@@ -16,7 +16,7 @@ try:
     from presentation.pages.documents import DocumentsPage
     from presentation.pages.communications import CommunicationsPage
     from presentation.pages.exports import ExportsPage
-    from presentation.pages.ffme import FFMEPage
+    from presentation.pages.ffme import ImportDataPage
     from presentation.pages.gmail_contact import GmailContactPage
     from presentation.pages.groups import GroupsPage
     from presentation.pages.reports import ReportsPage
@@ -38,7 +38,7 @@ class TestPresentationLot3(unittest.TestCase):
         documents = DocumentsPage()
         communications = CommunicationsPage()
         exports = ExportsPage()
-        ffme = FFMEPage()
+        ffme = ImportDataPage()
         contacts = GmailContactPage()
         groups = GroupsPage()
         reports = ReportsPage()
@@ -62,8 +62,8 @@ class TestPresentationLot3(unittest.TestCase):
         
         win = MainWindow()
         self.assertIsNotNone(win)
-        self.assertEqual(win.stacked_widget.count(), 10)
-        self.assertEqual(len(win.nav_buttons), 10)
+        self.assertEqual(win.stacked_widget.count(), 11)
+        self.assertEqual(len(win.nav_buttons), 11)
 
     @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
     def test_main_window_drive_status_email(self):

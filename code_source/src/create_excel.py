@@ -959,6 +959,11 @@ def generate_ffme_csv(participants_data, output_path=None):
     ignored_members = []
 
     for p in participants_data:
+        # Phase 6 — Normalisation NULL : les valeurs None du schéma v2 (vue legacy) sont
+        # converties en chaîne vide AVANT traitement, supprimant les artefacts str(None)
+        # historiques ('NO' pays, 'none' courriel 2, 'NONE' pap, 'None' adresse/ville).
+        p = {k: (v if v is not None else "") for k, v in p.items()}
+
         # Exclure les listes d'attente, montants nuls (sauf les ajouts manuels), commandes annulées/canceled ou déjà validées (terminé)
         tarif_name = str(p.get("tarif_name", "")).lower()
         amount = p.get("amount", 0.0)

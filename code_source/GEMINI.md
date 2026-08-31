@@ -175,9 +175,11 @@ Règles de conception (respecter impérativement) :
 3. **Lectures** : `SqliteRepository.load_direct_data()` (dicts legacy via la vue) ou
    `SqliteRepository.get_members()` (objets `Member` typés, API recommandée).
 4. **Golden master** : `tests/test_ffme_golden_master.py` garantit un export CSV FFME **octet-pour-octet
-   identique** à la référence (`tests/fixtures/import_ffme_reference.csv`, données locales non versionnées).
-   Le générateur conserve volontairement les artefacts `str(None)` du legacy tant que la référence n'est
-   pas renouvelée — ne pas « nettoyer » ces valeurs sans renouveler la référence avec le club.
+   identique** à la référence (`tests/fixtures/import_ffme_reference.csv`, données locales non versionnée).
+   La référence a été **renouvelée le 31/08/2026** après correction du bug `str(None)` historique
+   (artefacts `'NO'` pays, `'none'`, `'NONE'` sur les valeurs NULL — 1 seule ligne affectée : HUE Magaly).
+   Toute modification du générateur `generate_ffme_csv` doit laisser ce test vert, ou s'accompagner
+   d'un renouvellement explicite de la référence validé par le club.
 5. **Migration legacy** : le script `src/migrate_schema_v2.py` reste disponible (idempotent) pour les bases
    v1 héritées ; il est aussi déclenché automatiquement au démarrage si `PRAGMA user_version = 1`.
 6. **Sauvegardes** : API backup SQLite (jamais de copie fichier brute avec WAL actif), rétention 10 jours
