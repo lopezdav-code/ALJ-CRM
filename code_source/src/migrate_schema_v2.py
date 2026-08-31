@@ -27,7 +27,7 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 from paths import ROOT_DIR  # noqa: E402
-from infrastructure.sqlite_repository import SqliteRepository, COMPAT_VIEW_SQL  # noqa: E402
+from infrastructure.sqlite_repository import SqliteRepository  # noqa: E402
 from infrastructure.schema_v2 import (  # noqa: E402
     SCHEMA_TARGET_VERSION, SEASON_ACTIVE,
     normalize_status, status_score, clean_legacy_text, is_true,
@@ -50,7 +50,7 @@ def migrate(skip_excel=False):
     if version >= SCHEMA_TARGET_VERSION:
         # Idempotent : garantir la présence de la vue de compatibilité (ex: bases migrées
         # avant l'introduction de la vue), puis vérifier les comptages.
-        cur.execute(COMPAT_VIEW_SQL)
+        recreate_compat_view(cur)
         conn.commit()
         counts = {
             "users": cur.execute("SELECT COUNT(*) FROM users").fetchone()[0],
@@ -72,7 +72,7 @@ def migrate(skip_excel=False):
         # Garde-fou : tables v2 déjà peuplées (ex: double-écriture phase 3 sur base fraîche)
         existing_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if existing_users > 0:
-            cur.execute(COMPAT_VIEW_SQL)
+            recreate_compat_view(cur)
             cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
             conn.commit()
             conn.close()
@@ -198,7 +198,7 @@ def migrate(skip_excel=False):
             print("\n[MIGRATION V2] Écart détecté : ROLLBACK effectué, base inchangée.")
             return False
 
-        cur.execute(COMPAT_VIEW_SQL)
+        recreate_compat_view(cur)
         cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
         conn.commit()
         conn.close()

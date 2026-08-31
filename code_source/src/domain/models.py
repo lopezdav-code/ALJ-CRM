@@ -60,21 +60,17 @@ class Member:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Member":
-        """Crée une instance de Member à partir d'un dictionnaire brut (ex: HelloAsso ou Excel)."""
-        ins = InsuranceOptions(
-            has_base=data.get("opt_Assurance Base") == "Oui",
-            amount_base=float(data.get("opt_Montant Assurance Base", 0.0) or 0.0),
-            has_base_plus=data.get("opt_Assurance Base +") == "Oui",
-            amount_base_plus=float(data.get("opt_Montant Assurance Base +", 0.0) or 0.0),
-            has_base_plus_plus=data.get("opt_Assurance Base ++") == "Oui",
-            amount_base_plus_plus=float(data.get("opt_Montant Assurance Base ++", 0.0) or 0.0),
-            has_ski=data.get("opt_Assurance Option ski de piste") == "Oui",
-            amount_ski=float(data.get("opt_Montant Assurance Option ski de piste", 0.0) or 0.0),
-            has_vtt=data.get("opt_Assurance Option VTT") == "Oui",
-            amount_vtt=float(data.get("opt_Montant Assurance Option VTT", 0.0) or 0.0),
-            has_trail=data.get("opt_Assurance Option Trail") == "Oui",
-            amount_trail=float(data.get("opt_Montant Assurance Option Trail", 0.0) or 0.0),
-        )
+        """
+        Crée une instance de Member à partir d'un dictionnaire brut.
+        Phase 4 : lecture bilingue — noms v2 (last_name, email_primary, emergency1_name...)
+        prioritaires, libellés legacy (user_lastName, champ_*, opt_*) en repli.
+        """
+        def pick(*keys, default=""):
+            for k in keys:
+                v = data.get(k)
+                if v is not None and str(v).strip() != "":
+                    return v
+            return default
 
         def clean_float_str(val) -> str:
             s = str(val or "").strip()
@@ -82,35 +78,78 @@ class Member:
                 return s[:-2]
             return s
 
+        # Options d'assurance : opt_* legacy, ou liste purchase_options v2 si fournie
+        opt_list = data.get("purchase_options") or []
+        if isinstance(opt_list, list) and opt_list:
+
+            def opt_amount(*names):
+                for o in opt_list:
+                    if isinstance(o, dict) and str(o.get("option_name") or "").strip() in names:
+                        try:
+                            return float(o.get("amount") or 0.0)
+                        except (ValueError, TypeError):
+                            return 0.0
+                return 0.0
+
+            ins = InsuranceOptions(
+                has_base=opt_amount("Assurance Base") > 0 or data.get("opt_Assurance Base") == "Oui",
+                amount_base=opt_amount("Assurance Base") or float(data.get("opt_Montant Assurance Base", 0.0) or 0.0),
+                has_base_plus=opt_amount("Assurance Base +") > 0 or data.get("opt_Assurance Base +") == "Oui",
+                amount_base_plus=opt_amount("Assurance Base +") or float(data.get("opt_Montant Assurance Base +", 0.0) or 0.0),
+                has_base_plus_plus=opt_amount("Assurance Base ++") > 0 or data.get("opt_Assurance Base ++") == "Oui",
+                amount_base_plus_plus=opt_amount("Assurance Base ++") or float(data.get("opt_Montant Assurance Base ++", 0.0) or 0.0),
+                has_ski=opt_amount("Assurance Option ski de piste") > 0 or data.get("opt_Assurance Option ski de piste") == "Oui",
+                amount_ski=opt_amount("Assurance Option ski de piste") or float(data.get("opt_Montant Assurance Option ski de piste", 0.0) or 0.0),
+                has_vtt=opt_amount("Assurance Option VTT") > 0 or data.get("opt_Assurance Option VTT") == "Oui",
+                amount_vtt=opt_amount("Assurance Option VTT") or float(data.get("opt_Montant Assurance Option VTT", 0.0) or 0.0),
+                has_trail=opt_amount("Assurance Option Trail") > 0 or data.get("opt_Assurance Option Trail") == "Oui",
+                amount_trail=opt_amount("Assurance Option Trail") or float(data.get("opt_Montant Assurance Option Trail", 0.0) or 0.0),
+            )
+        else:
+            ins = InsuranceOptions(
+                has_base=data.get("opt_Assurance Base") == "Oui",
+                amount_base=float(data.get("opt_Montant Assurance Base", 0.0) or 0.0),
+                has_base_plus=data.get("opt_Assurance Base +") == "Oui",
+                amount_base_plus=float(data.get("opt_Montant Assurance Base +", 0.0) or 0.0),
+                has_base_plus_plus=data.get("opt_Assurance Base ++") == "Oui",
+                amount_base_plus_plus=float(data.get("opt_Montant Assurance Base ++", 0.0) or 0.0),
+                has_ski=data.get("opt_Assurance Option ski de piste") == "Oui",
+                amount_ski=float(data.get("opt_Montant Assurance Option ski de piste", 0.0) or 0.0),
+                has_vtt=data.get("opt_Assurance Option VTT") == "Oui",
+                amount_vtt=float(data.get("opt_Montant Assurance Option VTT", 0.0) or 0.0),
+                has_trail=data.get("opt_Assurance Option Trail") == "Oui",
+                amount_trail=float(data.get("opt_Montant Assurance Option Trail", 0.0) or 0.0),
+            )
+
         return cls(
             order_ref=str(data.get("order_ref") or ""),
             order_date=str(data.get("order_date") or ""),
             status=str(data.get("status") or ""),
             tarif_name=str(data.get("tarif_name") or "").strip(),
             amount=float(data.get("amount", 0.0) or 0.0),
-            user_last_name=str(data.get("user_lastName") or "").strip(),
-            user_first_name=str(data.get("user_firstName") or "").strip(),
-            payer_first_name=str(data.get("payer_firstName") or "").strip(),
-            payer_last_name=str(data.get("payer_lastName") or "").strip(),
-            payer_email=str(data.get("payer_email") or "").strip(),
-            birth_date=str(data.get("champ_Date de naissance de l'adhérent") or data.get("birth_date") or "").strip(),
-            gender=str(data.get("champ_Sexe") or data.get("gender") or "").strip(),
-            nationality=str(data.get("champ_Nationalité") or data.get("nationality") or "").strip(),
-            address=str(data.get("champ_Adresse : numéro et nom de rue") or data.get("address") or "").strip(),
-            zip_code=clean_float_str(data.get("champ_Code postal") or data.get("zip_code")),
-            city=str(data.get("champ_Ville") or data.get("city") or "").strip(),
-            country=str(data.get("champ_Pays") or data.get("country") or "").strip(),
-            phone=str(data.get("champ_Téléphone ") or data.get("phone") or "").strip(),
-            primary_email=str(data.get("champ_Adresse mail pour la réception des informations du club") or data.get("primary_email") or "").strip(),
-            secondary_email=str(data.get("champ_Deuxième adresse mail pour la réception des informations du club") or data.get("secondary_email") or "").strip(),
-            emergency_contact_name_1=str(data.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule") or data.get("emergency_contact_name_1") or "").strip(),
-            emergency_contact_phone_1=str(data.get("champ_Personne à prévenir en cas d'urgence - Téléphone") or data.get("emergency_contact_phone_1") or "").strip(),
-            emergency_contact_name_2=str(data.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)") or data.get("emergency_contact_name_2") or "").strip(),
-            emergency_contact_phone_2=str(data.get("champ_Parent 2 - Numéro de téléphone portable") or data.get("emergency_contact_phone_2") or "").strip(),
-            photo_auth=str(data.get("champ_En cas de prise de vue (Photo ou vidéo), j'autorise...") or data.get("photo_auth") or "").strip(),
-            health_q_auth=str(data.get("champ_Je m'engage à compléter mon questionnaire de santé...") or data.get("health_q_auth") or "").strip(),
-            is_tribe=str(data.get("champ_Famille : nous sommes une tribu de 3...") or data.get("is_tribe") or "").strip(),
-            licence_ffme=clean_float_str(data.get("champ_Numéro de Licence FFME (6 chiffres)") or data.get("licence_ffme")),
+            user_last_name=str(pick("last_name", "user_lastName")).strip(),
+            user_first_name=str(pick("first_name", "user_firstName")).strip(),
+            payer_first_name=str(pick("payer_first_name", "payer_firstName")).strip(),
+            payer_last_name=str(pick("payer_last_name", "payer_lastName")).strip(),
+            payer_email=str(pick("payer_email", "payer_email_order")).strip(),
+            birth_date=str(pick("champ_Date de naissance de l'adhérent", "birth_date", "birth_date_raw")).strip(),
+            gender=str(pick("champ_Sexe", "gender")).strip(),
+            nationality=str(pick("champ_Nationalité", "nationality")).strip(),
+            address=str(pick("champ_Adresse : numéro et nom de rue", "address")).strip(),
+            zip_code=clean_float_str(pick("champ_Code postal", "zip_code")),
+            city=str(pick("champ_Ville", "city")).strip(),
+            country=str(pick("champ_Pays", "country")).strip(),
+            phone=str(pick("champ_Téléphone ", "phone")).strip(),
+            primary_email=str(pick("champ_Adresse mail pour la réception des informations du club", "email_primary", "primary_email")).strip(),
+            secondary_email=str(pick("champ_Deuxième adresse mail pour la réception des informations du club", "email_secondary", "secondary_email")).strip(),
+            emergency_contact_name_1=str(pick("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule", "emergency1_name", "emergency_contact_name_1")).strip(),
+            emergency_contact_phone_1=str(pick("champ_Personne à prévenir en cas d'urgence - Téléphone", "emergency1_phone", "emergency_contact_phone_1")).strip(),
+            emergency_contact_name_2=str(pick("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", "emergency2_name", "emergency_contact_name_2")).strip(),
+            emergency_contact_phone_2=str(pick("champ_Parent 2 - Numéro de téléphone portable", "emergency2_phone", "emergency_contact_phone_2")).strip(),
+            photo_auth=str(pick("champ_En cas de prise de vue (Photo ou vidéo), j'autorise...", "photo_auth")).strip(),
+            health_q_auth=str(pick("champ_Je m'engage à compléter mon questionnaire de santé...", "health_commitment", "health_q_auth")).strip(),
+            is_tribe=str(pick("champ_Famille : nous sommes une tribu de 3...", "is_tribe")).strip(),
+            licence_ffme=clean_float_str(pick("champ_Numéro de Licence FFME (6 chiffres)", "licence_ffme")),
             insurance=ins,
             commentaires_correctif=str(data.get("commentaires_correctif") or "").strip(),
             email_sent_date=str(data.get("email_sent_date") or "").strip(),

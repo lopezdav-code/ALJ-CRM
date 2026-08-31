@@ -579,3 +579,126 @@ def mirror_adherent_personal(cur, adherent_id, **fields):
     params.append(datetime.datetime.now().isoformat(timespec="seconds"))
     params.append(adherent_id)
     cur.execute(f'UPDATE users SET {", ".join(cols)} WHERE legacy_adherent_id=?', params)
+
+
+# Phase 2 — Vue de compatibilité : reproduit le format plat legacy (colonnes champ_* / opt_*)
+# à partir du schéma cible users / orders / purchases / purchase_options.
+# Stratégie strangler : le code existant lit cette vue sans modification.
+# Les options d'assurance sont exposées au niveau user (achat porteur de la saison active),
+# reproduisant l'emplacement legacy (colonnes opt_* de la table adherents).
+COMPAT_VIEW_SQL = """
+CREATE VIEW IF NOT EXISTS v_adherents_legacy AS
+SELECT
+    u.legacy_adherent_id AS "id",
+    u.id AS "user_id",
+    u.last_name AS "user_lastName",
+    u.first_name AS "user_firstName",
+    u.birth_date_raw AS "champ_Date de naissance de l'adhérent",
+    u.gender AS "champ_Sexe",
+    u.nationality AS "champ_Nationalité",
+    u.address AS "champ_Adresse : numéro et nom de rue",
+    u.zip_code AS "champ_Code postal",
+    u.city AS "champ_Ville",
+    u.country AS "champ_Pays",
+    u.phone AS "champ_Téléphone ",
+    u.email_primary AS "champ_Adresse mail pour la réception des informations du club",
+    u.email_secondary AS "champ_Deuxième adresse mail pour la réception des informations du club",
+    u.emergency1_name AS "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
+    u.emergency1_phone AS "champ_Personne à prévenir en cas d'urgence - Téléphone",
+    u.emergency2_name AS "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
+    u.emergency2_phone AS "champ_Parent 2 - Numéro de téléphone portable",
+    u.photo_auth AS "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
+    u.health_commitment AS "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
+    p.is_tribe AS "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
+    u.licence_ffme AS "champ_Numéro de Licence FFME (6 chiffres)",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Assurance Base",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Montant Assurance Base",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Assurance Base +",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Montant Assurance Base +",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Assurance Base ++",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Montant Assurance Base ++",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Assurance Option ski de piste",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Montant Assurance Option ski de piste",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Assurance Option VTT",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Montant Assurance Option VTT",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Assurance Option Trail",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Montant Assurance Option Trail",
+    u.badge_rouge AS "badge_rouge",
+    u.autonomie_bloc AS "autonomie_bloc",
+    u.raw_passports AS "raw_passports",
+    u.raw_diplomas AS "raw_diplomas",
+    u.parental_auth_autonomous AS "parental_auth_autonomous",
+    u.parental_auth_family AS "parental_auth_family",
+    u.last_name AS "last_name",
+    u.first_name AS "first_name",
+    u.birth_date AS "birth_date",
+    u.birth_date_raw AS "birth_date_raw",
+    u.gender AS "gender",
+    u.nationality AS "nationality",
+    u.address AS "address",
+    u.zip_code AS "zip_code",
+    u.city AS "city",
+    u.country AS "country",
+    u.phone AS "phone",
+    u.email_primary AS "email_primary",
+    u.email_secondary AS "email_secondary",
+    u.emergency1_name AS "emergency1_name",
+    u.emergency1_phone AS "emergency1_phone",
+    u.emergency2_name AS "emergency2_name",
+    u.emergency2_phone AS "emergency2_phone",
+    u.licence_ffme AS "licence_ffme",
+    u.photo_auth AS "photo_auth",
+    u.health_commitment AS "health_commitment",
+    p.is_tribe AS "is_tribe",
+    o.payer_last_name AS "payer_last_name",
+    o.payer_first_name AS "payer_first_name",
+    o.payer_email AS "payer_email",
+    o.payment_method AS "payment_method",
+    o.promo_code AS "promo_code",
+    o.order_ref AS "order_ref",
+    o.order_date AS "order_date",
+    p.tarif_name AS "tarif_name",
+    p.amount AS "amount",
+    p.status AS "status",
+    p.is_modified AS "is_modified",
+    p.commentaires_correctif AS "commentaires_correctif",
+    p.email_sent_date AS "email_sent_date",
+    s.name AS "season_name",
+    (SELECT COUNT(*) FROM purchases p3
+      WHERE p3.user_id = u.id AND p3.legacy_season_id != p.legacy_season_id) AS "already_member"
+FROM purchases p
+JOIN users u ON u.id = p.user_id
+JOIN orders o ON o.id = p.order_id
+JOIN seasons s ON s.id = o.season_id
+"""
+
+
+def recreate_compat_view(cur):
+    """Recree la vue de compatibilite avec la definition du code courant
+    (CREATE VIEW IF NOT EXISTS ne met pas a jour une definition existante)."""
+    cur.execute("DROP VIEW IF EXISTS v_adherents_legacy")
+    cur.execute(COMPAT_VIEW_SQL)

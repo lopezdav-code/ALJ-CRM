@@ -7,6 +7,7 @@ from paths import CODE_ROOT, ROOT_DIR
 from infrastructure.secret_store import SecretStore
 from domain.constants import CORRECTIVE_MAP
 from infrastructure import schema_v2
+from infrastructure.schema_v2 import COMPAT_VIEW_SQL, recreate_compat_view
 
 EXTRA_COLUMNS = {
     "is_modified": "TEXT DEFAULT 'Non'",
@@ -24,94 +25,7 @@ EXTRA_COLUMNS = {
 #   2 = schéma cible (users / orders / purchases / purchase_options, voir migrate_schema_v2.py)
 SCHEMA_VERSION = 1
 
-# Phase 2 — Vue de compatibilité : reproduit le format plat legacy (colonnes champ_* / opt_*)
-# à partir du schéma cible users / orders / purchases / purchase_options.
-# Stratégie strangler : le code existant lit cette vue sans modification.
-# Les options d'assurance sont exposées au niveau user (achat porteur de la saison active),
-# reproduisant l'emplacement legacy (colonnes opt_* de la table adherents).
-COMPAT_VIEW_SQL = """
-CREATE VIEW IF NOT EXISTS v_adherents_legacy AS
-SELECT
-    u.legacy_adherent_id AS "id",
-    u.id AS "user_id",
-    u.last_name AS "user_lastName",
-    u.first_name AS "user_firstName",
-    u.birth_date_raw AS "champ_Date de naissance de l'adhérent",
-    u.gender AS "champ_Sexe",
-    u.nationality AS "champ_Nationalité",
-    u.address AS "champ_Adresse : numéro et nom de rue",
-    u.zip_code AS "champ_Code postal",
-    u.city AS "champ_Ville",
-    u.country AS "champ_Pays",
-    u.phone AS "champ_Téléphone ",
-    u.email_primary AS "champ_Adresse mail pour la réception des informations du club",
-    u.email_secondary AS "champ_Deuxième adresse mail pour la réception des informations du club",
-    u.emergency1_name AS "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-    u.emergency1_phone AS "champ_Personne à prévenir en cas d'urgence - Téléphone",
-    u.emergency2_name AS "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
-    u.emergency2_phone AS "champ_Parent 2 - Numéro de téléphone portable",
-    u.photo_auth AS "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
-    u.health_commitment AS "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
-    p.is_tribe AS "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
-    u.licence_ffme AS "champ_Numéro de Licence FFME (6 chiffres)",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Assurance Base",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Montant Assurance Base",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Assurance Base +",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Montant Assurance Base +",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Assurance Base ++",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Montant Assurance Base ++",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Assurance Option ski de piste",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Montant Assurance Option ski de piste",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Assurance Option VTT",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Montant Assurance Option VTT",
-    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Assurance Option Trail",
-    (SELECT po2.amount
-       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
-      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Montant Assurance Option Trail",
-    u.badge_rouge AS "badge_rouge",
-    u.autonomie_bloc AS "autonomie_bloc",
-    u.raw_passports AS "raw_passports",
-    u.raw_diplomas AS "raw_diplomas",
-    u.parental_auth_autonomous AS "parental_auth_autonomous",
-    u.parental_auth_family AS "parental_auth_family",
-    o.order_ref AS "order_ref",
-    o.order_date AS "order_date",
-    p.tarif_name AS "tarif_name",
-    p.amount AS "amount",
-    p.status AS "status",
-    p.is_modified AS "is_modified",
-    p.commentaires_correctif AS "commentaires_correctif",
-    p.email_sent_date AS "email_sent_date",
-    s.name AS "season_name",
-    (SELECT COUNT(*) FROM purchases p3
-      WHERE p3.user_id = u.id AND p3.legacy_season_id != p.legacy_season_id) AS "already_member"
-FROM purchases p
-JOIN users u ON u.id = p.user_id
-JOIN orders o ON o.id = p.order_id
-JOIN seasons s ON s.id = o.season_id
-"""
+# Phase 2 - vue de compatibilite : definie dans infrastructure/schema_v2.py (COMPAT_VIEW_SQL)
 
 class SqliteRepository:
     """
@@ -366,7 +280,7 @@ class SqliteRepository:
             print(f"🔖 [SQLITE] Schéma tagué en version {SCHEMA_VERSION} (legacy).")
         elif current_version >= 2:
             # Base migrée vers le schéma cible : s'assurer que la vue de compatibilité existe
-            cursor.execute(COMPAT_VIEW_SQL)
+            schema_v2.recreate_compat_view(cursor)
             print("🔗 [SQLITE] Vue de compatibilité v_adherents_legacy vérifiée.")
 
         conn.commit()
@@ -574,7 +488,9 @@ class SqliteRepository:
             "opt_Assurance Option ski de piste", "opt_Montant Assurance Option ski de piste",
             "opt_Assurance Option VTT", "opt_Montant Assurance Option VTT", "opt_Assurance Option Trail",
             "opt_Montant Assurance Option Trail", "badge_rouge", "autonomie_bloc", "raw_passports", "raw_diplomas",
-            "parental_auth_autonomous", "parental_auth_family"
+            "parental_auth_autonomous", "parental_auth_family",
+            # Phase 4 — champs payeur exposés dans les deux chemins de lecture
+            "payer_lastName", "payer_firstName", "payer_email",
         ]
         
         select_fields = ", ".join([f'a."{f}"' for f in personal_fields])
@@ -671,6 +587,16 @@ class SqliteRepository:
         return participants_data
 
     @classmethod
+    def get_members(cls, season_filter: str = "2026-2027") -> list:
+        """
+        Phase 4 — Lecture typée canonique : retourne des objets Member construits
+        depuis la lecture bilingue (vue de compatibilité + Member.from_dict).
+        API recommandée pour les nouveaux consommateurs.
+        """
+        from domain.models import Member
+        return [Member.from_dict(row) for row in cls.load_direct_data(season_filter=season_filter)]
+
+    @classmethod
     def export_to_excel(cls, file_path: str) -> bool:
         """
         Exporte l'ensemble des données d'adhérents de la saison active SQLite vers un fichier Excel.
@@ -756,6 +682,21 @@ class SqliteRepository:
                             "champ_Personne à prévenir en cas d'urgence - Téléphone" = ?,
                             "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)" = ?,
                             "champ_Parent 2 - Numéro de téléphone portable" = ?,
+                            "payer_lastName" = ?,
+                            "payer_firstName" = ?,
+                            "payer_email" = ?,
+                            "opt_Assurance Base" = ?,
+                            "opt_Montant Assurance Base" = ?,
+                            "opt_Assurance Base +" = ?,
+                            "opt_Montant Assurance Base +" = ?,
+                            "opt_Assurance Base ++" = ?,
+                            "opt_Montant Assurance Base ++" = ?,
+                            "opt_Assurance Option ski de piste" = ?,
+                            "opt_Montant Assurance Option ski de piste" = ?,
+                            "opt_Assurance Option VTT" = ?,
+                            "opt_Montant Assurance Option VTT" = ?,
+                            "opt_Assurance Option Trail" = ?,
+                            "opt_Montant Assurance Option Trail" = ?,
                             "champ_Numéro de Licence FFME (6 chiffres)" = COALESCE(NULLIF(?, ''), "champ_Numéro de Licence FFME (6 chiffres)")
                         WHERE id = ?
                     """, (
@@ -773,6 +714,21 @@ class SqliteRepository:
                         m.get("champ_Personne à prévenir en cas d'urgence - Téléphone", ""),
                         m.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", ""),
                         m.get("champ_Parent 2 - Numéro de téléphone portable", ""),
+                        m.get("payer_lastName", ""),
+                        m.get("payer_firstName", ""),
+                        m.get("payer_email", ""),
+                        m.get("opt_Assurance Base", "Non"),
+                        m.get("opt_Montant Assurance Base", 0.0),
+                        m.get("opt_Assurance Base +", "Non"),
+                        m.get("opt_Montant Assurance Base +", 0.0),
+                        m.get("opt_Assurance Base ++", "Non"),
+                        m.get("opt_Montant Assurance Base ++", 0.0),
+                        m.get("opt_Assurance Option ski de piste", "Non"),
+                        m.get("opt_Montant Assurance Option ski de piste", 0.0),
+                        m.get("opt_Assurance Option VTT", "Non"),
+                        m.get("opt_Montant Assurance Option VTT", 0.0),
+                        m.get("opt_Assurance Option Trail", "Non"),
+                        m.get("opt_Montant Assurance Option Trail", 0.0),
                         m.get("champ_Numéro de Licence FFME (6 chiffres)", ""),
                         adherent_id
                     ))
@@ -789,9 +745,16 @@ class SqliteRepository:
                             "champ_Personne à prévenir en cas d'urgence - Téléphone",
                             "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
                             "champ_Parent 2 - Numéro de téléphone portable",
+                            "payer_lastName", "payer_firstName", "payer_email",
+                            "opt_Assurance Base", "opt_Montant Assurance Base",
+                            "opt_Assurance Base +", "opt_Montant Assurance Base +",
+                            "opt_Assurance Base ++", "opt_Montant Assurance Base ++",
+                            "opt_Assurance Option ski de piste", "opt_Montant Assurance Option ski de piste",
+                            "opt_Assurance Option VTT", "opt_Montant Assurance Option VTT",
+                            "opt_Assurance Option Trail", "opt_Montant Assurance Option Trail",
                             "champ_Numéro de Licence FFME (6 chiffres)",
                             badge_rouge, autonomie_bloc, raw_passports, raw_diplomas
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Non', 'Non', '', '')
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Non', 'Non', '', '')
                     """, (
                         last_name_raw, first_name_raw,
                         m.get("champ_Téléphone ", ""),
@@ -808,6 +771,21 @@ class SqliteRepository:
                         m.get("champ_Personne à prévenir en cas d'urgence - Téléphone", ""),
                         m.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", ""),
                         m.get("champ_Parent 2 - Numéro de téléphone portable", ""),
+                        m.get("payer_lastName", ""),
+                        m.get("payer_firstName", ""),
+                        m.get("payer_email", ""),
+                        m.get("opt_Assurance Base", "Non"),
+                        m.get("opt_Montant Assurance Base", 0.0),
+                        m.get("opt_Assurance Base +", "Non"),
+                        m.get("opt_Montant Assurance Base +", 0.0),
+                        m.get("opt_Assurance Base ++", "Non"),
+                        m.get("opt_Montant Assurance Base ++", 0.0),
+                        m.get("opt_Assurance Option ski de piste", "Non"),
+                        m.get("opt_Montant Assurance Option ski de piste", 0.0),
+                        m.get("opt_Assurance Option VTT", "Non"),
+                        m.get("opt_Montant Assurance Option VTT", 0.0),
+                        m.get("opt_Assurance Option Trail", "Non"),
+                        m.get("opt_Montant Assurance Option Trail", 0.0),
                         m.get("champ_Numéro de Licence FFME (6 chiffres)", "")
                     ))
                     adherent_id = cursor.lastrowid
@@ -833,26 +811,9 @@ class SqliteRepository:
                 if exist_reg:
                     exist_status = str(exist_reg["status"] or "").strip().lower()
                     new_status_lower = new_status.lower()
-                    
-                    status_priorities = {
-                        "processed": 10,
-                        "validated": 9,
-                        "validé": 8,
-                        "valide": 8,
-                        "terminé": 7,
-                        "en cours": 5,
-                        "canceled": 1,
-                        "annulé": 1,
-                        "annule": 1
-                    }
-                    
-                    def get_score(status, tarif, val_amt):
-                        status_key = str(status or "").strip().lower()
-                        prio = status_priorities.get(status_key, 0)
-                        tarif_key = str(tarif or "").strip().lower()
-                        if "attente" in tarif_key or val_amt == 0.0:
-                            prio -= 20
-                        return prio
+
+                    # Phase 3 — table de priorité des statuts centralisée (infrastructure.schema_v2)
+                    get_score = schema_v2.purchase_priority_score
 
                     # Récupérer l'ancien montant existant pour un score précis
                     exist_tarif = str(exist_reg["tarif_name"] or "").strip()
