@@ -10,6 +10,9 @@ Principes :
 - Récupération des payeurs/manquants (moyen de paiement, code promo, commentaires)
   depuis l'archive Excel HelloAsso (import/helloAsso/export-adhesion-*.xlsx).
 
+La logique partagée (DDL, normalisations, upserts) vit dans infrastructure/schema_v2.py,
+réutilisée par les écritures applicatives depuis la phase 3.
+
 Usage :
     python src/migrate_schema_v2.py [chemin_database.db] [--skip-excel]
 """
@@ -24,298 +27,18 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 from paths import ROOT_DIR  # noqa: E402
-from domain.utils import normalize_name  # noqa: E402
 from infrastructure.sqlite_repository import SqliteRepository, COMPAT_VIEW_SQL  # noqa: E402
-
-SCHEMA_TARGET_VERSION = 2
-
-SEASON_ACTIVE = "2026-2027"
-
-STATUS_NORMALIZATION = {
-    "processed": "Traité",
-    "validated": "Validé",
-    "validé": "Validé",
-    "valide": "Validé",
-    "terminé": "Terminé",
-    "termine": "Terminé",
-    "annulé": "Annulé",
-    "annule": "Annulé",
-    "canceled": "Annulé",
-    "en cours": "En cours",
-}
-
-STATUS_PRIORITY = {
-    "processed": 10, "traité": 10, "traite": 10,
-    "validated": 9, "validé": 8, "valide": 8,
-    "terminé": 7, "termine": 7,
-    "en cours": 5,
-    "canceled": 1, "annulé": 1, "annule": 1,
-}
-
-# (nom d'option cible, colonne has legacy, colonne montant legacy)
-OPTION_PAIRS = [
-    ("Assurance Base", "opt_Assurance Base", "opt_Montant Assurance Base"),
-    ("Assurance Base +", "opt_Assurance Base +", "opt_Montant Assurance Base +"),
-    ("Assurance Base ++", "opt_Assurance Base ++", "opt_Montant Assurance Base ++"),
-    ("Assurance Option ski de piste", "opt_Assurance Option ski de piste", "opt_Montant Assurance Option ski de piste"),
-    ("Assurance Option VTT", "opt_Assurance Option VTT", "opt_Montant Assurance Option VTT"),
-    ("Assurance Option Trail", "opt_Assurance Option Trail", "opt_Montant Assurance Option Trail"),
-]
-
-# colonnes legacy adherents -> colonnes users
-USER_FIELD_MAP = {
-    "user_lastName": "last_name",
-    "user_firstName": "first_name",
-    "champ_Sexe": "gender",
-    "champ_Nationalité": "nationality",
-    "champ_Adresse : numéro et nom de rue": "address",
-    "champ_Code postal": "zip_code",
-    "champ_Ville": "city",
-    "champ_Pays": "country",
-    "champ_Téléphone ": "phone",
-    "champ_Adresse mail pour la réception des informations du club": "email_primary",
-    "champ_Deuxième adresse mail pour la réception des informations du club": "email_secondary",
-    "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule": "emergency1_name",
-    "champ_Personne à prévenir en cas d'urgence - Téléphone": "emergency1_phone",
-    "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)": "emergency2_name",
-    "champ_Parent 2 - Numéro de téléphone portable": "emergency2_phone",
-    "champ_Numéro de Licence FFME (6 chiffres)": "licence_ffme",
-    "badge_rouge": "badge_rouge",
-    "autonomie_bloc": "autonomie_bloc",
-    "raw_passports": "raw_passports",
-    "raw_diplomas": "raw_diplomas",
-    "parental_auth_autonomous": "parental_auth_autonomous",
-    "parental_auth_family": "parental_auth_family",
-}
-
-# Colonnes à libellés très longs (photo / questionnaire de santé) : résolues dynamiquement
-# car leur texte exact dépend de CORRECTIVE_MAP.
-DYNAMIC_USER_FIELDS = [
-    ("champ_En cas de prise de vue", "photo_auth"),
-    ("champ_Je m'engage", "health_commitment"),
-]
-
-DOB_COLUMN = "champ_Date de naissance de l'adhérent"
-
-
-def build_user_field_map(cur):
-    """Construit la map legacy->users en résolvant dynamiquement les colonnes à longs libellés."""
-    cols = [r["name"] for r in cur.execute("PRAGMA table_info(adherents)").fetchall()]
-    field_map = {}
-    for src, dst in USER_FIELD_MAP.items():
-        if src in cols:
-            field_map[src] = dst
-        else:
-            raise KeyError(f"Colonne legacy absente de la table adherents : {src!r}")
-    for prefix, dst in DYNAMIC_USER_FIELDS:
-        matches = [c for c in cols if c.startswith(prefix)]
-        if matches:
-            field_map[matches[0]] = dst
-        else:
-            raise KeyError(f"Aucune colonne legacy commençant par {prefix!r}")
-    return field_map
-
-
-def parse_iso_date(val):
-    """Normalise une date legacy ('20/08/2012', '2012-08-20T00:00:00', ...) en ISO '2012-08-20'."""
-    s = str(val or "").strip()
-    if not s:
-        return ""
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S", "%d/%m/%y"):
-        try:
-            dt = datetime.datetime.strptime(s[:19] if "T" in s else s, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return ""
-
-
-def normalize_status(status):
-    return STATUS_NORMALIZATION.get(str(status or "").strip().lower(), str(status or "").strip())
-
-
-def status_score(status):
-    return STATUS_PRIORITY.get(str(status or "").strip().lower(), 0)
-
-
-def is_true(val):
-    return str(val or "").strip().lower() in ("oui", "true", "vrai", "1", "yes")
-
-
-def create_target_schema(cur):
-    cur.executescript("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        last_name TEXT NOT NULL,
-        first_name TEXT NOT NULL,
-        last_name_key TEXT NOT NULL,
-        first_name_key TEXT NOT NULL,
-        birth_date TEXT,
-        birth_date_raw TEXT,
-        gender TEXT, nationality TEXT,
-        address TEXT, zip_code TEXT, city TEXT, country TEXT,
-        phone TEXT,
-        email_primary TEXT, email_secondary TEXT,
-        emergency1_name TEXT, emergency1_phone TEXT,
-        emergency2_name TEXT, emergency2_phone TEXT,
-        licence_ffme TEXT,
-        photo_auth TEXT, health_commitment TEXT,
-        badge_rouge TEXT DEFAULT 'Non',
-        autonomie_bloc TEXT DEFAULT 'Non',
-        raw_passports TEXT DEFAULT '',
-        raw_diplomas TEXT DEFAULT '',
-        parental_auth_autonomous TEXT DEFAULT 'Non',
-        parental_auth_family TEXT DEFAULT 'Non',
-        legacy_adherent_id INTEGER UNIQUE,
-        created_at TEXT, updated_at TEXT,
-        UNIQUE(last_name_key, first_name_key, birth_date)
-    );
-    CREATE INDEX IF NOT EXISTS idx_users_names ON users(last_name_key, first_name_key);
-
-    CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_ref TEXT UNIQUE NOT NULL,
-        order_date TEXT,
-        status TEXT,
-        status_normalized TEXT,
-        payment_method TEXT,
-        payer_last_name TEXT, payer_first_name TEXT, payer_email TEXT,
-        promo_code TEXT, promo_amount REAL,
-        comment TEXT,
-        season_id INTEGER REFERENCES seasons(id),
-        created_at TEXT, updated_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_orders_season ON orders(season_id);
-
-    CREATE TABLE IF NOT EXISTS purchases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL REFERENCES orders(id),
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        tarif_name TEXT, amount REAL,
-        status TEXT, status_normalized TEXT,
-        is_tribe TEXT DEFAULT 'Non',
-        email_sent_date TEXT,
-        is_modified TEXT DEFAULT 'Non',
-        commentaires_correctif TEXT DEFAULT '',
-        legacy_adherent_id INTEGER,
-        legacy_season_id INTEGER,
-        created_at TEXT, updated_at TEXT,
-        UNIQUE(order_id, user_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
-    CREATE INDEX IF NOT EXISTS idx_purchases_order ON purchases(order_id);
-
-    CREATE TABLE IF NOT EXISTS purchase_options (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
-        option_name TEXT NOT NULL,
-        amount REAL DEFAULT 0.0,
-        UNIQUE(purchase_id, option_name)
-    );
-    """)
-
-
-def clean_legacy_text(val):
-    """
-    Préserve la distinction NULL / chaîne vide du legacy : le générateur CSV historique
-    applique str(None) ('None') sur les valeurs NULL — la vue de compatibilité doit donc
-    restituer NULL tel quel pour garantir un export octet-pour-octet identique.
-    """
-    if val is None:
-        return None
-    return str(val).strip()
-
-
-def upsert_user(cur, adherent_row, now_iso, field_map):
-    """Crée ou complète un user à partir d'une ligne legacy. Retourne (user_id, created)."""
-    last = str(adherent_row["user_lastName"] or "").strip()
-    first = str(adherent_row["user_firstName"] or "").strip()
-    dob_raw = str(adherent_row[DOB_COLUMN] or "").strip()
-    dob_iso = parse_iso_date(dob_raw)
-    k_last = normalize_name(last).upper()
-    k_first = normalize_name(first).lower()
-
-    cur.execute(
-        "SELECT id FROM users WHERE last_name_key=? AND first_name_key=? AND birth_date=?",
-        (k_last, k_first, dob_iso),
-    )
-    found = cur.fetchone()
-    if found:
-        user_id = found["id"]
-        # Compléter les champs vides (ne jamais écraser une valeur existante)
-        for src_col, dst_col in field_map.items():
-            new_val = clean_legacy_text(adherent_row[src_col])
-            if new_val:
-                cur.execute(
-                    f'UPDATE users SET "{dst_col}" = ?, updated_at = ? '
-                    f'WHERE id = ? AND (("{dst_col}" IS NULL) OR (TRIM("{dst_col}") = ""))',
-                    (new_val, now_iso, user_id),
-                )
-        return user_id, False
-
-    values = {dst: clean_legacy_text(adherent_row[src]) for src, dst in field_map.items()}
-    values["last_name_key"] = k_last
-    values["first_name_key"] = k_first
-    values["birth_date"] = dob_iso
-    values["birth_date_raw"] = dob_raw
-    values["legacy_adherent_id"] = adherent_row["adherent_id"]
-    cols = list(values.keys())
-    try:
-        cur.execute(
-            f'INSERT INTO users ({", ".join(cols)}) VALUES ({", ".join("?" for _ in cols)})',
-            [values[c] for c in cols],
-        )
-        user_id = cur.lastrowid
-    except sqlite3.IntegrityError:
-        # Naissance absente sur un homonyme : rattacher au user existant
-        cur.execute(
-            "SELECT id FROM users WHERE last_name_key=? AND first_name_key=? AND birth_date=?",
-            (k_last, k_first, dob_iso),
-        )
-        user_id = cur.fetchone()["id"]
-        return user_id, False
-    cur.execute("UPDATE users SET created_at=?, updated_at=? WHERE id=?", (now_iso, now_iso, user_id))
-    return user_id, True
-
-
-def upsert_order(cur, order_ref, order_date, status, payer_row, season_id, now_iso):
-    """Crée ou met à jour la commande. Retourne order_id."""
-    cur.execute("SELECT id, status, payer_last_name, payer_first_name, payer_email, season_id "
-                "FROM orders WHERE order_ref=?", (order_ref,))
-    found = cur.fetchone()
-    if found:
-        order_id = found["id"]
-        # Conserver le statut le plus « actif » (priorité métier)
-        if status_score(status) > status_score(found["status"]):
-            cur.execute("UPDATE orders SET status=?, status_normalized=?, updated_at=? WHERE id=?",
-                        (status, normalize_status(status), now_iso, order_id))
-        # Compléter le payeur s'il manque
-        for col, val in (("payer_last_name", payer_row["payer_lastName"]),
-                         ("payer_first_name", payer_row["payer_firstName"]),
-                         ("payer_email", payer_row["payer_email"])):
-            v = str(val or "").strip()
-            if v and not str(found[col] or "").strip():
-                cur.execute(f"UPDATE orders SET {col}=?, updated_at=? WHERE id=?", (v, now_iso, order_id))
-        if season_id and not found["season_id"]:
-            cur.execute("UPDATE orders SET season_id=? WHERE id=?", (season_id, order_id))
-        return order_id
-
-    cur.execute("""
-        INSERT INTO orders (order_ref, order_date, status, status_normalized,
-                            payer_last_name, payer_first_name, payer_email,
-                            season_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (order_ref, order_date, status, normalize_status(status),
-          str(payer_row["payer_lastName"] or "").strip(),
-          str(payer_row["payer_firstName"] or "").strip(),
-          str(payer_row["payer_email"] or "").strip(),
-          season_id, now_iso, now_iso))
-    return cur.lastrowid
+from infrastructure.schema_v2 import (  # noqa: E402
+    SCHEMA_TARGET_VERSION, SEASON_ACTIVE,
+    normalize_status, status_score, clean_legacy_text, is_true,
+    DOB_COLUMN, build_user_field_map, ensure_v2_schema,
+    upsert_user_v2, upsert_order_v2, insert_options_v2,
+)
 
 
 def migrate(skip_excel=False):
     db_path = SqliteRepository.get_db_path()
-    print(f"🔄 [MIGRATION V2] Base cible : {db_path}")
+    print(f"[MIGRATION V2] Base cible : {db_path}")
 
     SqliteRepository.setup_database()
     conn = SqliteRepository.get_connection()
@@ -334,7 +57,7 @@ def migrate(skip_excel=False):
             "orders": cur.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
             "purchases": cur.execute("SELECT COUNT(*) FROM purchases").fetchone()[0],
         }
-        print(f"ℹ️ [MIGRATION V2] Base déjà migrée (user_version={version}) : {counts}")
+        print(f"[MIGRATION V2] Base déjà migrée (user_version={version}) : {counts}")
         conn.close()
         return True
 
@@ -343,8 +66,19 @@ def migrate(skip_excel=False):
     active_season_id = seasons.get(SEASON_ACTIVE)
 
     try:
-        create_target_schema(cur)
+        ensure_v2_schema(cur)
         field_map = build_user_field_map(cur)
+
+        # Garde-fou : tables v2 déjà peuplées (ex: double-écriture phase 3 sur base fraîche)
+        existing_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if existing_users > 0:
+            cur.execute(COMPAT_VIEW_SQL)
+            cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
+            conn.commit()
+            conn.close()
+            print(f"[MIGRATION V2] Tables v2 déjà peuplées ({existing_users} users) : "
+                  f"vue vérifiée, version taguée, pas de re-migration.")
+            return True
 
         rows = cur.execute("""
             SELECT las.adherent_id, las.season_id, las.order_ref, las.order_date,
@@ -355,7 +89,7 @@ def migrate(skip_excel=False):
             JOIN adherents a ON a.id = las.adherent_id
             ORDER BY las.adherent_id, las.season_id
         """).fetchall()
-        print(f"📦 [MIGRATION V2] {len(rows)} inscriptions legacy à migrer...")
+        print(f"[MIGRATION V2] {len(rows)} inscriptions legacy à migrer...")
 
         stats = {"users_created": 0, "users_merged": 0, "purchases": 0,
                  "options": 0, "anomalies": []}
@@ -374,14 +108,20 @@ def migrate(skip_excel=False):
                 stats["anomalies"].append(f"Inscription sans order_ref (adherent_id={r['adherent_id']})")
                 continue
 
-            user_id, created = upsert_user(cur, r, now_iso, field_map)
+            user_id, created = upsert_user_v2(cur, r, now_iso, field_map)
             if created:
                 stats["users_created"] += 1
             else:
                 stats["users_merged"] += 1
 
-            order_id = upsert_order(cur, order_ref, r["order_date"], r["status"], r, r["season_id"], now_iso)
+            order_id = upsert_order_v2(
+                cur, order_ref, r["order_date"], r["status"],
+                r["payer_lastName"], r["payer_firstName"], r["payer_email"],
+                r["season_id"], now_iso,
+            )
 
+            # Insertion directe (la migration ne ré-applique pas la priorité : les données
+            # legacy sont déjà dédupliquées en amont par le pipeline de synchronisation)
             try:
                 cur.execute("""
                     INSERT INTO purchases (order_id, user_id, tarif_name, amount, status,
@@ -393,7 +133,7 @@ def migrate(skip_excel=False):
                 """, (order_id, user_id, r["tarif_name"], r["amount"], r["status"],
                       normalize_status(r["status"]),
                       "Oui" if is_true(r["champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE"]) else "Non",
-                      r["email_sent_date"], r["is_modified"], r["commentaires_correctif"],
+                      r["email_sent_date"], r["is_modified"], clean_legacy_text(r["commentaires_correctif"]) or "",
                       r["adherent_id"], r["season_id"], now_iso, now_iso))
                 purchase_id = cur.lastrowid
                 stats["purchases"] += 1
@@ -408,23 +148,12 @@ def migrate(skip_excel=False):
                 aid not in options_attached and not has_active_season.get(aid, False)
             )
             if is_porteur:
-                for opt_name, col_has, col_amount in OPTION_PAIRS:
-                    if is_true(r[col_has]):
-                        try:
-                            cur.execute(
-                                "INSERT INTO purchase_options (purchase_id, option_name, amount) VALUES (?, ?, ?)",
-                                (purchase_id, opt_name, float(r[col_amount] or 0.0)),
-                            )
-                            stats["options"] += 1
-                        except sqlite3.IntegrityError:
-                            pass
+                stats["options"] += insert_options_v2(cur, purchase_id, r)
                 options_attached.add(aid)
 
         # ---- Récupération payeurs / moyen de paiement / promo depuis l'archive Excel
-        excel_stats = {"orders_found": 0, "payer_filled": 0, "payment_method": 0,
-                       "promo": 0, "comment": 0}
         if not skip_excel:
-            excel_stats = recover_from_excel(cur)
+            recover_from_excel(cur)
 
         # ---- Vérifications avant validation
         nb_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -453,9 +182,8 @@ def migrate(skip_excel=False):
         print(f"  purchase_options   : {nb_options}")
         print(f"  Somme montants     : {sum_new} (legacy {sum_legacy})")
         print(f"  users créés/fusionnés : {stats['users_created']} / {stats['users_merged']}")
-        print(f"  Excel : {excel_stats}")
         if stats["anomalies"]:
-            print(f"  ⚠️ Anomalies ({len(stats['anomalies'])}) :")
+            print(f"  Anomalies ({len(stats['anomalies'])}) :")
             for a in stats["anomalies"][:10]:
                 print(f"     - {a}")
 
@@ -467,20 +195,20 @@ def migrate(skip_excel=False):
         if not ok:
             conn.rollback()
             conn.close()
-            print("\n❌ [MIGRATION V2] Écart détecté : ROLLBACK effectué, base inchangée.")
+            print("\n[MIGRATION V2] Écart détecté : ROLLBACK effectué, base inchangée.")
             return False
 
         cur.execute(COMPAT_VIEW_SQL)
         cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
         conn.commit()
         conn.close()
-        print(f"\n✅ [MIGRATION V2] Migration validée et commitée (user_version={SCHEMA_TARGET_VERSION}).")
+        print(f"\n[MIGRATION V2] Migration validée et commitée (user_version={SCHEMA_TARGET_VERSION}).")
         return True
 
     except Exception as e:
         conn.rollback()
         conn.close()
-        print(f"\n❌ [MIGRATION V2] Erreur : {e} — ROLLBACK effectué.")
+        print(f"\n[MIGRATION V2] Erreur : {e} — ROLLBACK effectué.")
         raise
 
 
@@ -496,7 +224,7 @@ def recover_from_excel(cur):
             if f.startswith("export-adhesion") and f.endswith(".xlsx"):
                 excel_path = os.path.join(root, f)
     if not excel_path or not os.path.exists(excel_path):
-        print("⚠️ [MIGRATION V2] Archive Excel HelloAsso introuvable : payeurs non récupérés.")
+        print("[MIGRATION V2] Archive Excel HelloAsso introuvable : payeurs non récupérés.")
         return {"orders_found": 0, "payer_filled": 0, "payment_method": 0, "promo": 0, "comment": 0}
 
     def norm(s):
@@ -559,7 +287,7 @@ def recover_from_excel(cur):
             except ValueError:
                 pass
 
-    print(f"📧 [MIGRATION V2] Récupération Excel : {os.path.basename(excel_path)}")
+    print(f"[MIGRATION V2] Récupération Excel : {os.path.basename(excel_path)}")
     return stats
 
 
@@ -572,7 +300,7 @@ def main():
     if args.db_path:
         SqliteRepository.set_db_path(args.db_path)
     elif not os.path.exists(SqliteRepository.get_db_path()):
-        print(f"❌ Base introuvable : {SqliteRepository.get_db_path()}")
+        print(f"Base introuvable : {SqliteRepository.get_db_path()}")
         sys.exit(1)
 
     ok = migrate(skip_excel=args.skip_excel)

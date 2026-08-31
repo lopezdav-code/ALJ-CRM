@@ -33,50 +33,9 @@ if CODE_ROOT not in sys.path:
 excel_app = None
 current_corrective_file_path = None
 
-# Mapping between corrective Excel columns and cache keys
-CORRECTIVE_MAP = {
-    "Référence commande": "order_ref",
-    "Date de la commande": "order_date",
-    "Statut de la commande": "status",
-    "Tarif": "tarif_name",
-    "Montant tarif": "amount",
-    "Nom adhérent": "user_lastName",
-    "Prénom adhérent": "user_firstName",
-    "Nom payeur": "payer_lastName",
-    "Prénom payeur": "payer_firstName",
-    "Email payeur": "payer_email",
-    "Date de naissance de l'adhérent": "champ_Date de naissance de l'adhérent",
-    "Sexe": "champ_Sexe",
-    "Nationalité": "champ_Nationalité",
-    "Adresse : numéro et nom de rue": "champ_Adresse : numéro et nom de rue",
-    "Code postal": "champ_Code postal",
-    "Ville": "champ_Ville",
-    "Pays": "champ_Pays",
-    "Téléphone ": "champ_Téléphone ",
-    "Adresse mail pour la réception des informations du club": "champ_Adresse mail pour la réception des informations du club",
-    "Deuxième adresse mail pour la réception des informations du club": "champ_Deuxième adresse mail pour la réception des informations du club",
-    "Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule": "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-    "Personne à prévenir en cas d'urgence - Téléphone": "champ_Personne à prévenir en cas d'urgence - Téléphone",
-    "Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)": "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
-    "Parent 2 - Numéro de téléphone portable": "champ_Parent 2 - Numéro de téléphone portable",
-    "En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales": "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
-    "Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)": "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
-    "Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE": "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
-    "Numéro de Licence FFME (6 chiffres)": "champ_Numéro de Licence FFME (6 chiffres)",
-    "Assurance Base ": "opt_Assurance Base",
-    "Montant Assurance Base ": "opt_Montant Assurance Base",
-    "Assurance Base +": "opt_Assurance Base +",
-    "Montant Assurance Base +": "opt_Montant Assurance Base +",
-    "Assurance Base ++": "opt_Assurance Base ++",
-    "Montant Assurance Base ++": "opt_Montant Assurance Base ++",
-    "Assurance Option ski de piste ": "opt_Assurance Option ski de piste",
-    "Montant Assurance Option ski de piste ": "opt_Montant Assurance Option ski de piste",
-    "Assurance Option VTT": "opt_Assurance Option VTT",
-    "Montant Assurance Option VTT": "opt_Montant Assurance Option VTT",
-    "Assurance Option Trail": "opt_Assurance Option Trail",
-    "Montant Assurance Option Trail": "opt_Montant Assurance Option Trail",
-    "Date d'envoi de l'email": "email_sent_date",
-}
+# Phase 3 — mapping canonique unique (domain.constants), fin de la duplication
+from domain.constants import CORRECTIVE_MAP
+from infrastructure.schema_v2 import purchase_priority_score
 
 def download_file_from_drive(file_id, dest_path):
     """Télécharge le fichier Excel d'adhésion depuis Google Drive."""
@@ -457,33 +416,9 @@ def update_membership_excel():
         excel_order_counts = Counter() # Compter les occurences par commande dans la BDD !
         existing_member_max_score = {} # (firstName, lastName) -> score maximal du statut existant en BDD
 
-        status_priorities = {
-            "processed": 10,
-            "validated": 9,
-            "validé": 8,
-            "valide": 8,
-            "terminé": 7,
-            "en cours": 5,
-            "canceled": 1,
-            "annulé": 1,
-            "annule": 1
-        }
-
+        # Phase 3 — table de priorité des statuts centralisée (infrastructure.schema_v2)
         def get_priority_score(status, tarif_name, amount):
-            status_lower = str(status or "").strip().lower()
-            base_prio = status_priorities.get(status_lower, 0)
-            
-            # Pénalité importante de 20 points pour les listes d'attente ou montants nuls
-            tarif_lower = str(tarif_name or "").strip().lower()
-            try:
-                amt_val = float(amount) if amount else 0.0
-            except ValueError:
-                amt_val = 0.0
-                
-            if "attente" in tarif_lower or amt_val == 0.0:
-                base_prio -= 20
-                
-            return base_prio
+            return purchase_priority_score(status, tarif_name, amount)
         
         for p in existing_participants:
             o_ref = str(p.get("order_ref", "")).strip()

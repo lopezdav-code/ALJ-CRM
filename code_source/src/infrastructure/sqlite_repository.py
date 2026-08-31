@@ -5,51 +5,8 @@ import pandas as pd
 import json
 from paths import CODE_ROOT, ROOT_DIR
 from infrastructure.secret_store import SecretStore
-
-# Extraction de la map corrective (doit correspondre à celle d'ExcelRepository)
-CORRECTIVE_MAP = {
-    "Référence commande": "order_ref",
-    "Date de la commande": "order_date",
-    "Statut de la commande": "status",
-    "Tarif": "tarif_name",
-    "Montant tarif": "amount",
-    "Nom adhérent": "user_lastName",
-    "Prénom adhérent": "user_firstName",
-    "Nom payeur": "payer_lastName",
-    "Prénom payeur": "payer_firstName",
-    "Email payeur": "payer_email",
-    "Date de naissance de l'adhérent": "champ_Date de naissance de l'adhérent",
-    "Sexe": "champ_Sexe",
-    "Nationalité": "champ_Nationalité",
-    "Adresse : numéro et nom de rue": "champ_Adresse : numéro et nom de rue",
-    "Code postal": "champ_Code postal",
-    "Ville": "champ_Ville",
-    "Pays": "champ_Pays",
-    "Téléphone ": "champ_Téléphone ",
-    "Adresse mail pour la réception des informations du club": "champ_Adresse mail pour la réception des informations du club",
-    "Deuxième adresse mail pour la réception des informations du club": "champ_Deuxième adresse mail pour la réception des informations du club",
-    "Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule": "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-    "Personne à prévenir en cas d'urgence - Téléphone": "champ_Personne à prévenir en cas d'urgence - Téléphone",
-    "Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)": "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
-    "Parent 2 - Numéro de téléphone portable": "champ_Parent 2 - Numéro de téléphone portable",
-    "En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales": "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
-    "Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)": "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
-    "Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE": "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
-    "Numéro de Licence FFME (6 chiffres)": "champ_Numéro de Licence FFME (6 chiffres)",
-    "Assurance Base ": "opt_Assurance Base",
-    "Montant Assurance Base ": "opt_Montant Assurance Base",
-    "Assurance Base +": "opt_Assurance Base +",
-    "Montant Assurance Base +": "opt_Montant Assurance Base +",
-    "Assurance Base ++": "opt_Assurance Base ++",
-    "Montant Assurance Base ++": "opt_Montant Assurance Base ++",
-    "Assurance Option ski de piste ": "opt_Assurance Option ski de piste",
-    "Montant Assurance Option ski de piste ": "opt_Montant Assurance Option ski de piste",
-    "Assurance Option VTT": "opt_Assurance Option VTT",
-    "Montant Assurance Option VTT": "opt_Montant Assurance Option VTT",
-    "Assurance Option Trail": "opt_Assurance Option Trail",
-    "Montant Assurance Option Trail": "opt_Montant Assurance Option Trail",
-    "Date d'envoi de l'email": "email_sent_date",
-}
+from domain.constants import CORRECTIVE_MAP
+from infrastructure import schema_v2
 
 EXTRA_COLUMNS = {
     "is_modified": "TEXT DEFAULT 'Non'",
@@ -763,6 +720,12 @@ class SqliteRepository:
 
         inserted_count = 0
         try:
+            # Phase 3 — Écriture miroir dans le schéma cible v2 (même transaction que le
+            # flux legacy : toute erreur annule les deux). Écrit enfin les payeurs
+            # (payer_*) absents de l'ancien flux et les options dans purchase_options.
+            v2_stats = schema_v2.sync_members_to_v2(cursor, members, season_name)
+            print(f"🔄 [SQLITE] Miroir v2 : {v2_stats}")
+
             for m in members:
                 # Étape 1 : Rapprochement ou insertion dans la table adherents par Nom et Prénom
                 last_name_raw = str(m.get("user_lastName", "")).strip()
@@ -1053,6 +1016,10 @@ class SqliteRepository:
 
         try:
             cursor.execute(season_sql, season_params)
+            # Phase 3 — miroir des correctifs manuels dans le schéma v2 (même transaction)
+            schema_v2.mirror_member_update(cursor, adherent_id, original_order_ref,
+                                           original_last_name, original_first_name,
+                                           updated_fields, comment_text)
             conn.commit()
             print(f"📝 [SQLITE] Adhérent {original_last_name} {original_first_name} mis à jour avec succès (multi-saisons).")
             return True, ""
@@ -1087,6 +1054,9 @@ class SqliteRepository:
                     WHERE order_ref = ?
                 """, (date_str, order_ref.strip()))
                 rows_affected = cursor.rowcount
+
+            # Phase 3 — miroir v2 sur les achats de la commande
+            schema_v2.mirror_email_sent_date(cursor, order_ref, date_str)
 
             conn.commit()
             if rows_affected > 0:
@@ -1242,7 +1212,20 @@ class SqliteRepository:
                     SET status = ?
                     WHERE id = ?
                 """, [(u[0], u[4]) for u in updates])
-                
+
+                # Phase 3 — miroir v2 : identité vers users, statut vers purchases (saison active)
+                schema_v2.ensure_v2_schema(cursor)
+                cursor.executemany("""
+                    UPDATE users
+                    SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
+                    WHERE legacy_adherent_id = ?
+                """, [(u[1], u[2], u[3], u[4]) for u in updates])
+                cursor.executemany("""
+                    UPDATE purchases
+                    SET status = ?, status_normalized = ?
+                    WHERE legacy_adherent_id = ? AND legacy_season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
+                """, [(u[0], schema_v2.normalize_status(u[0]), u[4]) for u in updates])
+
                 conn.commit()
                 
         except Exception as e:
@@ -1386,6 +1369,15 @@ class SqliteRepository:
                         raw_passports = ?
                     WHERE id = ?
                 """, updates)
+
+                # Phase 3 — miroir v2 : flags club vers users
+                schema_v2.ensure_v2_schema(cursor)
+                cursor.executemany("""
+                    UPDATE users
+                    SET badge_rouge = ?, autonomie_bloc = ?, raw_passports = ?
+                    WHERE legacy_adherent_id = ?
+                """, updates)
+
                 conn.commit()
                 
             # Calculer les statistiques après mise à jour
