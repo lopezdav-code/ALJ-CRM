@@ -19,7 +19,7 @@ def get_access_token():
     if not CLIENT_ID or not CLIENT_SECRET:
         return None
         
-    url = f"https://api.helloasso.com/oauth2/token"
+    url = "https://api.helloasso.com/oauth2/token"
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,

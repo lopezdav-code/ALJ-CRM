@@ -1,5 +1,3 @@
-import os
-import glob
 import datetime
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
@@ -7,8 +5,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from domain.models import Member
-from paths import CODE_ROOT
-from infrastructure.secret_store import SecretStore
 
 class MemberDetailPanel(QFrame):
     """

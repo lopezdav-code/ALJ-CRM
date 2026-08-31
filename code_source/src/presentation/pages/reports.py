@@ -60,7 +60,7 @@ class GeocodeWorker(QThread):
                     else:
                         SqliteRepository.save_geocode(addr, None, None)
                         fail_count += 1
-                        print(f"⚠️ [GEOCODING] Adresse introuvable ou non localisée.")
+                        print("⚠️ [GEOCODING] Adresse introuvable ou non localisée.")
                 except Exception as err:
                     print(f"❌ [GEOCODING] Erreur technique pour '{addr}' : {err}")
                     fail_count += 1

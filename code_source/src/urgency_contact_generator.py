@@ -1,5 +1,4 @@
 import os
-import re
 import openpyxl
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from paths import ROOT_DIR

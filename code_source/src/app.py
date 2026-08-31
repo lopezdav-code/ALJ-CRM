@@ -95,7 +95,6 @@ def main():
     server_thread = threading.Thread(target=start_backend_server, args=(port,), daemon=True)
     server_thread.start()
 
-    import datetime
     print("\n================================================================================")
     print("🎬 [STARTUP] ALJ ESCALADE MANAGER — DÉMARRAGE DE L'APPLICATION (PySide6)")
     print("================================================================================")

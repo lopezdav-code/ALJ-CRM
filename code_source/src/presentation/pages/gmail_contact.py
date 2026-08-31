@@ -1,13 +1,10 @@
-import os
-import glob
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
-    QFrame, QProgressBar, QTextEdit, QMessageBox, QComboBox, QLineEdit,
+    QFrame, QProgressBar, QTextEdit, QMessageBox, QLineEdit,
     QAbstractItemView
 )
 from PySide6.QtCore import Qt
 from presentation.workers import SyncGmailContactsWorker
-from paths import ROOT_DIR
 
 class GmailContactPage(QWidget):
     """
@@ -61,7 +58,7 @@ class GmailContactPage(QWidget):
         combo_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #334155;")
         combo_layout.addWidget(combo_lbl)
         
-        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        from PySide6.QtWidgets import QListWidget
         self.group_list = QListWidget()
         self.group_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.group_list.setStyleSheet("""

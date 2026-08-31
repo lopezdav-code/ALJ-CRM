@@ -1,5 +1,4 @@
 import os
-from paths import ROOT_DIR
 import json
 import time
 from fastapi import FastAPI, Body, BackgroundTasks
@@ -247,13 +246,13 @@ def get_sqlite_map_data(background_tasks: BackgroundTasks = None) -> List[Dict[s
             if "annul" in str(status).lower():
                 continue
                 
-            firstName = row.get("user_firstName") or "".strip().title()
-            lastName = row.get("user_lastName") or "".strip().upper()
+            firstName = (row.get("first_name") or "").strip().title()
+            lastName = (row.get("last_name") or "").strip().upper()
             t_name = row.get("tarif_name") or "".strip() or "Aucun"
             
-            addr = row.get("champ_Adresse : numéro et nom de rue") or ""
-            city = row.get("champ_Ville") or ""
-            zip_code = row.get("champ_Code postal") or ""
+            addr = row.get("address") or ""
+            city = row.get("city") or ""
+            zip_code = row.get("zip_code") or ""
             
             # Formater l'adresse de façon normalisée et insensible à la casse
             from domain.utils import clean_city_name
@@ -664,7 +663,7 @@ def get_pivot_table(season: str = "Toutes les saisons"):
                 
             # 2. Normaliser les noms de villes pour fusionner "Saint-Maurice..." et "Saint Maurice..."
             from domain.utils import clean_city_name
-            city_raw = row.get("champ_Ville", "Inconnue")
+            city_raw = row.get("city") or "Inconnue"
             city_clean = clean_city_name(city_raw)
             
             # 3. Type d'adhésion (Nouveau vs Déjà membre)
@@ -675,9 +674,9 @@ def get_pivot_table(season: str = "Toutes les saisons"):
             season_name = row.get("season_name", "Inconnue")
             
             pivot_records.append({
-                "Nom": row.get("user_lastName") or "".strip().upper(),
-                "Prénom": row.get("user_firstName") or "".strip().title(),
-                "Sexe": row.get("champ_Sexe", "Inconnu").strip().title() or "Inconnu",
+                "Nom": (row.get("last_name") or "").strip().upper(),
+                "Pr\u00e9nom": (row.get("first_name") or "").strip().title(),
+                "Sexe": (row.get("gender") or "Inconnu").strip().title() or "Inconnu",
                 "Ville": city_clean,
                 "Groupe / Tarif": row.get("tarif_name") or "".strip() or "Aucun",
                 "Statut": status_clean,

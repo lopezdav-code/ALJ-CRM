@@ -469,9 +469,9 @@ class MainWindow(QMainWindow):
                 html_msg += "</table>"
             else:
                 html_msg = (
-                    f"<h3><b>✔️ Synchronisation Réussie !</b></h3>"
-                    f"<p>La base d'adhérents est déjà entièrement à jour.</p>"
-                    f"<p><b>📊 0 nouvelle ligne ajoutée.</b></p>"
+                    "<h3><b>✔️ Synchronisation Réussie !</b></h3>"
+                    "<p>La base d'adhérents est déjà entièrement à jour.</p>"
+                    "<p><b>📊 0 nouvelle ligne ajoutée.</b></p>"
                 )
                 
             # Créer un QMessageBox personnalisé pour intégrer le bouton d'ouverture web Google Drive

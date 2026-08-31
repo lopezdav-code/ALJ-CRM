@@ -1,10 +1,5 @@
-import os
-import glob
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QFrame
-from PySide6.QtCore import Qt
 
-from paths import CODE_ROOT
-from domain.constants import get_corrective_files_pattern
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
 

@@ -1,9 +1,7 @@
 import os
 from paths import CODE_ROOT
-import sys
 import glob
 import json
-import base64
 import webbrowser
 import urllib.request
 import urllib.parse

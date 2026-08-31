@@ -29,9 +29,9 @@ if _script_dir not in sys.path:
 from paths import ROOT_DIR  # noqa: E402
 from infrastructure.sqlite_repository import SqliteRepository  # noqa: E402
 from infrastructure.schema_v2 import (  # noqa: E402
-    SCHEMA_TARGET_VERSION, SEASON_ACTIVE,
-    normalize_status, status_score, clean_legacy_text, is_true,
-    DOB_COLUMN, build_user_field_map, ensure_v2_schema,
+    SCHEMA_TARGET_VERSION, SEASON_ACTIVE, recreate_compat_view,
+    normalize_status, clean_legacy_text, is_true,
+    build_user_field_map, ensure_v2_schema,
     upsert_user_v2, upsert_order_v2, insert_options_v2,
 )
 

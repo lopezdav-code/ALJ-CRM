@@ -1,15 +1,13 @@
 import os
-import glob
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
-    QListWidgetItem, QSplitter, QComboBox, QCheckBox
+    QListWidgetItem, QSplitter, QComboBox, QCheckBox, QMessageBox
 )
 from PySide6.QtCore import Qt
 from PIL import Image, ImageDraw
 
 from paths import CODE_ROOT
-from domain.constants import get_corrective_files_pattern
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
 from presentation.workers import SendEmailCampaignWorker

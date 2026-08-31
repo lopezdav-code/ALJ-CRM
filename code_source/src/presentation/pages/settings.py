@@ -431,7 +431,6 @@ class SettingsPage(QWidget):
         
         # Loader pour patienter
         from infrastructure.google_drive_client import GoogleDriveClient
-        from infrastructure.google_contacts_client import GoogleContactsClient
         import requests
         
         try:

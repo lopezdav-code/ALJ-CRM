@@ -5,15 +5,11 @@ from PySide6.QtCore import QThread, Signal
 
 from domain.models import Member
 from domain.constants import (
-    get_drive_temp_filename, 
-    get_corrective_files_pattern, 
-    get_save_filename_template
+    get_drive_temp_filename
 )
 from paths import CODE_ROOT, ROOT_DIR
 from infrastructure.google_drive_client import GoogleDriveClient
-from infrastructure.excel_repository import ExcelRepository
 from infrastructure.email_repository import EmailRepository
-from helloasso_api import get_campaigns, get_items
 from attestation_generator import generate_all_attestations
 
 class SyncHelloAssoWorker(QThread):
@@ -295,7 +291,7 @@ class SendEmailCampaignWorker(QThread):
                                     else:
                                         qr_status_msg = f"❌ QRCode non joint ({group_name} : Échec API, code HTTP {res.status_code})"
                                         qr_path = None
-                                except Exception as qe:
+                                except Exception:
                                     qr_status_msg = f"❌ QRCode non joint ({group_name} : Erreur de téléchargement)"
                                     qr_path = None
                             else:
@@ -305,8 +301,8 @@ class SendEmailCampaignWorker(QThread):
                             qr_status_msg = f"⚠️ QRCode non joint (Lien WhatsApp absent pour le groupe '{group_desc}')"
                     else:
                         qr_status_msg = f"⚠️ QRCode non joint (Aucun cours trouvé pour le tarif '{m.tarif_name}')"
-                except Exception as match_err:
-                    qr_status_msg = f"❌ QRCode non joint (Erreur de matching de cours)"
+                except Exception:
+                    qr_status_msg = "❌ QRCode non joint (Erreur de matching de cours)"
                 
             self.progress.emit(f"✉️ Envoi de l'e-mail à {m.user_last_name} {m.user_first_name} ({email_dest})...\n   └─ {qr_status_msg}", percent)
             
@@ -489,10 +485,10 @@ class ExportWorker(QThread):
                     
                 excel_rows = []
                 for p in anciens_raw:
-                    email_val = str(p.get("champ_Adresse mail pour la réception des informations du club") or p.get("payer_email") or "").strip()
+                    email_val = str(p.get("email_primary") or p.get("payer_email") or "").strip()
                     excel_rows.append({
-                        "Nom": str(p.get("user_lastName") or "").strip().upper(),
-                        "Prénom": str(p.get("user_firstName") or "").strip().capitalize(),
+                        "Nom": str(p.get("last_name") or "").strip().upper(),
+                        "Pr\u00e9nom": str(p.get("first_name") or "").strip().capitalize(),
                         "Email": email_val,
                         "Tarif (Saison précédente 2025-2026)": str(p.get("tarif_name") or "").strip()
                     })
@@ -913,9 +909,9 @@ class SyncGmailContactsWorker(QThread):
                 group_name = f"{year} {tariff.strip()}"
                 base_percent = int((t_idx / total_tariffs) * 100)
                 
-                self.progress.emit(f"\n======================================", base_percent)
+                self.progress.emit("\n======================================", base_percent)
                 self.progress.emit(f"==> Traitement du groupe [{t_idx+1}/{total_tariffs}] : '{group_name}'", base_percent)
-                self.progress.emit(f"======================================", base_percent)
+                self.progress.emit("======================================", base_percent)
                 
                 selected_clean = tariff.strip().lower()
                 
@@ -946,9 +942,9 @@ class SyncGmailContactsWorker(QThread):
                 self.progress.emit("🔍 Analyse et synchronisation des membres dans votre annuaire Google...", base_percent + 10)
                 
                 for m_idx, m in enumerate(group_members):
-                    first_name = m.get("user_firstName") or "".strip()
-                    last_name = m.get("user_lastName") or "".strip().upper()
-                    phone = m.get("champ_Téléphone ") or "".strip()
+                    first_name = (m.get("first_name") or "").strip()
+                    last_name = (m.get("last_name") or "").strip().upper()
+                    phone = (m.get("phone") or "").strip()
                     
                     emails_to_process = []
                     emails_added = set()
@@ -960,11 +956,11 @@ class SyncGmailContactsWorker(QThread):
                             emails_to_process.append((em, suffix))
                     
                     if self.use_primary_email:
-                        email1 = m.get("champ_Adresse mail pour la réception des informations du club") or "".strip()
+                        email1 = (m.get("email_primary") or "").strip()
                         add_email(email1, "")
                         
                     if self.use_secondary_email:
-                        email2 = m.get("champ_Deuxième adresse mail pour la réception des informations du club") or "".strip()
+                        email2 = (m.get("email_secondary") or "").strip()
                         add_email(email2, " (2)")
                         
                     if self.use_payer_email:

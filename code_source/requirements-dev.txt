@@ -1,0 +1,4 @@
+# Dépendances de développement (pip install -r code_source/requirements-dev.txt)
+pytest==9.1.1
+ruff==0.16.5
+mypy==2.3.1

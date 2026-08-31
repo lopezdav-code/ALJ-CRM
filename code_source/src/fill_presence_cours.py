@@ -1,7 +1,6 @@
 import os
 import glob
 import shutil
-import unicodedata
 import datetime
 import pandas as pd
 import openpyxl

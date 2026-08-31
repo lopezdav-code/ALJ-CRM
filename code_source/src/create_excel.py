@@ -7,21 +7,15 @@ import pandas as pd
 import datetime
 import csv
 import time
-import requests
-from attestation_generator import generate_all_attestations
 from presence_sheet_generator import generate_presence_sheets
-from urgency_contact_generator import generate_urgency_contacts_sheet
 
 from paths import CODE_ROOT, ROOT_DIR
 from domain.constants import (
-    get_active_season,
-    get_drive_temp_filename,
-    get_corrective_files_pattern,
-    get_save_filename_template
+    get_active_season
 )
 from infrastructure.secret_store import SecretStore
 from infrastructure.google_drive_client import GoogleDriveClient
-from domain.utils import normalize_string, normalize_name
+from domain.utils import normalize_name
 
 # S'assurer que le répertoire de travail et le répertoire du script sont dans le chemin de recherche
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +28,6 @@ excel_app = None
 current_corrective_file_path = None
 
 # Phase 3 — mapping canonique unique (domain.constants), fin de la duplication
-from domain.constants import CORRECTIVE_MAP
 from infrastructure.schema_v2 import purchase_priority_score
 
 def download_file_from_drive(file_id, dest_path):
@@ -211,7 +204,6 @@ def get_helloasso_data():
 def sanitize_rows(rows):
     import math
     import datetime
-    import json
     sanitized_rows = []
     for row in rows:
         sanitized_row = []
@@ -839,7 +831,7 @@ def build_excel(participants_data, rows_values, modified_rows, added_rows, heade
     if os.path.exists(save_path):
         try:
             os.remove(save_path)
-        except Exception as de:
+        except Exception:
             pass
             
     wb = excel.Workbooks.Add()
@@ -1633,7 +1625,6 @@ def show_member_details(parent, p):
 
 def open_presence_window(parent, participants_data):
     import tkinter as tk
-    from tkinter import ttk
     import tkinter.messagebox
     import datetime
 

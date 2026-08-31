@@ -1,5 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout, QScrollArea
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QScrollArea
 
 class HelpPage(QWidget):
     """

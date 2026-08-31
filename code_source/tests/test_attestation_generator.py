@@ -88,7 +88,8 @@ class TestAttestationGenerator(unittest.TestCase):
 
     def test_create_excel_mappings_and_helpers(self):
         """Vérifie que la colonne de date d'envoi d'e-mail est correctement mappée et que les helpers fonctionnent."""
-        from create_excel import CORRECTIVE_MAP, parse_date_to_datetime
+        from create_excel import parse_date_to_datetime
+        from domain.constants import CORRECTIVE_MAP
         
         # Vérifier la présence du nouveau mapping d'email
         self.assertIn("Date d'envoi de l'email", CORRECTIVE_MAP)

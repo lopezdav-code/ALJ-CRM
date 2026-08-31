@@ -127,7 +127,6 @@ class MemberTableModel(QAbstractTableModel):
         
         if col_name == "order_date":
             import pandas as pd
-            import datetime
             def get_date_key(m):
                 val = getattr(m, "order_date", None)
                 if not val:

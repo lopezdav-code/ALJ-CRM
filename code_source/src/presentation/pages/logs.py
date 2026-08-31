@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
-    QPushButton, QLabel, QCheckBox, QFrame
+    QPushButton, QLabel, QCheckBox
 )
 from PySide6.QtCore import QTimer, Qt
 from paths import ROOT_DIR
@@ -220,7 +220,7 @@ class LogsPage(QWidget):
         if reply == QMessageBox.Yes:
             try:
                 with open(self.log_file_path, "w", encoding="utf-8") as f:
-                    f.write(f"--- Journal d'activité réinitialisé par l'utilisateur ---\n")
+                    f.write("--- Journal d'activité réinitialisé par l'utilisateur ---\n")
                 self.load_logs()
             except Exception as e:
                 QMessageBox.warning(self, "Erreur", f"Impossible d'effacer le fichier log : {e}")

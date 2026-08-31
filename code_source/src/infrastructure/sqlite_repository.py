@@ -4,10 +4,8 @@ import datetime
 import pandas as pd
 import json
 from paths import CODE_ROOT, ROOT_DIR
-from infrastructure.secret_store import SecretStore
 from domain.constants import CORRECTIVE_MAP
 from infrastructure import schema_v2
-from infrastructure.schema_v2 import COMPAT_VIEW_SQL, recreate_compat_view
 
 EXTRA_COLUMNS = {
     "is_modified": "TEXT DEFAULT 'Non'",
@@ -300,7 +298,6 @@ class SqliteRepository:
     @classmethod
     def create_db_backup(cls):
         """Crée une sauvegarde de sécurité horodatée de la base de données dans archive/db avec rétention de 10 jours (Nouveau !)."""
-        import shutil
         import glob
         import datetime
         import time
@@ -514,7 +511,6 @@ class SqliteRepository:
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
-            from domain.utils import normalize_name
             cursor.execute("""
                 UPDATE purchases
                 SET email_sent_date = ?
@@ -1044,10 +1040,10 @@ class SqliteRepository:
             try:
                 if os.path.exists(json_path):
                     os.rename(json_path, json_path + ".migrated")
-                    print(f"📦 [SQLITE] Fichier planning.json archivé en .migrated")
+                    print("📦 [SQLITE] Fichier planning.json archivé en .migrated")
                 if os.path.exists(tarif_mapping_path):
                     os.rename(tarif_mapping_path, tarif_mapping_path + ".migrated")
-                    print(f"📦 [SQLITE] Fichier tarif_mapping.json archivé en .migrated")
+                    print("📦 [SQLITE] Fichier tarif_mapping.json archivé en .migrated")
             except Exception as re_err:
                 print(f"⚠️ [SQLITE] Impossible d'archiver les fichiers historiques JSON : {re_err}")
         except Exception as e:

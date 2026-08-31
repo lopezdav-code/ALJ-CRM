@@ -1,15 +1,13 @@
 import os
-import glob
 import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QTableView, QHeaderView, QFrame, QSplitter, QComboBox,
+    QTableView, QHeaderView, QSplitter, QComboBox,
     QDateEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
 
-from paths import CODE_ROOT, ROOT_DIR
-from domain.constants import get_corrective_files_pattern
+from paths import ROOT_DIR
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
 from presentation.components.member_table_model import MemberTableModel

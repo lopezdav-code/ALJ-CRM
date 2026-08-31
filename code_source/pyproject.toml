@@ -1,0 +1,40 @@
+[project]
+name = "alj-escalade-manager"
+version = "2.0.3"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# Les tests sont des classes unittest : pytest les exécute nativement.
+addopts = "-q"
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
+exclude = ["tests", "build", "dist"]
+
+[tool.ruff.lint]
+# Démarrage progressif : erreurs d'exécution + imports/variables inutilisés.
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "B008",  # injections de dépendances FastAPI (Body(...) en défaut)
+    "B904",  # raise ... from : chantier séparé
+    "B007",  # variables de boucle inutilisées (patterns UI existants)
+    "B023",  # closures de boucle volontaires (event loops synchrones, callbacks par itération)
+    "E701",  # style historique : instruction simple après deux-points
+    "F841",  # variables locales assignées non relues (récupération de boutons Qt, styles)
+    "E402",  # imports après configuration sys.path (structure des entry points du projet)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Les workers/pages émettent des print() redirigés vers le log applicatif.
+"src/app.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = false
+exclude = ["tests", "build", "dist"]
+# Fichiers migrés récemment (le reste du code sert de baseline progressive) :
+files = ["src/infrastructure/schema_v2.py", "src/domain/constants.py"]

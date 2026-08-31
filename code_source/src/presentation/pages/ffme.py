@@ -1,6 +1,5 @@
 import os
 import glob
-import shutil
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
     QFrame, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLineEdit, QTabWidget, QComboBox
@@ -602,7 +601,7 @@ class AutonomesImportWidget(QWidget):
             self.log_area.append("\n🎉 [SUCCÈS] Traitement d'importation et de fusion Autonomie accompli !")
             
             # Logs supplémentaires demandés par l'utilisateur
-            self.log_area.append(f"\n📊 [STATISTIQUES DE TRAITEMENT] :")
+            self.log_area.append("\n📊 [STATISTIQUES DE TRAITEMENT] :")
             self.log_area.append(f"  • Nombre d'adhérents avec badge rouge trouvés dans le fichier : {stats.get('file_badge_rouge_count', 0)}")
             self.log_area.append(f"  • Nombre d'adhérents qui ont le badge rouge en base de données : {stats.get('db_total_badge_rouge', 0)}")
             self.log_area.append(f"  • Nombre d'adhérents du groupe autonome sans badge rouge : {stats.get('db_autonomes_without_badge_rouge', 0)}")
