@@ -103,11 +103,12 @@ class HelpPage(QWidget):
         f3_title = QLabel("📁 3. Base de Référence des Adhésions du Club")
         f3_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2563EB;")
         f3_desc = QLabel(
-            "<b>Format :</b> <code>Adhésions escalade-{saison}-amicale-laique-de-jonage-DRIVE_TEMP.xlsx</code> ou <code>HelloAsso_Admin_*.xlsx</code><br>"
-            "<b>Provenance :</b> Téléchargé automatiquement depuis l'API HelloAsso ou récupéré de façon partagée sur Google Drive.<br>"
-            "<b>Rôle :</b> C'est le fichier pivot central (base de données de l'application). Il recense l'intégralité des "
-            "<i>coordonnées des adhérents, tarifs réglés, justificatifs de paiement et statuts de commandes</i>. Il est synchronisé "
-            "en temps réel avec HelloAsso et sauvegardé sur Google Drive."
+            "<b>Format :</b> <code>database.db</code> (base SQLite locale, synchronisée sur Google Drive)<br>"
+            "<b>Provenance :</b> Synchronisée automatiquement depuis l'API HelloAsso et sauvegardée de façon "
+            "partagée sur Google Drive (<code>GOOGLE_DRIVE_DB_ID</code>).<br>"
+            "<b>Rôle :</b> C'est le pivot central de l'application. Elle recense l'intégralité des "
+            "<i>coordonnées des adhérents, tarifs réglés, justificatifs de paiement et statuts de commandes</i> "
+            "au format relationnel (users / orders / purchases / purchase_options)."
         )
         f3_desc.setWordWrap(True)
         f3_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.5;")

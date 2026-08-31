@@ -1,5 +1,4 @@
 import os
-import datetime
 import socket
 import sqlite3
 import webbrowser
@@ -11,9 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal
 
-from paths import CODE_ROOT
 from infrastructure.secret_store import SecretStore
-from domain.constants import get_drive_temp_filename
 
 class GeocodeWorker(QThread):
     """
@@ -687,18 +684,8 @@ class ReportsPage(QWidget):
 
     def update_sync_dates_on_banner(self):
         """Récupère et actualise les dates de synchronisation sur la bannière."""
-        drive_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC")
-        if not drive_sync:
-            try:
-                temp_file = os.path.join(CODE_ROOT, get_drive_temp_filename())
-                if os.path.exists(temp_file):
-                    mtime = os.path.getmtime(temp_file)
-                    drive_sync = datetime.datetime.fromtimestamp(mtime).strftime("%d/%m/%Y %H:%M:%S")
-            except Exception:
-                pass
-        if not drive_sync:
-            drive_sync = "Inconnue"
-            
+        drive_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC") or "Inconnue"
+
         hello_sync = SecretStore.get_secret("LAST_HELLOASSO_SYNC") or "Inconnue"
 
         self.drive_sync_lbl.setText(f"🌐 Dernière mise à jour Drive : {drive_sync}")

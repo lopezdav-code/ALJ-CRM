@@ -234,9 +234,7 @@ class SettingsPage(QWidget):
         status_layout.addWidget(self.db_status_lbl)
 
         # Label Excel Adhésions
-        self.excel_status_lbl = QLabel("📊 Fichier Excel : (Analyse en cours...)")
-        self.excel_status_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #64748B;")
-        status_layout.addWidget(self.excel_status_lbl)
+
 
         # Bouton de rafraîchissement
         refresh_status_btn = QPushButton("🔄 Rafraîchir l'état des fichiers")
@@ -495,21 +493,16 @@ class SettingsPage(QWidget):
         self.check_local_files_status()
 
     def check_local_files_status(self):
-        """Vérifie la disponibilité et la lisibilité des fichiers SQLite et Excel locaux."""
+        """Vérifie la disponibilité et la lisibilité de la base SQLite locale."""
         import os
         import sqlite3
-        from openpyxl import load_workbook
-        from paths import CODE_ROOT
-        from domain.constants import get_drive_temp_filename
         from infrastructure.sqlite_repository import SqliteRepository
-        
-        # 1. Vérifier la base SQLite locale (Utilise le chemin persistant officiel)
+
         db_path = SqliteRepository.get_db_path()
         db_status = "🔴 Introuvable"
         db_color = "#EF4444"
         if os.path.exists(db_path):
             try:
-                # Tester la lisibilité en ouvrant une connexion rapide
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -520,29 +513,9 @@ class SettingsPage(QWidget):
             except Exception as e:
                 db_status = f"⚠️ Corrompu ou illisible ({str(e)[:30]})"
                 db_color = "#F59E0B"
-        
-        # 2. Vérifier l'Excel local de référence
-        excel_name = get_drive_temp_filename()
-        excel_path = os.path.join(CODE_ROOT, excel_name)
-        excel_status = "🔴 Introuvable"
-        excel_color = "#EF4444"
-        if os.path.exists(excel_path):
-            try:
-                # Tester la lisibilité rapide en mode read_only
-                wb = load_workbook(excel_path, read_only=True)
-                wb.close()
-                excel_status = "🟢 Disponible et lisible"
-                excel_color = "#10B981"
-            except Exception as e:
-                excel_status = f"⚠️ Corrompu ou illisible ({str(e)[:30]})"
-                excel_color = "#F59E0B"
-                
-        # Mettre à jour l'IHM
+
         self.db_status_lbl.setText(f"📁 database.db : {db_status}")
         self.db_status_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {db_color};")
-        
-        self.excel_status_lbl.setText(f"📊 {excel_name} : {excel_status}")
-        self.excel_status_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {excel_color};")
 
     def load_drive_filenames(self):
         """Récupère en arrière-plan le nom de la base SQLite sur Google Drive."""

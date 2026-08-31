@@ -4,10 +4,7 @@ import datetime
 from PySide6.QtCore import QThread, Signal
 
 from domain.models import Member
-from domain.constants import (
-    get_drive_temp_filename
-)
-from paths import CODE_ROOT, ROOT_DIR
+from paths import ROOT_DIR
 from infrastructure.google_drive_client import GoogleDriveClient
 from infrastructure.email_repository import EmailRepository
 from attestation_generator import generate_all_attestations
@@ -601,14 +598,12 @@ class DownloadDriveFileWorker(QThread):
             from infrastructure.secret_store import SecretStore
             from infrastructure.sqlite_repository import SqliteRepository
             from infrastructure.google_drive_client import GoogleDriveClient
-            import os
             
             self.progress.emit("Connexion à Google Drive...", 20)
             
             db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
             excel_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_FILE_ID") or self.drive_file_id
             db_local_path = SqliteRepository.get_db_path()
-            temp_excel = os.path.join(CODE_ROOT, get_drive_temp_filename())
             
             # Migration automatique si pas de base de données configurée sur le Drive
             if not db_drive_id and excel_drive_id:
