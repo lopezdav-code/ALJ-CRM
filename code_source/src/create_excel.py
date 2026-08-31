@@ -978,27 +978,38 @@ def build_excel(participants_data, rows_values, modified_rows, added_rows, heade
     excel_app = None
     print(f"Fichier Excel finalisé : {save_path}")
 
-def generate_ffme_csv(participants_data):
+def generate_ffme_csv(participants_data, output_path=None):
+    """
+    Génère le CSV d'import FFME.
+    Si output_path est fourni (tests de non-régression), écrit à cet emplacement exact
+    sans horodatage ni archivage. Sinon, comportement historique : fichier horodaté
+    dans exports/ avec archivage des anciens CSV.
+    """
     print("\nGénération simultanée du fichier CSV FFME...")
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_filename = f"import_ffme_{timestamp}.csv"
-    
-    root_dir = ROOT_DIR
-    exports_dir = os.path.join(root_dir, "exports")
-    os.makedirs(exports_dir, exist_ok=True)
-    csv_path = os.path.join(exports_dir, csv_filename)
+    if output_path:
+        csv_path = output_path
+        out_dir = os.path.dirname(os.path.abspath(csv_path))
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"import_ffme_{timestamp}.csv"
 
-    # Archiver les anciens fichiers import_ffme
-    archive_dir = os.path.join(exports_dir, "archive")
-    os.makedirs(archive_dir, exist_ok=True)
-    import shutil
-    for old_file in glob.glob(os.path.join(exports_dir, "import_ffme_*.csv")):
-        if os.path.basename(old_file) != csv_filename:
-            try:
-                shutil.move(old_file, os.path.join(archive_dir, os.path.basename(old_file)))
-                print(f"📦 Ancien fichier CSV FFME archivé : {os.path.basename(old_file)}")
-            except Exception:
-                pass
+        root_dir = ROOT_DIR
+        exports_dir = os.path.join(root_dir, "exports")
+        os.makedirs(exports_dir, exist_ok=True)
+        csv_path = os.path.join(exports_dir, csv_filename)
+
+        # Archiver les anciens fichiers import_ffme
+        archive_dir = os.path.join(exports_dir, "archive")
+        os.makedirs(archive_dir, exist_ok=True)
+        import shutil
+        for old_file in glob.glob(os.path.join(exports_dir, "import_ffme_*.csv")):
+            if os.path.basename(old_file) != csv_filename:
+                try:
+                    shutil.move(old_file, os.path.join(archive_dir, os.path.basename(old_file)))
+                    print(f"📦 Ancien fichier CSV FFME archivé : {os.path.basename(old_file)}")
+                except Exception:
+                    pass
     
     headers = [
         "numero de licence", "nom", "prenom", "date de naissance", "sexe", "nationalite",

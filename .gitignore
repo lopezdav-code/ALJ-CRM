@@ -28,6 +28,9 @@ __pycache__/
 scripts_temporaires/
 code_source/query_*.py
 
+# ===== Golden master FFME : référence CSV avec données personnelles (local uniquement) =====
+code_source/tests/fixtures/
+
 # ===== Build / Packaging =====
 build/
 dist/
