@@ -77,17 +77,17 @@ def generate_urgency_contacts_sheet(participants_data):
     # 1. Filtrer les adhérents actifs (montant > 0, exclure les listes d'attente, exclure les annulés)
     active_participants = []
     for p in participants_data:
-        t_name = str(p.get("tarif_name", "")).lower()
+        t_name = str(p.get("tarif_name") or "").lower()
         amount = p.get("amount", 0.0)
-        status = str(p.get("status", "")).lower()
+        status = str(p.get("status") or "").lower()
         if "attente" in t_name or amount == 0.0 or "annul" in status:
             continue
         active_participants.append(p)
         
     # Trier par Nom de famille puis Prénom (insensible à la casse)
     active_participants.sort(key=lambda x: (
-        str(x.get("user_lastName", "")).strip().lower(),
-        str(x.get("user_firstName", "")).strip().lower()
+        str(x.get("user_lastName") or "").strip().lower(),
+        str(x.get("user_firstName") or "").strip().lower()
     ))
     
     # 2. Créer un nouveau classeur Excel avec openpyxl
@@ -151,18 +151,18 @@ def generate_urgency_contacts_sheet(participants_data):
     # 5. Remplir la liste des adhérents
     row_idx = 7
     for p in active_participants:
-        last_name = str(p.get("user_lastName", "")).strip().upper()
-        first_name = str(p.get("user_firstName", "")).strip().capitalize()
-        group_name = str(p.get("tarif_name", "")).strip()
+        last_name = str(p.get("user_lastName") or "").strip().upper()
+        first_name = str(p.get("user_firstName") or "").strip().capitalize()
+        group_name = str(p.get("tarif_name") or "").strip()
         
         # Concaténer les deux contacts d'urgence (avec formatage NOM et Prénom)
-        c1_name_raw = str(p.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule", "")).strip()
+        c1_name_raw = str(p.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule") or "").strip()
         c1_name = format_contact_name(c1_name_raw)
-        c1_tel = str(p.get("champ_Personne à prévenir en cas d'urgence - Téléphone", "")).strip()
+        c1_tel = str(p.get("champ_Personne à prévenir en cas d'urgence - Téléphone") or "").strip()
         
-        c2_name_raw = str(p.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", "")).strip()
+        c2_name_raw = str(p.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)") or "").strip()
         c2_name = format_contact_name(c2_name_raw)
-        c2_tel = str(p.get("champ_Parent 2 - Numéro de téléphone portable", "")).strip()
+        c2_tel = str(p.get("champ_Parent 2 - Numéro de téléphone portable") or "").strip()
         
         contacts = []
         if c1_name or c1_tel:

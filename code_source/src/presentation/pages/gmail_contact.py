@@ -221,7 +221,7 @@ class GmailContactPage(QWidget):
             from infrastructure.sqlite_repository import SqliteRepository
             SqliteRepository.setup_database()
             all_members = SqliteRepository.load_direct_data(season_filter="2026-2027")
-            tarifs = sorted(list(set([str(m.get("tarif_name", "")).strip() for m in all_members if m.get("tarif_name")])))
+            tarifs = sorted(list(set([str(m.get("tarif_name") or "").strip() for m in all_members if m.get("tarif_name")])))
             
             # Ajouter les groupes virtuels récapitulatifs au début de la liste
             virtual_groups = ["Adhérent", "Compétition", "Payeur"]

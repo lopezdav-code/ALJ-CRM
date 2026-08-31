@@ -98,10 +98,10 @@ def find_planning_match_dynamically(tarif_name, planning_data):
 
     # 2. Recherche de correspondances dans les lignes de planning.json
     for idx_item, item in enumerate(planning_data, 1):
-        g_name = str(item.get("groupe", "")).lower()
-        g_type = str(item.get("type", "")).lower()
-        g_day = str(item.get("jour", "")).lower()
-        g_time = str(item.get("horaires", ""))
+        g_name = str(item.get("groupe") or "").lower()
+        g_type = str(item.get("type") or "").lower()
+        g_day = str(item.get("jour") or "").lower()
+        g_time = str(item.get("horaires") or "")
         
         # A. Créneaux Autonomes
         if is_autonome and ("autonome" in g_name or "autonome" in g_type):
@@ -168,15 +168,15 @@ def find_planning_match_dynamically(tarif_name, planning_data):
                 if enc not in all_coaches:
                     all_coaches.append(enc)
             
-            day_name = m.get("jour", "")
-            time_slot = m.get("horaires", "")
+            day_name = m.get("jour") or ""
+            time_slot = m.get("horaires") or ""
             if day_name and time_slot:
                 slot_str = f"{day_name} {time_slot}"
                 if slot_str not in all_slots:
                     all_slots.append(slot_str)
             
             # Extraire les jours individuels de l'entrée de planning
-            day_field = str(m.get("jour", "")).strip()
+            day_field = str(m.get("jour") or "").strip()
             for part in re.split(r"[/,;\s]+and\s+|[/,;\s]+et\s+|[/,;]+", day_field):
                 p_clean = part.strip().lower()
                 if p_clean in DAY_NAME_TO_WEEKDAY:
@@ -283,14 +283,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             if g == "Adultes & Jeunes Adultes autonomes":
                 sub_parts = [
                     p for p in participants_data 
-                    if p.get("tarif_name", "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
-                    and "annul" not in str(p.get("status", "")).lower()
+                    if p.get("tarif_name") or "".strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
+                    and "annul" not in str(p.get("status") or "").lower()
                 ]
             else:
                 sub_parts = [
                     p for p in participants_data 
-                    if p.get("tarif_name", "").strip() == g
-                    and "annul" not in str(p.get("status", "")).lower()
+                    if p.get("tarif_name") or "".strip() == g
+                    and "annul" not in str(p.get("status") or "").lower()
                 ]
             for p in sub_parts:
                 if p not in merged_participants:
@@ -304,14 +304,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             if group_name == "Adultes & Jeunes Adultes autonomes":
                 participants_by_group[group_name] = [
                     p for p in participants_data 
-                    if p.get("tarif_name", "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
-                    and "annul" not in str(p.get("status", "")).lower()
+                    if p.get("tarif_name") or "".strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
+                    and "annul" not in str(p.get("status") or "").lower()
                 ]
             else:
                 participants_by_group[group_name] = [
                     p for p in participants_data 
-                    if p.get("tarif_name", "").strip() == group_name
-                    and "annul" not in str(p.get("status", "")).lower()
+                    if p.get("tarif_name") or "".strip() == group_name
+                    and "annul" not in str(p.get("status") or "").lower()
                 ]
         loop_groups = selected_groups
 
@@ -319,7 +319,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         group_participants = participants_by_group[group_name]
         
         # Trier par prénom adhérent (user_firstName), insensible à la casse
-        group_participants.sort(key=lambda x: str(x.get("user_firstName", "")).strip().lower())
+        group_participants.sort(key=lambda x: str(x.get("user_firstName") or "").strip().lower())
         
         # 2. Charger une nouvelle copie du template
         wb = openpyxl.load_workbook(template_path)
@@ -353,14 +353,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 for enc in m.get("encadrants", []):
                     if enc not in all_coaches:
                         all_coaches.append(enc)
-                day_name = m.get("jour", "")
-                time_slot = m.get("horaires", "")
+                day_name = m.get("jour") or ""
+                time_slot = m.get("horaires") or ""
                 if day_name and time_slot:
                     slot_str = f"{day_name} {time_slot}"
                     if slot_str not in all_slots:
                         all_slots.append(slot_str)
                 
-                day_field = str(m.get("jour", "")).strip()
+                day_field = str(m.get("jour") or "").strip()
                 for part in re.split(r"[/,;\s]+and\s+|[/,;\s]+et\s+|[/,;]+", day_field):
                     p_clean = part.strip().lower()
                     if p_clean in DAY_NAME_TO_WEEKDAY:
@@ -402,14 +402,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                         for enc in m.get("encadrants", []):
                             if enc not in all_coaches:
                                 all_coaches.append(enc)
-                        day_name = m.get("jour", "")
-                        time_slot = m.get("horaires", "")
+                        day_name = m.get("jour") or ""
+                        time_slot = m.get("horaires") or ""
                         if day_name and time_slot:
                             slot_str = f"{day_name} {time_slot}"
                             if slot_str not in all_slots:
                                 all_slots.append(slot_str)
                         
-                        day_field = str(m.get("jour", "")).strip()
+                        day_field = str(m.get("jour") or "").strip()
                         for part in re.split(r"[/,;\s]+and\s+|[/,;\s]+et\s+|[/,;]+", day_field):
                             p_clean = part.strip().lower()
                             if p_clean in DAY_NAME_TO_WEEKDAY:
@@ -568,11 +568,11 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         max_active_col = start_date_col + len(session_dates) - 1 if session_dates else start_date_col
         
         for p in group_participants:
-            first_name = str(p.get("user_firstName", "")).strip().capitalize()
-            last_name = str(p.get("user_lastName", "")).strip().upper()
+            first_name = str(p.get("user_firstName") or "").strip().capitalize()
+            last_name = str(p.get("user_lastName") or "").strip().upper()
             badge_rouge = str(p.get("badge_rouge", "Non")).strip()
             autonomie_bloc = str(p.get("autonomie_bloc", "Non")).strip()
-            has_orange = "Oui" if "orange" in str(p.get("raw_passports", "")).lower() else "Non"
+            has_orange = "Oui" if "orange" in str(p.get("raw_passports") or "").lower() else "Non"
             
             # Saisie de prénom, nom, badge rouge, autonomie bloc et passeport orange
             cell_first = ws.cell(row=row_idx, column=1, value=first_name)

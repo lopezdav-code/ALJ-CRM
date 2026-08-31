@@ -34,7 +34,7 @@ class GroupsPage(QWidget):
             from infrastructure.sqlite_repository import SqliteRepository
             conn = SqliteRepository.get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT tarif_name FROM adherents WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
+            cursor.execute("SELECT DISTINCT tarif_name FROM purchases WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
             rows = cursor.fetchall()
             self.all_helloasso_tarifs = [row["tarif_name"].strip() for row in rows]
             conn.close()
@@ -316,7 +316,7 @@ class GroupsPage(QWidget):
         """Groupe l'ensemble des données plates de planning.json par Nom de Groupe unique."""
         self.groups_dict = {}
         for item in self.planning_data:
-            g_name = str(item.get("groupe", "")).strip()
+            g_name = str(item.get("groupe") or "").strip()
             if not g_name:
                 continue
                 
@@ -324,8 +324,8 @@ class GroupsPage(QWidget):
                 self.groups_dict[g_name] = {
                     "groupe": g_name,
                     "type": item.get("type", "cours"),
-                    "whatsapp_link": item.get("whatsapp_link", ""),
-                    "categorie_age": item.get("categorie_age", ""),
+                    "whatsapp_link": item.get("whatsapp_link") or "",
+                    "categorie_age": item.get("categorie_age") or "",
                     "helloasso_tarifs": item.get("helloasso_tarifs", []), # Nouveau !
                     "slots": []
                 }
@@ -333,7 +333,7 @@ class GroupsPage(QWidget):
             self.groups_dict[g_name]["slots"].append({
                 "id": item.get("id"),
                 "jour": item.get("jour", "Lundi"),
-                "horaires": item.get("horaires", ""),
+                "horaires": item.get("horaires") or "",
                 "encadrants": item.get("encadrants", [])
             })
 
@@ -346,11 +346,11 @@ class GroupsPage(QWidget):
                     "id": slot.get("id"),
                     "groupe": group.get("groupe", g_name),
                     "type": group.get("type", "cours"),
-                    "categorie_age": group.get("categorie_age", ""),
-                    "whatsapp_link": group.get("whatsapp_link", ""),
+                    "categorie_age": group.get("categorie_age") or "",
+                    "whatsapp_link": group.get("whatsapp_link") or "",
                     "helloasso_tarifs": group.get("helloasso_tarifs", []),
                     "jour": slot.get("jour", "Lundi"),
-                    "horaires": slot.get("horaires", ""),
+                    "horaires": slot.get("horaires") or "",
                     "encadrants": slot.get("encadrants", [])
                 })
         self.planning_data = flat_list
@@ -366,7 +366,7 @@ class GroupsPage(QWidget):
             group_item.setData(Qt.UserRole, g_name)
             self.table.setItem(row_idx, 0, group_item)
             
-            self.table.setItem(row_idx, 1, QTableWidgetItem(str(group.get("type", ""))))
+            self.table.setItem(row_idx, 1, QTableWidgetItem(str(group.get("type") or "")))
             
             # Formater le résumé des créneaux associés (avec indication claire du nombre !)
             num_slots = len(group["slots"])
@@ -386,7 +386,7 @@ class GroupsPage(QWidget):
             self.table.setItem(row_idx, 3, QTableWidgetItem(tarifs_summary or "Non configuré ⚠️"))
             
             # Statut WhatsApp (Pictogramme coloré !)
-            wa_link = str(group.get("whatsapp_link", "")).strip()
+            wa_link = str(group.get("whatsapp_link") or "").strip()
             wa_item = QTableWidgetItem()
             if wa_link and wa_link.startswith("http"):
                 wa_item.setText("🟢 Enregistré")
@@ -477,7 +477,7 @@ class GroupsPage(QWidget):
                 "groupe": new_name,
                 "type": updated_data["type"],
                 "whatsapp_link": updated_data["whatsapp_link"],
-                "categorie_age": selected_group.get("categorie_age", ""),
+                "categorie_age": selected_group.get("categorie_age") or "",
                 "helloasso_tarifs": updated_data["helloasso_tarifs"],
                 "slots": updated_data["slots"]
             }
@@ -518,7 +518,7 @@ class GroupsPage(QWidget):
             )
             return
 
-        whatsapp_link = selected_group.get("whatsapp_link", "").strip()
+        whatsapp_link = selected_group.get("whatsapp_link") or "".strip()
         group_name = selected_group.get("groupe", "Groupe")
         
         if not whatsapp_link:
@@ -639,7 +639,7 @@ class GroupEditDialog(QDialog):
             from infrastructure.sqlite_repository import SqliteRepository
             conn = SqliteRepository.get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT tarif_name FROM adherents WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
+            cursor.execute("SELECT DISTINCT tarif_name FROM purchases WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
             rows = cursor.fetchall()
             self.all_helloasso_tarifs = [row["tarif_name"].strip() for row in rows]
             conn.close()
@@ -667,13 +667,13 @@ class GroupEditDialog(QDialog):
         self.group_input = QLineEdit()
         self.group_input.setPlaceholderText("ex: Loisir Collège")
         if self.group_item:
-            self.group_input.setText(self.group_item.get("groupe", ""))
+            self.group_input.setText(self.group_item.get("groupe") or "")
         form_layout.addRow("Nom du groupe :", self.group_input)
 
         self.type_combo = QComboBox()
         self.type_combo.addItems(["autonome", "cours", "compétition", "perfectionnement"])
         if self.group_item:
-            stored_type = str(self.group_item.get("type", "")).strip().lower()
+            stored_type = str(self.group_item.get("type") or "").strip().lower()
             if "autonome" in stored_type:
                 self.type_combo.setCurrentText("autonome")
             elif "compétition" in stored_type or "compet" in stored_type:
@@ -687,7 +687,7 @@ class GroupEditDialog(QDialog):
         self.whatsapp_input = QLineEdit()
         self.whatsapp_input.setPlaceholderText("ex: https://chat.whatsapp.com/...")
         if self.group_item:
-            self.whatsapp_input.setText(self.group_item.get("whatsapp_link", ""))
+            self.whatsapp_input.setText(self.group_item.get("whatsapp_link") or "")
         form_layout.addRow("Lien WhatsApp :", self.whatsapp_input)
 
         left_panel.addLayout(form_layout)
@@ -793,7 +793,7 @@ class GroupEditDialog(QDialog):
         self.slots_table.setRowCount(len(self.slots))
         for row_idx, slot in enumerate(self.slots):
             self.slots_table.setItem(row_idx, 0, QTableWidgetItem(str(slot.get("jour", "Lundi"))))
-            self.slots_table.setItem(row_idx, 1, QTableWidgetItem(str(slot.get("horaires", ""))))
+            self.slots_table.setItem(row_idx, 1, QTableWidgetItem(str(slot.get("horaires") or "")))
             encadrants_str = ", ".join(slot.get("encadrants", []))
             self.slots_table.setItem(row_idx, 2, QTableWidgetItem(encadrants_str or "Aucun animateur"))
         self.slots_table.resizeColumnsToContents()
@@ -901,7 +901,7 @@ class SlotEditDialog(QDialog):
         self.time_input = QLineEdit()
         self.time_input.setPlaceholderText("ex: 18:30 - 20:00")
         if self.slot_item:
-            self.time_input.setText(self.slot_item.get("horaires", ""))
+            self.time_input.setText(self.slot_item.get("horaires") or "")
         form_layout.addRow("Heure du cours :", self.time_input)
 
         layout.addLayout(form_layout)

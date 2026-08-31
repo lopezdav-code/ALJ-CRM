@@ -79,33 +79,11 @@ class SqliteRepository:
         conn = cls.get_connection()
         cursor = conn.cursor()
 
-        # Construction dynamique de la table d'adhérents à partir de CORRECTIVE_MAP
-        columns = []
-        for key in CORRECTIVE_MAP.values():
-            if key == "amount" or key.startswith("opt_Montant"):
-                columns.append(f'"{key}" REAL')
-            else:
-                columns.append(f'"{key}" TEXT')
+        # Phase 5 — schéma v2 natif : users / orders / purchases / purchase_options
+        # (les tables legacy adherents / adherents_seasons ne sont plus créées)
+        schema_v2.ensure_v2_schema(cursor)
 
-        for extra_col, col_type in EXTRA_COLUMNS.items():
-            columns.append(f'"{extra_col}" {col_type}')
-
-        # Clé primaire composite pour identifier de manière unique un adhérent
-        columns_sql = ", ".join(columns)
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS adherents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            {columns_sql},
-            UNIQUE(order_ref, user_lastName, user_firstName)
-        );
-        """
-        cursor.execute(create_table_sql)
-        
-        # Création d'index pour optimiser les recherches
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_order_ref ON adherents(order_ref);')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_names ON adherents(user_lastName, user_firstName);')
-        
-        # Création des tables de saisons (Nouveau !)
+        # Création des tables de saisons
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS seasons (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,76 +113,6 @@ class SqliteRepository:
         # Insérer les saisons par défaut
         cursor.execute("INSERT OR IGNORE INTO seasons (name, is_active) VALUES ('2025-2026', 0)")
         cursor.execute("INSERT OR IGNORE INTO seasons (name, is_active) VALUES ('2026-2027', 1)")
-        
-        # Vérification et migration de la saison 2026-2027 si vide (Nouveau !)
-        cursor.execute("SELECT COUNT(*) FROM adherents_seasons")
-        cnt_link = cursor.fetchone()[0]
-        if cnt_link == 0:
-            cursor.execute("SELECT id FROM seasons WHERE name = '2026-2027'")
-            season_id = cursor.fetchone()[0]
-            
-            # Charger tous les adhérents existants de la BDD
-            cursor.execute("""
-                SELECT id, order_ref, order_date, tarif_name, amount, status, is_modified, commentaires_correctif, email_sent_date
-                FROM adherents
-            """)
-            existing_adherents = cursor.fetchall()
-            
-            links_to_insert = []
-            for adj in existing_adherents:
-                adj_id = adj["id"]
-                status_raw = str(adj["status"] or "").strip().lower()
-                tarif_raw = str(adj["tarif_name"] or "").strip().lower()
-                
-                # Exclure les abandons et la liste d'attente (votre demande !)
-                if "abandon" in status_raw:
-                    continue
-                if "attente" in tarif_raw and "liste" in tarif_raw:
-                    continue
-                    
-                links_to_insert.append((
-                    adj_id,
-                    season_id,
-                    adj["order_ref"],
-                    adj["order_date"],
-                    adj["tarif_name"],
-                    adj["amount"],
-                    adj["status"],
-                    adj["is_modified"] or "Non",
-                    adj["commentaires_correctif"] or "",
-                    adj["email_sent_date"]
-                ))
-                
-            if links_to_insert:
-                cursor.executemany("""
-                    INSERT OR REPLACE INTO adherents_seasons (
-                        adherent_id, season_id, order_ref, order_date, tarif_name, amount, status, is_modified, commentaires_correctif, email_sent_date
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, links_to_insert)
-                print(f"📦 [SQLITE] Initialisation multi-saisons : {len(links_to_insert)} adhérents rattachés à la saison 2026-2027.")
-                
-        # Initialisation automatique de la saison historique 2025-2026 (Nouveau !)
-        import sys
-        if "test" not in cls.get_db_path().lower() and "unittest" not in sys.modules:
-            cursor.execute("SELECT id FROM seasons WHERE name = '2025-2026'")
-            row_s25 = cursor.fetchone()
-            if row_s25:
-                season_25_id = row_s25["id"]
-                cursor.execute("SELECT COUNT(*) FROM adherents_seasons WHERE season_id = ?", (season_25_id,))
-                cnt_25 = cursor.fetchone()[0]
-                if cnt_25 == 0:
-                    hist_excel_path = os.path.join(ROOT_DIR, "import", "ffme", "Export_Licencies_david_lopez_50_2026-08-28-15-30-00 Saison 2025-2026.xlsx")
-                    if not os.path.exists(hist_excel_path):
-                        hist_excel_path = os.path.join(CODE_ROOT, "import", "ffme", "Export_Licencies_david_lopez_50_2026-08-28-15-30-00 Saison 2025-2026.xlsx")
-                    
-                    if os.path.exists(hist_excel_path):
-                        print(f"🚀 [SQLITE] Initialisation automatique de la saison 2025-2026 depuis {os.path.basename(hist_excel_path)}...")
-                        # Valider la transaction en cours, fermer pour l'importateur, puis réouvrir
-                        conn.commit()
-                        conn.close()
-                        cls.import_old_season_ffme(hist_excel_path, "2025-2026")
-                        conn = cls.get_connection()
-                        cursor = conn.cursor()
         
         # Création de la table de cache géocodage
         cursor.execute("""
@@ -238,15 +146,6 @@ class SqliteRepository:
             cursor.execute("ALTER TABLE planning ADD COLUMN helloasso_tarifs TEXT DEFAULT '[]'")
             conn.commit()
         
-        # S'assurer de la présence des colonnes d'autorisations parentales pour les BDD existantes (migration auto via PRAGMA) (Nouveau !)
-        cursor.execute("PRAGMA table_info(adherents)")
-        existing_cols = [row["name"] for row in cursor.fetchall()]
-        for col_name in ("parental_auth_autonomous", "parental_auth_family"):
-            if col_name not in existing_cols:
-                print(f"🔧 [SQLITE] Ajout de la colonne '{col_name}' à la table adherents...")
-                cursor.execute(f'ALTER TABLE adherents ADD COLUMN "{col_name}" TEXT DEFAULT "Non"')
-                conn.commit()
-
         # Création de la table de templates d'email (Nouveau !)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS email_templates (
@@ -272,16 +171,28 @@ class SqliteRepository:
             """, default_templates)
             conn.commit()
         
-        # Phase 0/2 — Gestion de la version du schéma (PRAGMA user_version)
+        # Phase 0/5 — Gestion de la version du schéma (PRAGMA user_version)
         cursor.execute("PRAGMA user_version")
         current_version = cursor.fetchone()[0]
+        if current_version == 1:
+            # Ancienne base legacy (v1) : auto-migration vers v2 au démarrage.
+            # Le drapeau est posé avant l'appel pour éviter toute récursion (migrate
+            # appelle setup_database lui-même).
+            cls._database_setup_done = True
+            conn.commit()
+            conn.close()
+            print("🔁 [SQLITE] Base legacy (v1) détectée : lancement de la migration v2...")
+            import migrate_schema_v2
+            migrate_schema_v2.migrate(skip_excel=False)
+            if cls._startup_db_hash is None:
+                cls._startup_db_hash = cls.get_file_hash()
+            return
         if current_version == 0:
-            cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            print(f"🔖 [SQLITE] Schéma tagué en version {SCHEMA_VERSION} (legacy).")
-        elif current_version >= 2:
-            # Base migrée vers le schéma cible : s'assurer que la vue de compatibilité existe
-            schema_v2.recreate_compat_view(cursor)
-            print("🔗 [SQLITE] Vue de compatibilité v_adherents_legacy vérifiée.")
+            cursor.execute(f"PRAGMA user_version = {schema_v2.SCHEMA_TARGET_VERSION}")
+            print(f"🔖 [SQLITE] Base neuve taguée en version {schema_v2.SCHEMA_TARGET_VERSION} (schéma v2 natif).")
+        # Vue de compatibilité : recréée à chaque démarrage pour suivre la définition du code
+        schema_v2.recreate_compat_view(cursor)
+        print("🔗 [SQLITE] Vue de compatibilité v_adherents_legacy vérifiée.")
 
         conn.commit()
         conn.close()
@@ -445,7 +356,8 @@ class SqliteRepository:
     @classmethod
     def load_direct_data(cls, season_filter: str = "2026-2027") -> list:
         """
-        Charge les données d'adhérents depuis SQLite pour une saison spécifique ou un filtre comparatif.
+        Charge les données d'adhérents depuis la vue de compatibilité (schéma v2)
+        pour une saison spécifique ou un filtre comparatif.
         """
         # Résolution pour la rétrocompatibilité (si un chemin de fichier Excel .xlsx est passé)
         if isinstance(season_filter, str) and (season_filter.endswith(".xlsx") or "\\" in season_filter or "/" in season_filter):
@@ -453,108 +365,10 @@ class SqliteRepository:
 
         cls.setup_database()
         conn = cls.get_connection()
-        cursor = conn.cursor()
-
-        # Phase 2 — Si la base est migrée (user_version >= 2), lire via la vue de compatibilité
         try:
-            current_version = cursor.execute("PRAGMA user_version").fetchone()[0]
-        except Exception:
-            current_version = 0
-        if current_version >= 2:
-            try:
-                return cls._load_data_from_compat_view(conn, season_filter)
-            except Exception as e:
-                print(f"❌ [SQLITE] Erreur lors du chargement via la vue de compatibilité : {e}")
-                return []
-            finally:
-                conn.close()
-
-        # Liste de toutes les colonnes personnelles de l'adhérent dans la table 'adherents' (Sans colonnes saisonnières !)
-        personal_fields = [
-            "id", "user_lastName", "user_firstName", "champ_Sexe", "champ_Nationalité",
-            "champ_Date de naissance de l'adhérent", "champ_Adresse : numéro et nom de rue",
-            "champ_Code postal", "champ_Ville", "champ_Pays", "champ_Téléphone ",
-            "champ_Adresse mail pour la réception des informations du club",
-            "champ_Deuxième adresse mail pour la réception des informations du club",
-            "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-            "champ_Personne à prévenir en cas d'urgence - Téléphone",
-            "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
-            "champ_Parent 2 - Numéro de téléphone portable",
-            "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
-            "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
-            "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
-            "champ_Numéro de Licence FFME (6 chiffres)", "opt_Assurance Base", "opt_Montant Assurance Base",
-            "opt_Assurance Base +", "opt_Montant Assurance Base +", "opt_Assurance Base ++", "opt_Montant Assurance Base ++",
-            "opt_Assurance Option ski de piste", "opt_Montant Assurance Option ski de piste",
-            "opt_Assurance Option VTT", "opt_Montant Assurance Option VTT", "opt_Assurance Option Trail",
-            "opt_Montant Assurance Option Trail", "badge_rouge", "autonomie_bloc", "raw_passports", "raw_diplomas",
-            "parental_auth_autonomous", "parental_auth_family",
-            # Phase 4 — champs payeur exposés dans les deux chemins de lecture
-            "payer_lastName", "payer_firstName", "payer_email",
-        ]
-        
-        select_fields = ", ".join([f'a."{f}"' for f in personal_fields])
-
-        try:
-            # Si le filtre est "Tous" ou "Toutes les saisons"
-            if season_filter in ("Tous", "Toutes les saisons", "Toutes les saisons confondues"):
-                cursor.execute(f"""
-                    SELECT {select_fields}, s.name as season_name,
-                           las.order_ref, las.order_date, las.tarif_name, las.amount, las.status,
-                           las.is_modified, las.commentaires_correctif, las.email_sent_date,
-                           (SELECT COUNT(*) FROM adherents_seasons las2 WHERE las2.adherent_id = a.id AND las2.season_id != las.season_id) as already_member
-                    FROM adherents a
-                    JOIN adherents_seasons las ON a.id = las.adherent_id
-                    JOIN seasons s ON las.season_id = s.id
-                    ORDER BY a.id DESC
-                """)
-
-            # Si c'est le filtre spécial : Présents en 2025-2026 mais non réinscrits en 2026-2027
-            elif season_filter in ("Non réinscrits", "Anciens (25-26) non réinscrits en 26-27", "Anciens non réinscrits (Présents en 25/26 mais pas en 26/27)"):
-                cursor.execute(f"""
-                    SELECT {select_fields}, '2025-2026' as season_name,
-                           las.order_ref, las.order_date, las.tarif_name, las.amount, las.status,
-                           las.is_modified, las.commentaires_correctif, las.email_sent_date,
-                           (SELECT COUNT(*) FROM adherents_seasons las2 WHERE las2.adherent_id = a.id AND las2.season_id != las.season_id) as already_member
-                    FROM adherents a
-                    JOIN adherents_seasons las ON a.id = las.adherent_id
-                    JOIN seasons s ON las.season_id = s.id
-                    WHERE s.name = '2025-2026'
-                      AND a.id NOT IN (
-                          SELECT las2.adherent_id 
-                          FROM adherents_seasons las2 
-                          JOIN seasons s2 ON las2.season_id = s2.id 
-                          WHERE s2.name = '2026-2027'
-                      )
-                    ORDER BY a.id DESC
-                """)
-
-            # Sinon, filtre classique sur une saison spécifique (ex: "2026-2027", "2025-2026")
-            else:
-                cursor.execute(f"""
-                    SELECT {select_fields}, s.name as season_name,
-                           las.order_ref, las.order_date, las.tarif_name, las.amount, las.status,
-                           las.is_modified, las.commentaires_correctif, las.email_sent_date,
-                           (SELECT COUNT(*) FROM adherents_seasons las2 WHERE las2.adherent_id = a.id AND las2.season_id != las.season_id) as already_member
-                    FROM adherents a
-                    JOIN adherents_seasons las ON a.id = las.adherent_id
-                    JOIN seasons s ON las.season_id = s.id
-                    WHERE s.name = ?
-                    ORDER BY a.id DESC
-                """, (season_filter,))
-
-            rows = cursor.fetchall()
-            participants_data = []
-            for row in rows:
-                row_dict = dict(row)
-                # Supprimer le champ d'identifiant interne
-                if "id" in row_dict:
-                    row_dict.pop("id")
-                participants_data.append(row_dict)
-            return participants_data
-
+            return cls._load_data_from_compat_view(conn, season_filter)
         except Exception as e:
-            print(f"❌ [SQLITE] Erreur lors du chargement des données multi-saisons : {e}")
+            print(f"❌ [SQLITE] Erreur lors du chargement des données : {e}")
             return []
         finally:
             conn.close()
@@ -630,228 +444,22 @@ class SqliteRepository:
 
     @classmethod
     def upsert_members(cls, members: list, season_name: str = "2026-2027") -> int:
-        """Insère ou met à jour un lot d'adhérents dans SQLite (compatible multi-saisons)."""
+        """
+        Phase 5 - Insere ou met a jour un lot d'adherents dans le schema v2
+        (users / orders / purchases / purchase_options).
+        """
         cls.setup_database()
         conn = cls.get_connection()
-        cursor = conn.cursor()
-
-        # Obtenir l'ID de la saison choisie
-        cursor.execute("SELECT id FROM seasons WHERE name = ?", (season_name,))
-        row_s = cursor.fetchone()
-        if not row_s:
-            cursor.execute("INSERT INTO seasons (name, is_active) VALUES (?, 0)", (season_name,))
-            season_id = cursor.lastrowid
-        else:
-            season_id = row_s["id"]
-
         inserted_count = 0
         try:
-            # Phase 3 — Écriture miroir dans le schéma cible v2 (même transaction que le
-            # flux legacy : toute erreur annule les deux). Écrit enfin les payeurs
-            # (payer_*) absents de l'ancien flux et les options dans purchase_options.
-            v2_stats = schema_v2.sync_members_to_v2(cursor, members, season_name)
-            print(f"🔄 [SQLITE] Miroir v2 : {v2_stats}")
-
-            for m in members:
-                # Étape 1 : Rapprochement ou insertion dans la table adherents par Nom et Prénom
-                last_name_raw = str(m.get("user_lastName", "")).strip()
-                first_name_raw = str(m.get("user_firstName", "")).strip()
-
-                cursor.execute("""
-                    SELECT id FROM adherents 
-                    WHERE TRIM(UPPER(user_lastName)) = ? AND TRIM(LOWER(user_firstName)) = ?
-                """, (last_name_raw.upper(), first_name_raw.lower()))
-
-                exist_row = cursor.fetchone()
-                if exist_row:
-                    adherent_id = exist_row["id"]
-                    # Mettre à jour les informations personnelles de l'adhérent
-                    cursor.execute("""
-                        UPDATE adherents
-                        SET "champ_Téléphone " = ?,
-                            "champ_Adresse mail pour la réception des informations du club" = ?,
-                            "champ_Deuxième adresse mail pour la réception des informations du club" = ?,
-                            "champ_Adresse : numéro et nom de rue" = ?,
-                            "champ_Code postal" = ?,
-                            "champ_Ville" = ?,
-                            "champ_Pays" = ?,
-                            "champ_Date de naissance de l'adhérent" = ?,
-                            "champ_Sexe" = ?,
-                            "champ_Nationalité" = ?,
-                            "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule" = ?,
-                            "champ_Personne à prévenir en cas d'urgence - Téléphone" = ?,
-                            "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)" = ?,
-                            "champ_Parent 2 - Numéro de téléphone portable" = ?,
-                            "payer_lastName" = ?,
-                            "payer_firstName" = ?,
-                            "payer_email" = ?,
-                            "opt_Assurance Base" = ?,
-                            "opt_Montant Assurance Base" = ?,
-                            "opt_Assurance Base +" = ?,
-                            "opt_Montant Assurance Base +" = ?,
-                            "opt_Assurance Base ++" = ?,
-                            "opt_Montant Assurance Base ++" = ?,
-                            "opt_Assurance Option ski de piste" = ?,
-                            "opt_Montant Assurance Option ski de piste" = ?,
-                            "opt_Assurance Option VTT" = ?,
-                            "opt_Montant Assurance Option VTT" = ?,
-                            "opt_Assurance Option Trail" = ?,
-                            "opt_Montant Assurance Option Trail" = ?,
-                            "champ_Numéro de Licence FFME (6 chiffres)" = COALESCE(NULLIF(?, ''), "champ_Numéro de Licence FFME (6 chiffres)")
-                        WHERE id = ?
-                    """, (
-                        m.get("champ_Téléphone ", ""),
-                        m.get("champ_Adresse mail pour la réception des informations du club", ""),
-                        m.get("champ_Deuxième adresse mail pour la réception des informations du club", ""),
-                        m.get("champ_Adresse : numéro et nom de rue", ""),
-                        m.get("champ_Code postal", ""),
-                        m.get("champ_Ville", ""),
-                        m.get("champ_Pays", ""),
-                        m.get("champ_Date de naissance de l'adhérent", ""),
-                        m.get("champ_Sexe", ""),
-                        m.get("champ_Nationalité", ""),
-                        m.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule", ""),
-                        m.get("champ_Personne à prévenir en cas d'urgence - Téléphone", ""),
-                        m.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", ""),
-                        m.get("champ_Parent 2 - Numéro de téléphone portable", ""),
-                        m.get("payer_lastName", ""),
-                        m.get("payer_firstName", ""),
-                        m.get("payer_email", ""),
-                        m.get("opt_Assurance Base", "Non"),
-                        m.get("opt_Montant Assurance Base", 0.0),
-                        m.get("opt_Assurance Base +", "Non"),
-                        m.get("opt_Montant Assurance Base +", 0.0),
-                        m.get("opt_Assurance Base ++", "Non"),
-                        m.get("opt_Montant Assurance Base ++", 0.0),
-                        m.get("opt_Assurance Option ski de piste", "Non"),
-                        m.get("opt_Montant Assurance Option ski de piste", 0.0),
-                        m.get("opt_Assurance Option VTT", "Non"),
-                        m.get("opt_Montant Assurance Option VTT", 0.0),
-                        m.get("opt_Assurance Option Trail", "Non"),
-                        m.get("opt_Montant Assurance Option Trail", 0.0),
-                        m.get("champ_Numéro de Licence FFME (6 chiffres)", ""),
-                        adherent_id
-                    ))
-                else:
-                    # Insérer un nouvel adhérent dans la table
-                    cursor.execute("""
-                        INSERT INTO adherents (
-                            user_lastName, user_firstName, "champ_Téléphone ",
-                            "champ_Adresse mail pour la réception des informations du club",
-                            "champ_Deuxième adresse mail pour la réception des informations du club",
-                            "champ_Adresse : numéro et nom de rue", "champ_Code postal", "champ_Ville", "champ_Pays",
-                            "champ_Date de naissance de l'adhérent", "champ_Sexe", "champ_Nationalité",
-                            "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-                            "champ_Personne à prévenir en cas d'urgence - Téléphone",
-                            "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
-                            "champ_Parent 2 - Numéro de téléphone portable",
-                            "payer_lastName", "payer_firstName", "payer_email",
-                            "opt_Assurance Base", "opt_Montant Assurance Base",
-                            "opt_Assurance Base +", "opt_Montant Assurance Base +",
-                            "opt_Assurance Base ++", "opt_Montant Assurance Base ++",
-                            "opt_Assurance Option ski de piste", "opt_Montant Assurance Option ski de piste",
-                            "opt_Assurance Option VTT", "opt_Montant Assurance Option VTT",
-                            "opt_Assurance Option Trail", "opt_Montant Assurance Option Trail",
-                            "champ_Numéro de Licence FFME (6 chiffres)",
-                            badge_rouge, autonomie_bloc, raw_passports, raw_diplomas
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Non', 'Non', '', '')
-                    """, (
-                        last_name_raw, first_name_raw,
-                        m.get("champ_Téléphone ", ""),
-                        m.get("champ_Adresse mail pour la réception des informations du club", ""),
-                        m.get("champ_Deuxième adresse mail pour la réception des informations du club", ""),
-                        m.get("champ_Adresse : numéro et nom de rue", ""),
-                        m.get("champ_Code postal", ""),
-                        m.get("champ_Ville", ""),
-                        m.get("champ_Pays", ""),
-                        m.get("champ_Date de naissance de l'adhérent", ""),
-                        m.get("champ_Sexe", ""),
-                        m.get("champ_Nationalité", ""),
-                        m.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule", ""),
-                        m.get("champ_Personne à prévenir en cas d'urgence - Téléphone", ""),
-                        m.get("champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)", ""),
-                        m.get("champ_Parent 2 - Numéro de téléphone portable", ""),
-                        m.get("payer_lastName", ""),
-                        m.get("payer_firstName", ""),
-                        m.get("payer_email", ""),
-                        m.get("opt_Assurance Base", "Non"),
-                        m.get("opt_Montant Assurance Base", 0.0),
-                        m.get("opt_Assurance Base +", "Non"),
-                        m.get("opt_Montant Assurance Base +", 0.0),
-                        m.get("opt_Assurance Base ++", "Non"),
-                        m.get("opt_Montant Assurance Base ++", 0.0),
-                        m.get("opt_Assurance Option ski de piste", "Non"),
-                        m.get("opt_Montant Assurance Option ski de piste", 0.0),
-                        m.get("opt_Assurance Option VTT", "Non"),
-                        m.get("opt_Montant Assurance Option VTT", 0.0),
-                        m.get("opt_Assurance Option Trail", "Non"),
-                        m.get("opt_Montant Assurance Option Trail", 0.0),
-                        m.get("champ_Numéro de Licence FFME (6 chiffres)", "")
-                    ))
-                    adherent_id = cursor.lastrowid
-
-                # Étape 2 : Insérer ou remplacer le lien de saison dans adherents_seasons (par ordre de priorité)
-                # Traitement de l'amount (REAL/Float)
-                amt = m.get("amount", 0.0)
-                try:
-                    amt_val = float(amt) if amt else 0.0
-                except ValueError:
-                    amt_val = 0.0
-
-                new_status = str(m.get("status", "Validé")).strip()
-                
-                # Vérifier s'il y a déjà une inscription pour cette saison
-                cursor.execute("""
-                    SELECT order_ref, status, tarif_name, amount FROM adherents_seasons 
-                    WHERE adherent_id = ? AND season_id = ?
-                """, (adherent_id, season_id))
-                exist_reg = cursor.fetchone()
-                
-                should_write = True
-                if exist_reg:
-                    exist_status = str(exist_reg["status"] or "").strip().lower()
-                    new_status_lower = new_status.lower()
-
-                    # Phase 3 — table de priorité des statuts centralisée (infrastructure.schema_v2)
-                    get_score = schema_v2.purchase_priority_score
-
-                    # Récupérer l'ancien montant existant pour un score précis
-                    exist_tarif = str(exist_reg["tarif_name"] or "").strip()
-                    exist_amt = float(exist_reg["amount"]) if exist_reg["amount"] else 0.0
-
-                    exist_prio = get_score(exist_status, exist_tarif, exist_amt)
-                    new_prio = get_score(new_status_lower, m.get("tarif_name", ""), amt_val)
-                    
-                    # Si l'existant est plus prioritaire (ex: Processed réel vs Validé liste d'attente), on ne l'écrase pas
-                    if exist_prio > new_prio:
-                        should_write = False
-                        print(f"🛡️ [SYNC] Inscription existante plus active conservée pour l'ID {adherent_id} (Saison {season_id}) : "
-                              f"Existant: {exist_reg['order_ref']} ({exist_reg['status']} / {exist_tarif}) - "
-                              f"Nouveau ignoré: {m.get('order_ref')} ({new_status} / {m.get('tarif_name')})")
-                
-                if should_write:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO adherents_seasons (
-                            adherent_id, season_id, order_ref, order_date, tarif_name, amount, status, is_modified, commentaires_correctif, email_sent_date
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        adherent_id,
-                        season_id,
-                        m.get("order_ref", ""),
-                        m.get("order_date", ""),
-                        m.get("tarif_name", ""),
-                        amt_val,
-                        new_status,
-                        m.get("is_modified", "Non"),
-                        m.get("commentaires_correctif", ""),
-                        m.get("email_sent_date", None)
-                    ))
-                    inserted_count += 1
-
+            cursor = conn.cursor()
+            stats = schema_v2.sync_members_to_v2(cursor, members, season_name)
+            inserted_count = stats["purchases"]
             conn.commit()
-            print(f"💾 [SQLITE] Synchro réussie : {inserted_count} adhésions enregistrées/mises à jour pour la saison {season_name}.")
+            print(f"[SQLITE] Synchro reussie : {inserted_count} adhesions enregistrees/mises a jour "
+                  f"pour la saison {season_name}. (v2: {stats})")
         except Exception as e:
-            print(f"❌ [SQLITE] Erreur lors de l'upsert des adhérents multi-saisons : {e}")
+            print(f"[SQLITE] Erreur lors de l'upsert des adherents : {e}")
             conn.rollback()
         finally:
             conn.close()
@@ -860,524 +468,321 @@ class SqliteRepository:
     @classmethod
     def update_member_in_db(cls, original_order_ref: str, original_last_name: str, original_first_name: str, updated_fields: dict, comment_text: str):
         """
-        Met à jour de manière chirurgicale un adhérent dans la base SQLite (compatible multi-saisons).
+        Phase 5 - Met a jour un adherent dans le schema v2 :
+        champs personnels -> users, champs de saison -> purchases (avec options).
         """
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
-
-        # 1. Trouver l'ID de l'adhérent lié à cette référence de commande en gérant les familles en Python (pour contourner UPPER/LOWER d'accent sous SQLite)
-        cursor.execute("""
-            SELECT las.adherent_id, a.user_lastName, a.user_firstName
-            FROM adherents_seasons las
-            JOIN adherents a ON las.adherent_id = a.id
-            WHERE las.order_ref = ?
-        """, (original_order_ref.strip(),))
-        rows = cursor.fetchall()
-        
-        adherent_id = None
-        if rows:
-            from domain.utils import normalize_name
-            target_last = normalize_name(original_last_name)
-            target_first = normalize_name(original_first_name)
-            for r in rows:
-                r_last = normalize_name(r["user_lastName"])
-                r_first = normalize_name(r["user_firstName"])
-                if r_last == target_last and r_first == target_first:
-                    adherent_id = r["adherent_id"]
-                    break
-                    
-            if not adherent_id:
-                # Si aucun ne correspond exactement par nom/prénom normalisé (ex: faute de frappe), on prend le premier de la famille
-                adherent_id = rows[0]["adherent_id"]
-        else:
-            # Fallback s'il s'agit d'une ancienne base sans liaison : recherche en Python sur toute la base
-            cursor.execute("SELECT id, user_lastName, user_firstName FROM adherents")
-            all_adh = cursor.fetchall()
-            from domain.utils import normalize_name
-            target_last = normalize_name(original_last_name)
-            target_first = normalize_name(original_first_name)
-            for a in all_adh:
-                a_last = normalize_name(a["user_lastName"])
-                a_first = normalize_name(a["user_firstName"])
-                if a_last == target_last and a_first == target_first:
-                    adherent_id = a["id"]
-                    break
-            
-            if not adherent_id:
-                conn.close()
-                return False, f"Aucun adhérent correspondant trouvé pour {original_last_name} {original_first_name}."
-
-        # 2. Dictionnaire liant les clés de l'IHM aux colonnes SQLite de la table 'adherents' (Données personnelles)
-        personal_fields = {
-            "user_last_name": "user_lastName",
-            "user_first_name": "user_firstName",
-            "birth_date": "champ_Date de naissance de l'adhérent",
-            "primary_email": "champ_Adresse mail pour la réception des informations du club",
-            "secondary_email": "champ_Deuxième adresse mail pour la réception des informations du club",
-            "phone": "champ_Téléphone ",
-            "city": "champ_Ville",
-            "emergency_contact_name_1": "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
-            "emergency_contact_phone_1": "champ_Personne à prévenir en cas d'urgence - Téléphone",
-            "licence_ffme": "champ_Numéro de Licence FFME (6 chiffres)",
-            "opt_assurance_base": "opt_Assurance Base",
-            "opt_assurance_base_plus": "opt_Assurance Base +",
-            "opt_assurance_base_plus_plus": "opt_Assurance Base ++",
-            "opt_assurance_ski": "opt_Assurance Option ski de piste",
-            "opt_assurance_vtt": "opt_Assurance Option VTT",
-            "opt_assurance_trail": "opt_Assurance Option Trail",
-            "photo_auth": "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
-            "health_q_auth": "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
-            "badge_rouge": "badge_rouge",
-            "autonomie_bloc": "autonomie_bloc",
-            "raw_passports": "raw_passports",
-            "raw_diplomas": "raw_diplomas",
-            "parental_auth_autonomous": "parental_auth_autonomous",
-            "parental_auth_family": "parental_auth_family"
-        }
-
-        # 3. Mettre à jour la table 'adherents' (Informations personnelles)
-        personal_sets = []
-        personal_params = []
-        for field, col_name in personal_fields.items():
-            if field in updated_fields:
-                personal_sets.append(f'"{col_name}" = ?')
-                personal_params.append(updated_fields[field])
-                
-        if personal_sets:
-            personal_sql = f'UPDATE adherents SET {", ".join(personal_sets)} WHERE id = ?'
-            personal_params.append(adherent_id)
-            try:
-                cursor.execute(personal_sql, personal_params)
-            except Exception as e:
-                print(f"❌ [SQLITE] Erreur lors de la mise à jour des données personnelles : {e}")
-                conn.rollback()
-                conn.close()
-                return False, str(e)
-
-        # 4. Mettre à jour la table 'adherents_seasons' (Données spécifiques de saison)
-        season_sets = []
-        season_params = []
-        
-        # Statut de la commande
-        if "status" in updated_fields:
-            season_sets.append('"status" = ?')
-            season_params.append(updated_fields["status"])
-            
-        # Indicateurs d'édition et commentaires
-        season_sets.append('"is_modified" = ?')
-        season_params.append("Oui")
-        season_sets.append('"commentaires_correctif" = ?')
-        season_params.append(comment_text)
-
-        # Clause WHERE pour mettre à jour la liaison exacte
-        season_sets_sql = ", ".join(season_sets)
-        season_sql = f'UPDATE adherents_seasons SET {season_sets_sql} WHERE adherent_id = ? AND order_ref = ?'
-        season_params.extend([adherent_id, original_order_ref.strip()])
-
         try:
-            cursor.execute(season_sql, season_params)
-            # Phase 3 — miroir des correctifs manuels dans le schéma v2 (même transaction)
-            schema_v2.mirror_member_update(cursor, adherent_id, original_order_ref,
-                                           original_last_name, original_first_name,
-                                           updated_fields, comment_text)
+            from domain.utils import normalize_name
+            cursor.execute("""
+                SELECT p.user_id FROM purchases p
+                JOIN orders o ON o.id = p.order_id
+                WHERE o.order_ref = ?
+            """, (original_order_ref.strip(),))
+            rows = cursor.fetchall()
+            user_id = None
+            if rows:
+                t_last = normalize_name(original_last_name)
+                t_first = normalize_name(original_first_name)
+                for r in rows:
+                    u = cursor.execute("SELECT last_name, first_name FROM users WHERE id=?", (r["user_id"],)).fetchone()
+                    if u and normalize_name(u["last_name"]) == t_last and normalize_name(u["first_name"]) == t_first:
+                        user_id = r["user_id"]
+                        break
+                if user_id is None:
+                    # Fallback famille : premier utilisateur de la commande
+                    user_id = rows[0]["user_id"]
+            if user_id is None:
+                conn.close()
+                return False, f"Aucun adherent correspondant trouve pour {original_last_name} {original_first_name}."
+            schema_v2.apply_member_update(cursor, user_id, original_order_ref, updated_fields, comment_text)
             conn.commit()
-            print(f"📝 [SQLITE] Adhérent {original_last_name} {original_first_name} mis à jour avec succès (multi-saisons).")
+            print(f"[SQLITE] Adherent {original_last_name} {original_first_name} mis a jour avec succes (v2).")
             return True, ""
         except Exception as e:
-            print(f"❌ [SQLITE] Erreur lors de l'adresse de liaison de la saison de l'adhérent : {e}")
+            print(f"[SQLITE] Erreur lors de la mise a jour de l'adherent : {e}")
             conn.rollback()
             return False, str(e)
         finally:
             conn.close()
-
     @classmethod
     def update_email_sent_date(cls, order_ref: str, last_name: str, first_name: str, date_str: str) -> bool:
-        """Met à jour de manière chirurgicale la date d'envoi de l'e-mail d'un adhérent (dans sa liaison de saison)."""
+        """Phase 5 - Met a jour la date d'envoi d'e-mail sur les achats v2 de la commande."""
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
+            from domain.utils import normalize_name
             cursor.execute("""
-                UPDATE adherents_seasons
+                UPDATE purchases
                 SET email_sent_date = ?
-                WHERE order_ref = ? AND adherent_id = (
-                    SELECT id FROM adherents 
-                    WHERE TRIM(UPPER(user_lastName)) = ? AND TRIM(LOWER(user_firstName)) = ?
-                )
-            """, (date_str, order_ref.strip(), last_name.strip().upper(), first_name.strip().lower()))
+                WHERE order_id IN (SELECT id FROM orders WHERE order_ref = ?)
+                  AND user_id IN (
+                      SELECT id FROM users
+                      WHERE UPPER(TRIM(last_name)) = ? AND LOWER(TRIM(first_name)) = ?
+                  )
+            """, (date_str, order_ref.strip(),
+                  str(last_name or "").strip().upper(), str(first_name or "").strip().lower()))
             rows_affected = cursor.rowcount
             if rows_affected == 0:
-                # Fallback si le nom a été modifié localement ou ne matche pas
                 cursor.execute("""
-                    UPDATE adherents_seasons
+                    UPDATE purchases
                     SET email_sent_date = ?
-                    WHERE order_ref = ?
+                    WHERE order_id IN (SELECT id FROM orders WHERE order_ref = ?)
                 """, (date_str, order_ref.strip()))
                 rows_affected = cursor.rowcount
-
-            # Phase 3 — miroir v2 sur les achats de la commande
-            schema_v2.mirror_email_sent_date(cursor, order_ref, date_str)
-
             conn.commit()
             if rows_affected > 0:
-                print(f"📝 [SQLITE] Date d'envoi d'e-mail enregistrée dans la liaison de saison pour la commande {order_ref} : {date_str}")
+                print(f"[SQLITE] Date d'envoi d'e-mail enregistree pour la commande {order_ref} : {date_str}")
                 return True
-            else:
-                print(f"⚠️ [SQLITE] Aucun enregistrement de saison trouvé pour la commande {order_ref}")
-                return False
+            print(f"[SQLITE] Aucun achat trouve pour la commande {order_ref}")
+            return False
         except Exception as e:
-            print(f"❌ [SQLITE] Erreur lors de la mise à jour de la date d'envoi d'e-mail : {e}")
+            print(f"[SQLITE] Erreur lors de la mise a jour de la date d'envoi d'e-mail : {e}")
             conn.rollback()
             return False
         finally:
             conn.close()
-
     @classmethod
     def merge_ffme_licensees(cls, excel_path: str) -> dict:
         """
-        Importe la liste des licenciés FFME depuis un fichier Excel et fusionne avec les adhérents SQLite.
+        Phase 5 - Importe la liste des licencies FFME depuis un fichier Excel et la
+        fusionne avec les utilisateurs du schema v2 (licence, passeports, statut).
         """
         cls.create_db_backup()
         import pandas as pd
         from domain.utils import normalize_name
-        
-        stats = {
-            "total_processed": 0,
-            "matched_by_licence": 0,
-            "matched_by_name": 0,
-            "not_found": 0,
-            "errors": []
-        }
-        
+
+        stats = {"total_processed": 0, "matched_by_licence": 0, "matched_by_name": 0,
+                 "not_found": 0, "errors": []}
+
         if not os.path.exists(excel_path):
             stats["errors"].append(f"Fichier introuvable : {excel_path}")
             return stats
-            
         try:
             df = pd.read_excel(excel_path)
         except Exception as e:
             stats["errors"].append(f"Erreur de lecture Excel : {e}")
             return stats
-            
-        required_cols = ["Nom", "Prénom", "N° de licence"]
+
+        required_cols = ["Nom", "Pr\u00e9nom", "N\u00b0 de licence"]
         for col in required_cols:
             if col not in df.columns:
                 stats["errors"].append(f"Colonne requise manquante dans le fichier Excel : {col}")
                 return stats
-                
-        # Charger tous les adhérents existants pour la comparaison par nom
+
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
-        
         try:
-            # Charger les adhérents
-            cursor.execute("SELECT id, user_lastName, user_firstName, status, \"champ_Numéro de Licence FFME (6 chiffres)\" FROM adherents")
-            adherents = [dict(row) for row in cursor.fetchall()]
-            
-            # Préparer les adhérents indexés par licence et par nom normalisé pour un traitement rapide
-            adherents_by_licence = {}
-            adherents_by_name = {}
-            
-            for adj in adherents:
-                lic = str(adj["champ_Numéro de Licence FFME (6 chiffres)"] or "").strip()
-                if lic:
-                    adherents_by_licence[lic] = adj
-                
-                # Indexer par nom et prénom normalisés
-                norm_last = normalize_name(adj["user_lastName"])
-                norm_first = normalize_name(adj["user_firstName"])
-                if norm_last and norm_first:
-                    adherents_by_name[(norm_last, norm_first)] = adj
-            
-            updates = [] # Liste de tuples (status, licence, id)
-            
+            cursor.execute("SELECT id, last_name, first_name, licence_ffme, raw_passports FROM users")
+            users = [dict(row) for row in cursor.fetchall()]
+
+            users_by_licence = {}
+            users_by_name = {}
+            for u in users:
+                lic = str(u["licence_ffme"] or "").strip()
+                if lic.endswith(".0"):
+                    lic = lic[:-2]
+                clean_lic = "".join(c for c in lic if c.isdigit())
+                if clean_lic:
+                    users_by_licence[clean_lic] = u
+                nk = normalize_name(u["last_name"])
+                fk = normalize_name(u["first_name"])
+                if nk and fk:
+                    users_by_name[(nk, fk)] = u
+
+            updates = []  # (status, licence, passports, diplomas, user_id)
             for idx, row in df.iterrows():
                 stats["total_processed"] += 1
-                
-                raw_lic = row["N° de licence"]
+                raw_lic = row["N\u00b0 de licence"]
                 if pd.isna(raw_lic):
                     lic_str = ""
+                elif isinstance(raw_lic, float):
+                    lic_str = str(int(raw_lic)).strip()
                 else:
-                    # Traiter si float (ex: 123456.0)
-                    if isinstance(raw_lic, float):
-                        lic_str = str(int(raw_lic)).strip()
-                    else:
-                        lic_str = str(raw_lic).strip()
-                        
+                    lic_str = str(raw_lic).strip()
                 nom = str(row["Nom"] or "").strip()
-                prenom = str(row["Prénom"] or "").strip()
-                
-                matched_adj = None
-                match_type = None
-                
-                # 1. Essayer de faire correspondre par numéro de licence
-                if lic_str and lic_str in adherents_by_licence:
-                    matched_adj = adherents_by_licence[lic_str]
+                prenom = str(row["Pr\u00e9nom"] or "").strip()
+
+                matched = None
+                if lic_str and lic_str in users_by_licence:
+                    matched = users_by_licence[lic_str]
                     match_type = "licence"
-                
-                # 2. Sinon, essayer de faire correspondre par Nom, Prénom
-                if not matched_adj and nom and prenom:
-                    norm_nom = normalize_name(nom)
-                    norm_prenom = normalize_name(prenom)
-                    if (norm_nom, norm_prenom) in adherents_by_name:
-                        matched_adj = adherents_by_name[(norm_nom, norm_prenom)]
+                if not matched and nom and prenom:
+                    key = (normalize_name(nom), normalize_name(prenom))
+                    if key in users_by_name:
+                        matched = users_by_name[key]
                         match_type = "name"
-                
-                if matched_adj:
-                    # Enregistrer la mise à jour
-                    target_id = matched_adj["id"]
-                    # On garde la licence existante ou on prend la nouvelle du fichier FFME
-                    final_lic = lic_str if lic_str else matched_adj["champ_Numéro de Licence FFME (6 chiffres)"]
-                    
-                    # Extraire et nettoyer les passeports et diplômes
+                if matched:
+                    final_lic = lic_str if lic_str else str(matched["licence_ffme"] or "")
                     passports_str = str(row.get("Passeports") or "").strip()
                     if passports_str.lower() in ("nan", "none", ""):
                         passports_str = ""
-                    
-                    diplomas_str = str(row.get("Diplômes") or "").strip()
+                    diplomas_str = str(row.get("Dipl\u00f4mes") or "").strip()
                     if diplomas_str.lower() in ("nan", "none", ""):
                         diplomas_str = ""
-                    
-                    updates.append(("Processed", final_lic, passports_str, diplomas_str, target_id))
-                    
+                    updates.append(("Processed", final_lic, passports_str, diplomas_str, matched["id"]))
                     if match_type == "licence":
                         stats["matched_by_licence"] += 1
                     else:
                         stats["matched_by_name"] += 1
                 else:
                     stats["not_found"] += 1
-            
-            # Appliquer les mises à jour en base de données
-            if updates:
-                # 1. Mettre à jour l'identité (licence, passeports, diplômes) dans la table adherents
-                cursor.executemany("""
-                    UPDATE adherents
-                    SET "champ_Numéro de Licence FFME (6 chiffres)" = ?,
-                        raw_passports = ?,
-                        raw_diplomas = ?
-                    WHERE id = ?
-                """, [(u[1], u[2], u[3], u[4]) for u in updates])
-                
-                # 2. Mettre à jour le statut dans la table adherents_seasons (saison active 2026-2027) (Nouveau !)
-                cursor.executemany("""
-                    UPDATE adherents_seasons
-                    SET status = ?
-                    WHERE adherent_id = ? AND season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
-                """, [(u[0], u[4]) for u in updates])
-                
-                # 3. Mettre à jour le statut dans la table adherents pour la rétrocompatibilité (Nouveau !)
-                cursor.executemany("""
-                    UPDATE adherents
-                    SET status = ?
-                    WHERE id = ?
-                """, [(u[0], u[4]) for u in updates])
 
-                # Phase 3 — miroir v2 : identité vers users, statut vers purchases (saison active)
-                schema_v2.ensure_v2_schema(cursor)
+            if updates:
                 cursor.executemany("""
                     UPDATE users
                     SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
-                    WHERE legacy_adherent_id = ?
+                    WHERE id = ?
                 """, [(u[1], u[2], u[3], u[4]) for u in updates])
                 cursor.executemany("""
                     UPDATE purchases
                     SET status = ?, status_normalized = ?
-                    WHERE legacy_adherent_id = ? AND legacy_season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
+                    WHERE user_id = ? AND order_id IN (
+                        SELECT id FROM orders
+                        WHERE season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
+                    )
                 """, [(u[0], schema_v2.normalize_status(u[0]), u[4]) for u in updates])
-
                 conn.commit()
-                
         except Exception as e:
             conn.rollback()
             stats["errors"].append(f"Erreur lors de la fusion en BDD : {e}")
         finally:
             conn.close()
-            
         return stats
-
     @classmethod
     def merge_autonomes_data(cls, excel_path: str) -> dict:
         """
-        Importe la liste d'autonomie (Autonomes_*.xlsx) depuis un fichier Excel et fusionne avec les adhérents SQLite.
+        Phase 5 - Importe la liste d'autonomie (Autonomes_*.xlsx) et la fusionne avec
+        les utilisateurs du schema v2 (badge rouge, autonomie bloc, passeports).
         """
         cls.create_db_backup()
         import pandas as pd
-        
-        stats = {
-            "total_processed": 0,
-            "matched": 0,
-            "not_found": 0,
-            "errors": []
-        }
-        
+        from domain.utils import normalize_name
+
+        stats = {"total_processed": 0, "matched": 0, "not_found": 0, "errors": []}
+
         if not os.path.exists(excel_path):
             stats["errors"].append(f"Fichier introuvable : {excel_path}")
             return stats
-            
         try:
-            # Lire le fichier excel, en sautant la ligne de titre (header=1)
             df = pd.read_excel(excel_path, header=1)
             df = df.fillna("")
         except Exception as e:
             stats["errors"].append(f"Erreur de lecture Excel : {e}")
             return stats
-            
-        required_cols = ["N° de licence", "Badge rouge diff", "Autonomie Bloc"]
+
+        required_cols = ["N\u00b0 de licence", "Badge rouge diff", "Autonomie Bloc"]
         for col in required_cols:
             if col not in df.columns:
                 stats["errors"].append(f"Colonne requise manquante dans le fichier Excel : {col}")
                 return stats
-                
+
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
-        
         try:
-            # Charger les adhérents existants avec leur numéro de licence, nom, prénom et leurs passeports actuels (Nouveau !)
-            cursor.execute("SELECT id, user_lastName, user_firstName, \"champ_Numéro de Licence FFME (6 chiffres)\", raw_passports FROM adherents")
-            adherents = [dict(row) for row in cursor.fetchall()]
-            
-            adherents_by_licence = {}
-            for adj in adherents:
-                lic = str(adj["champ_Numéro de Licence FFME (6 chiffres)"] or "").strip()
-                # Correction du bug de traînées de ".0" dans la base de données (Nouveau !)
+            cursor.execute("SELECT id, last_name, first_name, licence_ffme, raw_passports FROM users")
+            users = [dict(row) for row in cursor.fetchall()]
+
+            users_by_licence = {}
+            for u in users:
+                lic = str(u["licence_ffme"] or "").strip()
                 if lic.endswith(".0"):
                     lic = lic[:-2]
                 clean_lic = "".join(c for c in lic if c.isdigit())
                 if clean_lic:
-                    adherents_by_licence[clean_lic] = adj
-                    
-            # Charger un dictionnaire par Nom/Prénom pour le fallback sémantique (Nouveau !)
-            from domain.utils import normalize_name
-            adherents_by_name = {}
-            for adj in adherents:
-                nom = normalize_name(adj.get("user_lastName", ""))
-                prenom = normalize_name(adj.get("user_firstName", ""))
-                if nom and prenom:
-                    adherents_by_name[(nom, prenom)] = adj
-            
-            updates = [] # Liste de tuples (badge_rouge, autonomie_bloc, raw_passports, id)
+                    users_by_licence[clean_lic] = u
+
+            users_by_name = {}
+            for u in users:
+                nk = normalize_name(u["last_name"])
+                fk = normalize_name(u["first_name"])
+                if nk and fk:
+                    users_by_name[(nk, fk)] = u
+
+            updates = []  # (badge_rouge, autonomie_bloc, raw_passports, user_id)
             file_badge_rouge_count = 0
-            
+
             for idx, row in df.iterrows():
                 stats["total_processed"] += 1
-                
-                raw_lic = str(row.get("N° de licence", "")).strip()
+                raw_lic = str(row.get("N\u00b0 de licence", "")).strip()
                 if raw_lic.endswith(".0"):
                     raw_lic = raw_lic[:-2]
                 lic_num = "".join(c for c in raw_lic if c.isdigit())
-                
+
                 badge_rouge_raw = str(row.get("Badge rouge diff", "")).strip().upper()
                 autonomie_bloc_raw = str(row.get("Autonomie Bloc", "")).strip().upper()
-                
                 if badge_rouge_raw == "X":
                     file_badge_rouge_count += 1
-                
                 badge_rouge = "Oui" if badge_rouge_raw == "X" else ("Non" if not badge_rouge_raw else row.get("Badge rouge diff", ""))
                 autonomie_bloc = "Oui" if autonomie_bloc_raw == "X" else ("Non" if not autonomie_bloc_raw else row.get("Autonomie Bloc", ""))
-                
-                # Récupérer l'indicateur Passeport Orange s'il est noté X dans le fichier d'autonomie (votre demande !)
+
                 has_orange_raw = str(row.get("Passeport Orange", "")).strip().upper()
                 orange_passport_val = "Escalade - Passeport orange" if has_orange_raw == "X" else ""
-                
-                matched_adj = None
-                
-                # Étape 1 : Rapprochement par numéro de licence (CORRIGÉ !)
-                if lic_num and lic_num in adherents_by_licence:
-                    matched_adj = adherents_by_licence[lic_num]
-                    
-                # Étape 2 : Rapprochement sémantique par Nom et Prénom (Nouveau !)
-                if not matched_adj:
+
+                matched = None
+                if lic_num and lic_num in users_by_licence:
+                    matched = users_by_licence[lic_num]
+                if not matched:
                     nom_raw = str(row.get("NOM", "")).strip()
-                    prenom_raw = str(row.get("Prénom", "")).strip()
+                    prenom_raw = str(row.get("Pr\u00e9nom", "")).strip()
                     if nom_raw and prenom_raw:
-                        norm_nom = normalize_name(nom_raw)
-                        norm_prenom = normalize_name(prenom_raw)
-                        if (norm_nom, norm_prenom) in adherents_by_name:
-                            matched_adj = adherents_by_name[(norm_nom, norm_prenom)]
-                
-                if matched_adj:
-                    target_id = matched_adj["id"]
-                    existing_passports = str(matched_adj.get("raw_passports") or "").strip()
-                    
-                    # Fusionner intelligemment avec le passeport Orange si noté X
-                    if orange_passport_val:
-                        if "orange" not in existing_passports.lower():
-                            if existing_passports:
-                                new_passports = f"{existing_passports}, {orange_passport_val}"
-                            else:
-                                new_passports = orange_passport_val
-                        else:
-                            new_passports = existing_passports
+                        key = (normalize_name(nom_raw), normalize_name(prenom_raw))
+                        if key in users_by_name:
+                            matched = users_by_name[key]
+
+                if matched:
+                    existing_passports = str(matched.get("raw_passports") or "").strip()
+                    if orange_passport_val and "orange" not in existing_passports.lower():
+                        new_passports = f"{existing_passports}, {orange_passport_val}" if existing_passports else orange_passport_val
                     else:
                         new_passports = existing_passports
-                        
-                    updates.append((badge_rouge, autonomie_bloc, new_passports, target_id))
+                    updates.append((badge_rouge, autonomie_bloc, new_passports, matched["id"]))
                     stats["matched"] += 1
                 else:
                     stats["not_found"] += 1
-            
-            stats["file_badge_rouge_count"] = file_badge_rouge_count
-            
-            # Appliquer les mises à jour en base de données
-            if updates:
-                cursor.executemany("""
-                    UPDATE adherents
-                    SET badge_rouge = ?,
-                        autonomie_bloc = ?,
-                        raw_passports = ?
-                    WHERE id = ?
-                """, updates)
 
-                # Phase 3 — miroir v2 : flags club vers users
-                schema_v2.ensure_v2_schema(cursor)
+            stats["file_badge_rouge_count"] = file_badge_rouge_count
+
+            if updates:
                 cursor.executemany("""
                     UPDATE users
                     SET badge_rouge = ?, autonomie_bloc = ?, raw_passports = ?
-                    WHERE legacy_adherent_id = ?
+                    WHERE id = ?
                 """, updates)
-
                 conn.commit()
-                
-            # Calculer les statistiques après mise à jour
-            cursor.execute("SELECT COUNT(*) as cnt FROM adherents WHERE badge_rouge = 'Oui'")
+
+            cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE badge_rouge = 'Oui'")
             stats["db_total_badge_rouge"] = cursor.fetchone()["cnt"]
-            
-            cursor.execute("SELECT COUNT(*) as cnt FROM adherents WHERE autonomie_bloc = 'Oui' AND (badge_rouge IS NULL OR badge_rouge != 'Oui')")
+            cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE autonomie_bloc = 'Oui' AND (badge_rouge IS NULL OR badge_rouge != 'Oui')")
             stats["db_autonomes_without_badge_rouge"] = cursor.fetchone()["cnt"]
-                
         except Exception as e:
             conn.rollback()
             stats["errors"].append(f"Erreur lors de la fusion en BDD : {e}")
         finally:
             conn.close()
-            
         return stats
 
-    @classmethod
     def import_old_season_ffme(cls, excel_path: str, season_name: str = "2025-2026") -> dict:
         """
-        Importe les licenciés d'une ancienne saison depuis un export FFME (.xlsx) et les rattache à la saison spécifiée.
-        Crée les adhérents inexistants.
+        Phase 5 - Importe les licencies d'une ancienne saison depuis un export FFME
+        (.xlsx) et les rattache a la saison specifiee dans le schema v2.
+        Cree les utilisateurs inexistants.
         """
         cls.create_db_backup()
         import pandas as pd
         from domain.utils import normalize_name
-        
-        stats = {
-            "total_processed": 0,
-            "created": 0,
-            "linked": 0,
-            "errors": []
-        }
-        
+
+        stats = {"total_processed": 0, "created": 0, "linked": 0, "errors": []}
+
         if not os.path.exists(excel_path):
             stats["errors"].append(f"Fichier introuvable : {excel_path}")
             return stats
-            
-        # Contournement de verrouillage de fichier par copie temporaire (Nouveau !)
+
         import shutil
         temp_path = os.path.join(ROOT_DIR, "archive", f"temp_import_{datetime.datetime.now().strftime('%H%M%S')}.xlsx")
         try:
@@ -1389,7 +794,7 @@ class SqliteRepository:
             except Exception:
                 pass
         except Exception as e:
-            print(f"❌ [SQLITE] Erreur de lecture du fichier d'importation (fichier probablement ouvert ou verrouillé par Excel) : {e}")
+            print(f"[SQLITE] Erreur de lecture du fichier d'importation (fichier probablement verrouille) : {e}")
             stats["errors"].append(f"Erreur de lecture du fichier Excel : {e}")
             try:
                 if os.path.exists(temp_path):
@@ -1397,19 +802,17 @@ class SqliteRepository:
             except Exception:
                 pass
             return stats
-            
-        required_cols = ["Nom", "Prénom"]
+
+        required_cols = ["Nom", "Pr\u00e9nom"]
         for col in required_cols:
             if col not in df.columns:
                 stats["errors"].append(f"Colonne requise manquante dans le fichier Excel : {col}")
                 return stats
-                
+
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
-        
         try:
-            # 1. Obtenir l'ID de la saison cible
             cursor.execute("SELECT id FROM seasons WHERE name = ?", (season_name,))
             row_s = cursor.fetchone()
             if not row_s:
@@ -1417,148 +820,140 @@ class SqliteRepository:
                 season_id = cursor.lastrowid
             else:
                 season_id = row_s["id"]
-                
-            # 2. Charger les adhérents existants pour le rapprochement
-            cursor.execute("SELECT id, user_lastName, user_firstName, \"champ_Numéro de Licence FFME (6 chiffres)\" FROM adherents")
-            adherents = [dict(row) for row in cursor.fetchall()]
-            
-            adherents_by_licence = {}
-            adherents_by_name = {}
-            for adj in adherents:
-                lic = str(adj["champ_Numéro de Licence FFME (6 chiffres)"] or "").strip()
+
+            cursor.execute("SELECT id, last_name_key, first_name_key, licence_ffme, raw_passports FROM users")
+            users = [dict(row) for row in cursor.fetchall()]
+
+            users_by_licence = {}
+            users_by_name = {}
+            for u in users:
+                lic = str(u["licence_ffme"] or "").strip()
                 if lic.endswith(".0"):
                     lic = lic[:-2]
                 clean_lic = "".join(c for c in lic if c.isdigit())
                 if clean_lic:
-                    adherents_by_licence[clean_lic] = adj
-                    
-                nom = normalize_name(adj.get("user_lastName", ""))
-                prenom = normalize_name(adj.get("user_firstName", ""))
-                if nom and prenom:
-                    adherents_by_name[(nom, prenom)] = adj
-                    
-            # 3. Traiter chaque ligne du fichier FFME
+                    users_by_licence[clean_lic] = u
+
+            for u in users:
+                # Les cles normalisees sont deja en base (last_name_key / first_name_key)
+                if u["last_name_key"] and u["first_name_key"]:
+                    users_by_name[(u["last_name_key"], u["first_name_key"])] = u
+
+            now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+
             for idx, row in df.iterrows():
                 stats["total_processed"] += 1
-                
                 nom = str(row.get("Nom", "")).strip()
-                prenom = str(row.get("Prénom", "")).strip()
+                prenom = str(row.get("Pr\u00e9nom", "")).strip()
                 if not nom or not prenom:
                     continue
-                    
-                raw_lic = str(row.get("N° de licence", "")).strip()
+
+                raw_lic = str(row.get("N\u00b0 de licence", "")).strip()
                 if raw_lic.endswith(".0"):
                     raw_lic = raw_lic[:-2]
                 lic_num = "".join(c for c in raw_lic if c.isdigit())
-                
-                matched_adj = None
-                
-                # Rapprochement 1 : par licence
-                if lic_num and lic_num in adherents_by_licence:
-                    matched_adj = adherents_by_licence[lic_num]
-                # Rapprochement 2 : par nom / prénom
-                if not matched_adj:
-                    norm_nom = normalize_name(nom)
-                    norm_prenom = normalize_name(prenom)
-                    if (norm_nom, norm_prenom) in adherents_by_name:
-                        matched_adj = adherents_by_name[(norm_nom, norm_prenom)]
-                        
-                # Détecter le passeport Orange s'il est mentionné dans la colonne 'Passeports' de l'Excel (votre demande !)
+
+                matched = None
+                if lic_num and lic_num in users_by_licence:
+                    matched = users_by_licence[lic_num]
+                if not matched:
+                    key = (normalize_name(nom), normalize_name(prenom))
+                    if key in users_by_name:
+                        matched = users_by_name[key]
+
                 passports_col = str(row.get("Passeports", "")).strip()
                 has_orange_in_excel = "orange" in passports_col.lower()
-                
-                if matched_adj:
-                    adherent_id = matched_adj["id"]
-                    # Optionnellement mettre à jour le numéro de licence s'il manquait
-                    if lic_num and not matched_adj["champ_Numéro de Licence FFME (6 chiffres)"]:
-                        cursor.execute("""
-                            UPDATE adherents SET "champ_Numéro de Licence FFME (6 chiffres)" = ? WHERE id = ?
-                        """, (raw_lic, adherent_id))
-                        
-                    # Mettre à jour le passeport Orange s'il est présent dans l'Excel de l'ancienne saison (votre demande !)
+
+                if matched:
+                    user_id = matched["id"]
+                    if lic_num and not str(matched["licence_ffme"] or "").strip():
+                        cursor.execute("UPDATE users SET licence_ffme=?, updated_at=? WHERE id=?",
+                                       (raw_lic, now_iso, user_id))
                     if has_orange_in_excel:
-                        existing_passports = str(matched_adj.get("raw_passports") or "").strip()
+                        existing_passports = str(matched.get("raw_passports") or "").strip()
                         if "orange" not in existing_passports.lower():
                             new_passports = f"{existing_passports}, Escalade - Passeport orange" if existing_passports else "Escalade - Passeport orange"
-                            cursor.execute("""
-                                UPDATE adherents SET raw_passports = ? WHERE id = ?
-                            """, (new_passports, adherent_id))
+                            cursor.execute("UPDATE users SET raw_passports=? WHERE id=?", (new_passports, user_id))
                 else:
-                    # Créer un nouvel adhérent avec les informations du fichier FFME !
                     sexe = str(row.get("Sexe", "")).strip()
-                    birth_date_raw = str(row.get("Date de naissance", "")).strip()
-                    if birth_date_raw.endswith(" 00:00:00"):
-                        birth_date_raw = birth_date_raw[:-9]
-                        
+                    birth_raw = str(row.get("Date de naissance", "")).strip()
+                    if birth_raw.endswith(" 00:00:00"):
+                        birth_raw = birth_raw[:-9]
                     address = str(row.get("Adresse", "")).strip()
                     zip_code = str(row.get("Code postal", "")).strip()
                     if zip_code.endswith(".0"):
                         zip_code = zip_code[:-2]
                     city = str(row.get("Ville", "")).strip()
-                    phone = str(row.get("Téléphone", "")).strip()
+                    phone = str(row.get("T\u00e9l\u00e9phone", "")).strip()
                     email = str(row.get("Email", "")).strip()
-                    
                     passports = str(row.get("Passeports", "")).strip()
                     if passports.lower() in ("nan", "none", "aucune", ""):
                         passports = ""
-                    diplomas = str(row.get("Diplômes", "")).strip()
+                    diplomas = str(row.get("Dipl\u00f4mes", "")).strip()
                     if diplomas.lower() in ("nan", "none", "aucune", ""):
                         diplomas = ""
-                        
-                    # Si passeport Orange est dans l'Excel mais pas dans passports, on l'ajoute (votre demande !)
                     if has_orange_in_excel and "orange" not in passports.lower():
                         passports = f"{passports}, Escalade - Passeport orange" if passports else "Escalade - Passeport orange"
-                        
+
                     cursor.execute("""
-                        INSERT INTO adherents (
-                            user_lastName, user_firstName, "champ_Sexe", "champ_Date de naissance de l'adhérent",
-                            "champ_Adresse : numéro et nom de rue", "champ_Code postal", "champ_Ville",
-                            "champ_Téléphone ", "champ_Adresse mail pour la réception des informations du club",
-                            "champ_Numéro de Licence FFME (6 chiffres)", raw_passports, raw_diplomas,
-                            badge_rouge, autonomie_bloc, is_modified
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Non', 'Non', 'Non')
+                        INSERT INTO users (
+                            last_name, first_name, last_name_key, first_name_key,
+                            birth_date, birth_date_raw, gender, address, zip_code, city,
+                            phone, email_primary, licence_ffme, raw_passports, raw_diplomas,
+                            badge_rouge, autonomie_bloc, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Non', 'Non', ?, ?)
                     """, (
-                        nom, prenom, sexe, birth_date_raw,
-                        address, zip_code, city,
-                        phone, email,
-                        raw_lic, passports, diplomas
+                        nom, prenom,
+                        normalize_name(nom).upper(), normalize_name(prenom).lower(),
+                        schema_v2.parse_iso_date(birth_raw), birth_raw, sexe, address, zip_code, city,
+                        phone, email, raw_lic, passports, diplomas, now_iso, now_iso
                     ))
-                    adherent_id = cursor.lastrowid
+                    user_id = cursor.lastrowid
+                    users_by_licence[lic_num] = {"id": user_id, "licence_ffme": raw_lic, "raw_passports": passports}
+                    users_by_name[(normalize_name(nom), normalize_name(prenom))] = {"id": user_id}
                     stats["created"] += 1
-                    
-                # Établir la liaison adherents <-> adherents_seasons (avec le Type de licence de l'Excel !) (votre demande !)
-                placeholder_ref = f"IMPORT-FFME-{season_name.replace('-', '')}-{adherent_id:04d}"
+
+                # Commande synthetique + achat rattache a la saison importee
+                placeholder_ref = f"IMPORT-FFME-{season_name.replace('-', '')}-{user_id:04d}"
+                cursor.execute("SELECT id FROM orders WHERE order_ref=?", (placeholder_ref,))
+                row_o = cursor.fetchone()
+                if row_o:
+                    order_id = row_o["id"]
+                else:
+                    cursor.execute("""
+                        INSERT INTO orders (order_ref, order_date, status, status_normalized, season_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (placeholder_ref, f"{season_name.split('-')[0]}-09-01", "Valid\u00e9", "Valid\u00e9",
+                          season_id, now_iso, now_iso))
+                    order_id = cursor.lastrowid
+
                 tarif_name_val = str(row.get("Type de licence", "")).strip()
-                if not_found := (not tarif_name_val or tarif_name_val.lower() == "nan"):
+                if not tarif_name_val or tarif_name_val.lower() == "nan":
                     tarif_name_val = f"Import Historique (Saison {season_name})"
-                
+
                 cursor.execute("""
-                    INSERT OR REPLACE INTO adherents_seasons (
-                        adherent_id, season_id, order_ref, order_date, tarif_name, amount, status, is_modified, commentaires_correctif, email_sent_date
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    INSERT OR REPLACE INTO purchases (
+                        order_id, user_id, tarif_name, amount, status, status_normalized,
+                        is_modified, commentaires_correctif, legacy_adherent_id, legacy_season_id,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 """, (
-                    adherent_id,
-                    season_id,
-                    placeholder_ref,
-                    f"{season_name.split('-')[0]}-09-01",
-                    tarif_name_val,
-                    0.0,
-                    "Validé",
+                    order_id, user_id, tarif_name_val, 0.0, "Valid\u00e9", "Valid\u00e9",
                     "Non",
-                    f"Importé automatiquement depuis le fichier FFME de la saison {season_name}"
+                    f"Import\u00e9 automatiquement depuis le fichier FFME de la saison {season_name}",
+                    season_id, now_iso, now_iso
                 ))
                 stats["linked"] += 1
-                
+
             conn.commit()
-            print(f"✅ [SQLITE] Import de la saison {season_name} terminé : {stats['created']} adhérents créés, {stats['linked']} liaisons établies.")
+            print(f"[SQLITE] Import de la saison {season_name} termine : {stats['created']} utilisateurs crees, {stats['linked']} achats etablis.")
+            return stats
         except Exception as e:
             conn.rollback()
-            stats["errors"].append(f"Erreur lors de l'importation de l'ancienne saison en base : {e}")
-            print(f"❌ [SQLITE] Erreur lors de l'import de la saison historique : {e}")
+            stats["errors"].append(f"Erreur lors de l'import : {e}")
+            raise
         finally:
             conn.close()
-            
-        return stats
 
     @classmethod
     def migrate_json_planning(cls):

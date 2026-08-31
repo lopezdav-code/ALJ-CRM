@@ -86,13 +86,13 @@ def get_dashboard_data(background_tasks: BackgroundTasks = None, force_refresh: 
             "order_ref": item.get("order", {}).get("id"),
             "order_date": item.get("order", {}).get("date"),
             "status": item.get("state"),
-            "tarif_name": item.get("name", "").strip(),
+            "tarif_name": item.get("name") or "".strip(),
             "amount": item.get("amount", 0) / 100,
-            "user_firstName": item.get("user", {}).get("firstName", ""),
-            "user_lastName": item.get("user", {}).get("lastName", ""),
-            "payer_firstName": item.get("payer", {}).get("firstName", ""),
-            "payer_lastName": item.get("payer", {}).get("lastName", ""),
-            "payer_email": item.get("payer", {}).get("email", ""),
+            "user_firstName": item.get("user", {}).get("firstName") or "",
+            "user_lastName": item.get("user", {}).get("lastName") or "",
+            "payer_firstName": item.get("payer", {}).get("firstName") or "",
+            "payer_lastName": item.get("payer", {}).get("lastName") or "",
+            "payer_email": item.get("payer", {}).get("email") or "",
         }
         
         # Parse HelloAsso checkout options for insurance selections
@@ -111,7 +111,7 @@ def get_dashboard_data(background_tasks: BackgroundTasks = None, force_refresh: 
         flat_item["opt_Montant Assurance Option Trail"] = 0.0
         
         for opt in options:
-            opt_name = opt.get("name", "").strip()
+            opt_name = opt.get("name") or "".strip()
             opt_amount = opt.get("amount", 0) / 100
             if "Assurance Base ++" in opt_name:
                 flat_item["opt_Assurance Base ++"] = "Oui"
@@ -138,8 +138,8 @@ def get_dashboard_data(background_tasks: BackgroundTasks = None, force_refresh: 
         address = ""
         
         for field in custom_fields:
-            name = field.get("name", "")
-            val = field.get("answer", field.get("value", ""))
+            name = field.get("name") or ""
+            val = field.get("answer", field.get("value") or "")
             flat_item[f"champ_{name}"] = val
             
             if name.lower() == "ville":
@@ -247,13 +247,13 @@ def get_sqlite_map_data(background_tasks: BackgroundTasks = None) -> List[Dict[s
             if "annul" in str(status).lower():
                 continue
                 
-            firstName = row.get("user_firstName", "").strip().title()
-            lastName = row.get("user_lastName", "").strip().upper()
-            t_name = row.get("tarif_name", "").strip() or "Aucun"
+            firstName = row.get("user_firstName") or "".strip().title()
+            lastName = row.get("user_lastName") or "".strip().upper()
+            t_name = row.get("tarif_name") or "".strip() or "Aucun"
             
-            addr = row.get("champ_Adresse : numéro et nom de rue", "")
-            city = row.get("champ_Ville", "")
-            zip_code = row.get("champ_Code postal", "")
+            addr = row.get("champ_Adresse : numéro et nom de rue") or ""
+            city = row.get("champ_Ville") or ""
+            zip_code = row.get("champ_Code postal") or ""
             
             # Formater l'adresse de façon normalisée et insensible à la casse
             from domain.utils import clean_city_name
@@ -675,11 +675,11 @@ def get_pivot_table(season: str = "Toutes les saisons"):
             season_name = row.get("season_name", "Inconnue")
             
             pivot_records.append({
-                "Nom": row.get("user_lastName", "").strip().upper(),
-                "Prénom": row.get("user_firstName", "").strip().title(),
+                "Nom": row.get("user_lastName") or "".strip().upper(),
+                "Prénom": row.get("user_firstName") or "".strip().title(),
                 "Sexe": row.get("champ_Sexe", "Inconnu").strip().title() or "Inconnu",
                 "Ville": city_clean,
-                "Groupe / Tarif": row.get("tarif_name", "").strip() or "Aucun",
+                "Groupe / Tarif": row.get("tarif_name") or "".strip() or "Aucun",
                 "Statut": status_clean,
                 "Saison": season_name,
                 "Type d'Adhésion": inscription_type,

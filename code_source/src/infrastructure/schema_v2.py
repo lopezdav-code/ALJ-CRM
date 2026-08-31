@@ -253,29 +253,26 @@ def _get(rec, key):
         return None
 
 
-def build_user_field_map(cur):
-    """Construit la map legacy->users en résolvant dynamiquement les colonnes à longs libellés."""
-    cols = [r["name"] for r in cur.execute("PRAGMA table_info(adherents)").fetchall()]
-    if not cols:
-        # Base fraîche sans table legacy encore créée : map statique + placeholders dynamiques
-        cols = []
-    field_map = {}
-    for src, dst in USER_FIELD_MAP.items():
-        if not cols or src in cols:
-            field_map[src] = dst
-        else:
-            raise KeyError(f"Colonne legacy absente de la table adherents : {src!r}")
-    if cols:
-        for prefix, dst in DYNAMIC_USER_FIELDS:
-            matches = [c for c in cols if c.startswith(prefix)]
-            if matches:
-                field_map[matches[0]] = dst
-            else:
-                raise KeyError(f"Aucune colonne legacy commençant par {prefix!r}")
-    else:
-        for prefix, dst in DYNAMIC_USER_FIELDS:
-            field_map[prefix] = dst
-    return field_map
+def build_user_field_map(cur=None):
+    """Map legacy->users (phase 1 : validation PRAGMA ; phase 5 : map statique, la table
+    legacy pouvant ne plus exister)."""
+    return dict(USER_FIELD_MAP)
+
+
+def _dynamic_field_values(rec):
+    """Résout sur l'enregistrement les champs à longs libellés (photo / questionnaire de santé),
+    dont la clé exacte dépend du formulaire HelloAsso."""
+    out = {}
+    try:
+        rec_keys = list(rec.keys())
+    except Exception:
+        rec_keys = []
+    for prefix, dst in DYNAMIC_USER_FIELDS:
+        for k in rec_keys:
+            if k.startswith(prefix):
+                out[dst] = clean_legacy_text(_get(rec, k))
+                break
+    return out
 
 
 def ensure_v2_schema(cur):
@@ -314,8 +311,16 @@ def upsert_user_v2(cur, rec, now_iso, field_map):
         if legacy_id is not None:
             cur.execute("UPDATE users SET legacy_adherent_id=? WHERE id=? AND legacy_adherent_id IS NULL",
                         (legacy_id, user_id))
+        dyn = _dynamic_field_values(rec)
         for src_col, dst_col in field_map.items():
             new_val = clean_legacy_text(_get(rec, src_col))
+            if new_val:
+                cur.execute(
+                    f'UPDATE users SET "{dst_col}" = ?, updated_at = ? '
+                    f'WHERE id = ? AND (("{dst_col}" IS NULL) OR (TRIM("{dst_col}") = ""))',
+                    (new_val, now_iso, user_id),
+                )
+        for dst_col, new_val in dyn.items():
             if new_val:
                 cur.execute(
                     f'UPDATE users SET "{dst_col}" = ?, updated_at = ? '
@@ -331,6 +336,7 @@ def upsert_user_v2(cur, rec, now_iso, field_map):
     values["first_name_key"] = k_first
     values["birth_date"] = dob_iso
     values["birth_date_raw"] = dob_raw if dob_raw else None
+    values.update(_dynamic_field_values(rec))
     legacy_id = _get(rec, "adherent_id")
     if legacy_id is not None:
         values["legacy_adherent_id"] = legacy_id
@@ -388,16 +394,36 @@ def upsert_order_v2(cur, order_ref, order_date, status,
     return cur.lastrowid
 
 
+def _has_better_sibling_purchase(cur, user_id, order_id, score):
+    """Vrai si une autre purchase du même user dans la même saison a un score de statut
+    strictement supérieur. Reproduit la sémantique legacy : une inscription moins
+    prioritaire (annulée / liste d'attente) ne doit jamais masquer une inscription active."""
+    cur.execute("""
+        SELECT p.status, p.tarif_name, p.amount
+        FROM purchases p JOIN orders o ON o.id = p.order_id
+        WHERE p.user_id = ? AND o.season_id = (SELECT season_id FROM orders WHERE id = ?)
+          AND p.id != ?
+    """, (user_id, order_id, order_id))
+    for r in cur.fetchall():
+        ex_s = r["status"] if isinstance(r, sqlite3.Row) else r[0]
+        ex_t = r["tarif_name"] if isinstance(r, sqlite3.Row) else r[1]
+        ex_a = r["amount"] if isinstance(r, sqlite3.Row) else r[2]
+        if purchase_priority_score(ex_s, ex_t, ex_a) > score:
+            return True
+    return False
+
+
 def insert_purchase_v2(cur, order_id, user_id, rec, now_iso,
                        legacy_adherent_id=None, legacy_season_id=None):
     """Insère ou met à jour l'achat avec la règle de priorité de statut centralisée.
-    Retourne purchase_id, ou None si l'inscription existante est plus prioritaire."""
+    Retourne purchase_id, ou None si une inscription plus prioritaire existe déjà."""
     try:
         amt_val = float(_get(rec, "amount") or 0.0)
     except (ValueError, TypeError):
         amt_val = 0.0
     new_status = str(_get(rec, "status") or "Validé").strip()
     tarif = str(_get(rec, "tarif_name") or "")
+    new_score = purchase_priority_score(new_status, tarif, amt_val)
 
     cur.execute("SELECT id, status, tarif_name, amount FROM purchases WHERE order_id=? AND user_id=?",
                 (order_id, user_id))
@@ -407,7 +433,9 @@ def insert_purchase_v2(cur, order_id, user_id, rec, now_iso,
         ex_tarif = str(found["tarif_name"] or "") if isinstance(found, sqlite3.Row) else str(found[2] or "")
         ex_amt = float(found["amount"] or 0.0) if isinstance(found, sqlite3.Row) else float(found[3] or 0.0)
         purchase_id = found["id"] if isinstance(found, sqlite3.Row) else found[0]
-        if purchase_priority_score(ex_status, ex_tarif, ex_amt) > purchase_priority_score(new_status, tarif, amt_val):
+        if purchase_priority_score(ex_status, ex_tarif, ex_amt) > new_score:
+            return None
+        if _has_better_sibling_purchase(cur, user_id, order_id, new_score):
             return None
         cur.execute("""
             UPDATE purchases SET tarif_name=?, amount=?, status=?, status_normalized=?,
@@ -417,6 +445,26 @@ def insert_purchase_v2(cur, order_id, user_id, rec, now_iso,
               _get(rec, "is_modified") or "Non", clean_legacy_text(_get(rec, "commentaires_correctif")) or "",
               _get(rec, "email_sent_date"), now_iso, purchase_id))
         return purchase_id
+
+    if _has_better_sibling_purchase(cur, user_id, order_id, new_score):
+        return None
+
+    # Sémantique legacy d'écrasement : la nouvelle inscription plus prioritaire remplace
+    # les inscriptions STRICTEMENT moins prioritaires du même user dans la même saison.
+    cur.execute("""
+        SELECT p.id, p.status, p.tarif_name, p.amount
+        FROM purchases p JOIN orders o ON o.id = p.order_id
+        WHERE p.user_id = ? AND o.season_id = (SELECT season_id FROM orders WHERE id = ?)
+          AND p.id != ?
+    """, (user_id, order_id, order_id))
+    for r in cur.fetchall():
+        sib_id = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+        sib_s = r["status"] if isinstance(r, sqlite3.Row) else r[1]
+        sib_t = r["tarif_name"] if isinstance(r, sqlite3.Row) else r[2]
+        sib_a = r["amount"] if isinstance(r, sqlite3.Row) else r[3]
+        if purchase_priority_score(sib_s, sib_t, sib_a) < new_score:
+            cur.execute("DELETE FROM purchase_options WHERE purchase_id=?", (sib_id,))
+            cur.execute("DELETE FROM purchases WHERE id=?", (sib_id,))
 
     cur.execute("""
         INSERT INTO purchases (order_id, user_id, tarif_name, amount, status, status_normalized,
@@ -501,14 +549,11 @@ def _resolve_user_id(cur, adherent_id=None, last_name="", first_name=""):
     return None
 
 
-def mirror_member_update(cur, adherent_id, order_ref, last_name, first_name, updated_fields, comment_text):
+def apply_member_update(cur, user_id, order_ref, updated_fields, comment_text):
     """
-    Phase 3 — Miroir des correctifs manuels (update_member_in_db) dans le schéma v2.
-    À appeler dans la même transaction que la mise à jour legacy, avant le commit.
+    Phase 5 — Applique les correctifs manuels d'un adhérent dans le schéma v2 :
+    champs personnels -> users, champs de saison -> purchases, bascule des options.
     """
-    user_id = _resolve_user_id(cur, adherent_id, last_name, first_name)
-    if not user_id:
-        return
     now_iso = datetime.datetime.now().isoformat(timespec="seconds")
 
     # Champs personnels -> users
@@ -517,11 +562,13 @@ def mirror_member_update(cur, adherent_id, order_ref, last_name, first_name, upd
             cur.execute(f'UPDATE users SET "{users_col}"=?, updated_at=? WHERE id=?',
                         (updated_fields[ihm_key], now_iso, user_id))
     if "user_last_name" in updated_fields:
-        cur.execute("UPDATE users SET last_name_key=? WHERE id=?",
-                    (normalize_name(str(updated_fields["user_last_name"])).upper(), user_id))
+        cur.execute("UPDATE users SET last_name=?, last_name_key=? WHERE id=?",
+                    (str(updated_fields["user_last_name"]),
+                     normalize_name(str(updated_fields["user_last_name"])).upper(), user_id))
     if "user_first_name" in updated_fields:
-        cur.execute("UPDATE users SET first_name_key=? WHERE id=?",
-                    (normalize_name(str(updated_fields["user_first_name"])).lower(), user_id))
+        cur.execute("UPDATE users SET first_name=?, first_name_key=? WHERE id=?",
+                    (str(updated_fields["user_first_name"]),
+                     normalize_name(str(updated_fields["user_first_name"])).lower(), user_id))
     if "birth_date" in updated_fields:
         raw = str(updated_fields["birth_date"] or "")
         cur.execute("UPDATE users SET birth_date=?, birth_date_raw=? WHERE id=?",

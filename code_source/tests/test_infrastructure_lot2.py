@@ -298,7 +298,10 @@ class TestInfrastructureLot2(unittest.TestCase):
 
         conn = SqliteRepository.get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM adherents")
+        cursor.execute("DELETE FROM purchase_options")
+        cursor.execute("DELETE FROM purchases")
+        cursor.execute("DELETE FROM orders")
+        cursor.execute("DELETE FROM users")
         conn.commit()
         conn.close()
 
@@ -432,7 +435,10 @@ class TestInfrastructureLot2(unittest.TestCase):
             # Nettoyer la table adherents pour s'assurer du nombre exact d'adhérents de test (évite l'héritage d'autres tests)
             conn = SqliteRepository.get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM adherents")
+            cursor.execute("DELETE FROM purchase_options")
+            cursor.execute("DELETE FROM purchases")
+            cursor.execute("DELETE FROM orders")
+            cursor.execute("DELETE FROM users")
             conn.commit()
             conn.close()
 

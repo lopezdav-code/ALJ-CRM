@@ -531,9 +531,9 @@ class DocumentsPage(QWidget):
         # Si une seule attestation a été générée (ou sautée car déjà existante), on l'ouvre directement
         if (generated == 1 or skipped == 1) and hasattr(self, 'last_selected_members') and len(self.last_selected_members) == 1:
             member = self.last_selected_members[0]
-            user_last = member.get("user_lastName", "").strip()
-            user_first = member.get("user_firstName", "").strip()
-            order_ref = member.get("order_ref", "")
+            user_last = member.get("user_lastName") or "".strip()
+            user_first = member.get("user_firstName") or "".strip()
+            order_ref = member.get("order_ref") or ""
             
             from attestation_generator import get_safe_filename
             filename_docx = get_safe_filename(user_last.upper(), user_first.capitalize(), order_ref)

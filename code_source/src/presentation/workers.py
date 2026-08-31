@@ -64,12 +64,12 @@ class SyncHelloAssoWorker(QThread):
 
                 new_members_list = []
                 for p in new_participants:
-                    raw_date = p.get("order_date", "")
+                    raw_date = p.get("order_date") or ""
                     date_str = format_date_to_french_day_month(raw_date)
                         
                     new_members_list.append({
-                        "last_name": str(p.get("user_lastName", "")).upper().strip(),
-                        "first_name": str(p.get("user_firstName", "")).capitalize().strip(),
+                        "last_name": str(p.get("user_lastName") or "").upper().strip(),
+                        "first_name": str(p.get("user_firstName") or "").capitalize().strip(),
                         "order_date": date_str
                     })
                 
@@ -248,8 +248,8 @@ class SendEmailCampaignWorker(QThread):
                                     break
                                     
                     if found_item:
-                        whatsapp_link = found_item.get("whatsapp_link", "").strip()
-                        group_name = found_item.get("groupe", "").strip()
+                        whatsapp_link = found_item.get("whatsapp_link") or "".strip()
+                        group_name = found_item.get("groupe") or "".strip()
                         if whatsapp_link and group_name:
                             # Enrichir le corps de l'e-mail sous forme de signature officielle de créneau
                             template = self.whatsapp_template
@@ -457,7 +457,7 @@ class ExportWorker(QThread):
                 # Utiliser les groupes sélectionnés par l'utilisateur ou charger tous les groupes par défaut
                 groups_to_gen = self.selected_groups
                 if not groups_to_gen:
-                    groups_to_gen = list(set([str(p.get("tarif_name", "")).strip() for p in raw_data if p.get("tarif_name")]))
+                    groups_to_gen = list(set([str(p.get("tarif_name") or "").strip() for p in raw_data if p.get("tarif_name")]))
                     
                 if not groups_to_gen:
                     self.finished.emit(False, "Aucun groupe ou tarif sélectionné pour générer les fiches de présence.", "")
@@ -491,10 +491,10 @@ class ExportWorker(QThread):
                 for p in anciens_raw:
                     email_val = str(p.get("champ_Adresse mail pour la réception des informations du club") or p.get("payer_email") or "").strip()
                     excel_rows.append({
-                        "Nom": str(p.get("user_lastName", "")).strip().upper(),
-                        "Prénom": str(p.get("user_firstName", "")).strip().capitalize(),
+                        "Nom": str(p.get("user_lastName") or "").strip().upper(),
+                        "Prénom": str(p.get("user_firstName") or "").strip().capitalize(),
                         "Email": email_val,
-                        "Tarif (Saison précédente 2025-2026)": str(p.get("tarif_name", "")).strip()
+                        "Tarif (Saison précédente 2025-2026)": str(p.get("tarif_name") or "").strip()
                     })
                     
                 import pandas as pd
@@ -923,9 +923,9 @@ class SyncGmailContactsWorker(QThread):
                 if selected_clean in ("adhérent", "payeur"):
                     group_members = all_members
                 elif selected_clean == "compétition":
-                    group_members = [m for m in all_members if "compétition" in str(m.get("tarif_name", "")).strip().lower()]
+                    group_members = [m for m in all_members if "compétition" in str(m.get("tarif_name") or "").strip().lower()]
                 else:
-                    group_members = [m for m in all_members if str(m.get("tarif_name", "")).strip().lower() == selected_clean]
+                    group_members = [m for m in all_members if str(m.get("tarif_name") or "").strip().lower() == selected_clean]
                 
                 if not group_members:
                     self.progress.emit(f"⚠️ Aucun adhérent trouvé pour '{tariff}'. Le groupe est ignoré.", base_percent)
@@ -946,9 +946,9 @@ class SyncGmailContactsWorker(QThread):
                 self.progress.emit("🔍 Analyse et synchronisation des membres dans votre annuaire Google...", base_percent + 10)
                 
                 for m_idx, m in enumerate(group_members):
-                    first_name = m.get("user_firstName", "").strip()
-                    last_name = m.get("user_lastName", "").strip().upper()
-                    phone = m.get("champ_Téléphone ", "").strip()
+                    first_name = m.get("user_firstName") or "".strip()
+                    last_name = m.get("user_lastName") or "".strip().upper()
+                    phone = m.get("champ_Téléphone ") or "".strip()
                     
                     emails_to_process = []
                     emails_added = set()
@@ -960,15 +960,15 @@ class SyncGmailContactsWorker(QThread):
                             emails_to_process.append((em, suffix))
                     
                     if self.use_primary_email:
-                        email1 = m.get("champ_Adresse mail pour la réception des informations du club", "").strip()
+                        email1 = m.get("champ_Adresse mail pour la réception des informations du club") or "".strip()
                         add_email(email1, "")
                         
                     if self.use_secondary_email:
-                        email2 = m.get("champ_Deuxième adresse mail pour la réception des informations du club", "").strip()
+                        email2 = m.get("champ_Deuxième adresse mail pour la réception des informations du club") or "".strip()
                         add_email(email2, " (2)")
                         
                     if self.use_payer_email:
-                        payer = m.get("payer_email", "").strip()
+                        payer = m.get("payer_email") or "".strip()
                         suffix = " (Payeur)" if len(emails_to_process) > 0 else ""
                         add_email(payer, suffix)
                     

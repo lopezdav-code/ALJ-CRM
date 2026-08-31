@@ -155,6 +155,36 @@ Vous pouvez ensuite y accéder à l'adresse `http://127.0.0.1:8000/docs` pour co
 
 ---
 
+## 🗄️ Base de Données — Schéma v2 (users / orders / purchases / purchase_options)
+
+Depuis la version 2.0.0, la base `database.db` (racine du projet) est en **schéma v2 natif** :
+
+- **`users`** : identité stable inter-saisons (clé unique : nom + prénom normalisés + date de naissance ISO).
+- **`orders`** : commandes HelloAsso (clé naturelle `order_ref`) — payeur (`payer_*`), moyen de paiement, code promo.
+- **`purchases`** : une ligne par inscription-saison (tarif, montant, statut original + normalisé).
+- **`purchase_options`** : une ligne par assurance souscrite (fini les 12 colonnes `opt_*`).
+- **`seasons`, `planning`, `geocache`, `email_templates`** : inchangés.
+
+Règles de conception (respecter impérativement) :
+
+1. **Source de vérité unique** : la couche `infrastructure/schema_v2.py` centralise DDL, normalisations
+   (statuts, dates ISO, NULL legacy) et table de priorité des statuts. Ne jamais dupliquer ces tables.
+2. **Vue de compatibilité** : `v_adherents_legacy` reproduit le format plat historique (colonnes `champ_*` /
+   `opt_*`) pour les consommateurs existants. Elle est **recréée à chaque démarrage** depuis le code
+   (`recreate_compat_view`) — toute modification passe par `COMPAT_VIEW_SQL` dans `schema_v2.py`.
+3. **Lectures** : `SqliteRepository.load_direct_data()` (dicts legacy via la vue) ou
+   `SqliteRepository.get_members()` (objets `Member` typés, API recommandée).
+4. **Golden master** : `tests/test_ffme_golden_master.py` garantit un export CSV FFME **octet-pour-octet
+   identique** à la référence (`tests/fixtures/import_ffme_reference.csv`, données locales non versionnées).
+   Le générateur conserve volontairement les artefacts `str(None)` du legacy tant que la référence n'est
+   pas renouvelée — ne pas « nettoyer » ces valeurs sans renouveler la référence avec le club.
+5. **Migration legacy** : le script `src/migrate_schema_v2.py` reste disponible (idempotent) pour les bases
+   v1 héritées ; il est aussi déclenché automatiquement au démarrage si `PRAGMA user_version = 1`.
+6. **Sauvegardes** : API backup SQLite (jamais de copie fichier brute avec WAL actif), rétention 10 jours
+   dans `archive/db/`.
+
+---
+
 ## 🧪 Tests Unitaires
 
 Une couverture de tests unitaires est présente pour assurer le maintien de la stabilité de l'application.

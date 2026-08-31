@@ -380,9 +380,9 @@ class ReportsPage(QWidget):
                 if "annul" in str(status).lower():
                     continue
                     
-                addr = row.get("champ_Adresse : numéro et nom de rue", "")
-                city = row.get("champ_Ville", "")
-                zip_code = row.get("champ_Code postal", "")
+                addr = row.get("champ_Adresse : numéro et nom de rue") or ""
+                city = row.get("champ_Ville") or ""
+                zip_code = row.get("champ_Code postal") or ""
                 
                 city_upper = str(city).strip().upper() if city else ""
                 addr_clean = str(addr).strip() if addr else ""
@@ -410,7 +410,7 @@ class ReportsPage(QWidget):
                 if not is_resolved:
                     unresolved_list.append({
                         "name": f"{row.get('user_firstName', '').strip().title()} {row.get('user_lastName', '').strip().upper()}",
-                        "tarif": row.get("tarif_name", "").strip() or "Aucun",
+                        "tarif": row.get("tarif_name") or "".strip() or "Aucun",
                         "address": f"{addr_clean}, {zip_clean} {city_upper}" if addr_clean else city_upper,
                         "status": "⚠️ Adresse non reconnue" if in_cache else "⏳ En attente de géocodage"
                     })
@@ -535,10 +535,10 @@ class ReportsPage(QWidget):
             geom = feat.get("geometry", {})
             coords = geom.get("coordinates", []) # [lon, lat]
             
-            suggested_label = props.get("label", "")
-            s_name = props.get("name", "")
-            s_postcode = props.get("postcode", "")
-            s_city = props.get("city", "")
+            suggested_label = props.get("label") or ""
+            s_name = props.get("name") or ""
+            s_postcode = props.get("postcode") or ""
+            s_city = props.get("city") or ""
             
             if not s_name or not s_city:
                 QMessageBox.warning(self, "Suggestion incomplète", "La suggestion retournée par le service est incomplète.")
@@ -578,12 +578,10 @@ class ReportsPage(QWidget):
                 
                 # Mettre à jour les colonnes d'adresse
                 cursor.execute(
-                    "UPDATE adherents SET "
-                    "\"champ_Adresse : numéro et nom de rue\" = ?, "
-                    "\"champ_Code postal\" = ?, "
-                    "\"champ_Ville\" = ? "
-                    "WHERE UPPER(TRIM(user_firstName)) = UPPER(TRIM(?)) "
-                    "AND UPPER(TRIM(user_lastName)) = UPPER(TRIM(?))",
+                    "UPDATE users SET "
+                    "address = ?, zip_code = ?, city = ? "
+                    "WHERE UPPER(TRIM(first_name)) = UPPER(TRIM(?)) "
+                    "AND UPPER(TRIM(last_name)) = UPPER(TRIM(?))",
                     (s_name, s_postcode, s_city, first_name, last_name)
                 )
                 
@@ -628,9 +626,9 @@ class ReportsPage(QWidget):
                 if "annul" in str(status).lower():
                     continue
                     
-                addr = row.get("champ_Adresse : numéro et nom de rue", "")
-                city = row.get("champ_Ville", "")
-                zip_code = row.get("champ_Code postal", "")
+                addr = row.get("champ_Adresse : numéro et nom de rue") or ""
+                city = row.get("champ_Ville") or ""
+                zip_code = row.get("champ_Code postal") or ""
                 
                 city_upper = str(city).strip().upper() if city else ""
                 addr_clean = str(addr).strip() if addr else ""

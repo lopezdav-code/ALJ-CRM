@@ -65,6 +65,18 @@ def migrate(skip_excel=False):
     seasons = {r["name"]: r["id"] for r in cur.execute("SELECT id, name FROM seasons")}
     active_season_id = seasons.get(SEASON_ACTIVE)
 
+    # Phase 5 — la migration ne s'applique qu'aux bases contenant encore les tables legacy
+    has_legacy = cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='adherents'"
+    ).fetchone() is not None
+    if not has_legacy:
+        recreate_compat_view(cur)
+        cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
+        conn.commit()
+        conn.close()
+        print("[MIGRATION V2] Base v2 native (pas de tables legacy) : vue vérifiée, version taguée.")
+        return True
+
     try:
         ensure_v2_schema(cur)
         field_map = build_user_field_map(cur)

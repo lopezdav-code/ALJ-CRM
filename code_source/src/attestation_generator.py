@@ -143,16 +143,16 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
         for idx, member in enumerate(participants_to_process, 1):
             try:
                 # Récupérer les informations de l'adhérent
-                user_last = member.get("user_lastName", "").strip()
-                user_first = member.get("user_firstName", "").strip()
+                user_last = member.get("user_lastName") or "".strip()
+                user_first = member.get("user_firstName") or "".strip()
                 
                 # S'il n'y a pas d'adhérent valide (nom et prénom vides), on passe
                 if not user_last and not user_first:
                     continue
                     
                 # Infos payeur (par défaut l'adhérent s'il n'y a pas d'infos payeur distinctes)
-                payer_last = member.get("payer_lastName", "").strip() or user_last
-                payer_first = member.get("payer_firstName", "").strip() or user_first
+                payer_last = member.get("payer_lastName") or "".strip() or user_last
+                payer_first = member.get("payer_firstName") or "".strip() or user_first
                 
                 # Montant payé et filtrage si 0 €
                 amount = member.get("amount", 0.0)
@@ -166,7 +166,7 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                     skipped_count += 1
                     continue
                     
-                status = str(member.get("status", "")).lower()
+                status = str(member.get("status") or "").lower()
                 if "annul" in status:
                     print(f"[{idx}/{total_to_process}] ⏭️ Passé (Commande annulée) : {user_last.upper()} {user_first.capitalize()}")
                     skipped_count += 1
@@ -184,7 +184,7 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                 payer_first_format = payer_first.capitalize()
                 
                 # Nom de fichier de l'attestation avec identifiant de commande pour l'unicité
-                order_ref = member.get("order_ref", "")
+                order_ref = member.get("order_ref") or ""
                 filename_docx = get_safe_filename(user_last_format, user_first_format, order_ref)
                 filename_pdf = filename_docx.replace(".docx", ".pdf")
                 

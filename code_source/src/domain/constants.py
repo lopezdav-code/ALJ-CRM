@@ -9,7 +9,7 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"), override=True)
 
 # Saison active par défaut
 DEFAULT_SEASON = "2026-2027"
-APP_VERSION = "1.9.9"
+APP_VERSION = "2.0.0"
 
 def get_active_season() -> str:
     """

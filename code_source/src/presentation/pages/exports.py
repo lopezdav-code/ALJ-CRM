@@ -276,10 +276,10 @@ class ExportsPage(QWidget):
             termine_count = 0
             
             for p in participants:
-                tarif_name = str(p.get("tarif_name", "")).lower()
+                tarif_name = str(p.get("tarif_name") or "").lower()
                 amount = p.get("amount", 0.0)
-                status = str(p.get("status", "")).lower()
-                commentaires = str(p.get("commentaires_correctif", "")).lower()
+                status = str(p.get("status") or "").lower()
+                commentaires = str(p.get("commentaires_correctif") or "").lower()
                 is_manual = "ajout manuel" in commentaires
                 
                 # 1. Ignoré (liste d'attente, montant nul (sauf les ajouts manuels), annulé/Canceled)
@@ -293,7 +293,7 @@ class ExportsPage(QWidget):
                     continue
                     
                 # 3. Date de naissance invalide
-                dob_val = p.get("champ_Date de naissance de l'adhérent", "")
+                dob_val = p.get("champ_Date de naissance de l'adhérent") or ""
                 dob_date = None
                 if isinstance(dob_val, (datetime.datetime, datetime.date)):
                     dob_date = dob_val
@@ -348,7 +348,7 @@ class ExportsPage(QWidget):
             try:
                 from infrastructure.sqlite_repository import SqliteRepository
                 raw_data = SqliteRepository.load_direct_data(season_filter="2026-2027")
-                unique_groups = list(set([str(p.get("tarif_name", "")).strip() for p in raw_data if p.get("tarif_name")]))
+                unique_groups = list(set([str(p.get("tarif_name") or "").strip() for p in raw_data if p.get("tarif_name")]))
                 if not unique_groups:
                     QMessageBox.warning(self, "Aucun groupe", "Aucun groupe ou tarif d'adhérents trouvé en base de données.")
                     return
