@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+requests
+pandas
+openpyxl
+python-dotenv
+pywin32
+geopy
+python-docx
+pillow
+PySide6
+keyring

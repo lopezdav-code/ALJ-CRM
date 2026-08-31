@@ -1,0 +1,137 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0">
+  <diagram id="ALJ-Escalade-Flows" name="Flux d&#39;Informations ALJ Escalade">
+    <mxGraphModel dx="2054" dy="1137" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" background="#F8FAFC" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="lane-cloud" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;fontColor=#1E3A8A;fontStyle=1;startSize=30;rounded=1;arcSize=10;shadow=0;glass=0;" value="SOURCES EXTERNES (CLOUD / API)" vertex="1">
+          <mxGeometry height="740" width="240" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-helloasso" parent="lane-cloud" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#0284C7;strokeColor=#0369A1;fontColor=#ffffff;fontStyle=1;align=center;" value="HelloAsso API REST v5&#xa;(Adhésions &amp; Cotisations)" vertex="1">
+          <mxGeometry height="110" width="190" x="25" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-drive" parent="lane-cloud" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#0EA5E9;strokeColor=#0284C7;fontColor=#ffffff;fontStyle=1;align=center;" value="Google Drive Cloud&#xa;(Sauvegarde centralisée)" vertex="1">
+          <mxGeometry height="110" width="190" x="25" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-smtp" parent="lane-cloud" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#475569;strokeColor=#334155;fontColor=#ffffff;fontStyle=1;align=center;" value="Serveur Gmail / SMTP&#xa;(Relais messagerie)" vertex="1">
+          <mxGeometry height="110" width="190" x="25" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-app" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#CBD5E1;fontColor=#1E293B;fontStyle=1;startSize=30;rounded=1;arcSize=10;shadow=0;glass=0;" value="ALJ ESCALADE MANAGER (APPLICATION PYSIDE6)" vertex="1">
+          <mxGeometry height="740" width="320" x="320" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-mainwindow" parent="lane-app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#163A5F;strokeColor=#0F2942;fontColor=#ffffff;fontStyle=1;arcSize=10;" value="MainWindow (Qt IHM)&#xa;Saisie, Contrôles &amp; Lancement" vertex="1">
+          <mxGeometry height="70" width="260" x="30" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-synchelloasso" parent="lane-app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#1D4ED8;fontColor=#ffffff;fontStyle=1;arcSize=10;" value="SyncHelloAssoWorker&#xa;(Merge intelligent HelloAsso/Excel)" vertex="1">
+          <mxGeometry height="60" width="260" x="30" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-dataloader" parent="lane-app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#1D4ED8;fontColor=#ffffff;fontStyle=1;arcSize=10;" value="LocalDataLoaderWorker&#xa;(Préchargement asynchrone)" vertex="1">
+          <mxGeometry height="60" width="260" x="30" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-attestgen" parent="lane-app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#1D4ED8;fontColor=#ffffff;fontStyle=1;arcSize=10;" value="GenerateAttestationsWorker&#xa;(Moteur Word COM &amp; PDF Chromium)" vertex="1">
+          <mxGeometry height="60" width="260" x="30" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-mailsender" parent="lane-app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#1D4ED8;fontColor=#ffffff;fontStyle=1;arcSize=10;" value="SendEmailCampaignWorker&#xa;(Relais d&#39;envoi SMTP / Gmail API)" vertex="1">
+          <mxGeometry height="60" width="260" x="30" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-local" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#FFFBEB;strokeColor=#FDE68A;fontColor=#78350F;fontStyle=1;startSize=30;rounded=1;arcSize=10;shadow=0;glass=0;" value="STOCKAGE LOCAL &amp; CONFIGURATION" vertex="1">
+          <mxGeometry height="740" width="220" x="680" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-config" parent="lane-local" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#FCD34D;strokeColor=#D97706;fontColor=#78350F;fontStyle=1;" value="Configuration JSON&#xa;(planning.json, tarif_mapping.json)" vertex="1">
+          <mxGeometry height="80" width="170" x="25" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-masterexcel" parent="lane-local" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F59E0B;strokeColor=#D97706;fontColor=#ffffff;fontStyle=1;" value="Master Excel&#xa;(Adhésions escalade-*.xlsx)&#xa;Base unifiée du club" vertex="1">
+          <mxGeometry height="110" width="170" x="25" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-courseexcel" parent="lane-local" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F59E0B;strokeColor=#D97706;fontColor=#ffffff;fontStyle=1;" value="Tableur Cours&#xa;(Cours.xlsx)&#xa;Affectation des 19 créneaux" vertex="1">
+          <mxGeometry height="110" width="170" x="25" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="comp-templates" parent="lane-local" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#FCD34D;strokeColor=#D97706;fontColor=#78350F;fontStyle=1;" value="Templates d&#39;Origine&#xa;(ATTESTATION_TEMPLATE.html,&#xa;ATTESTATION DE PAIEMENT.docx,&#xa;Cours_Template.xlsx)" vertex="1">
+          <mxGeometry height="110" width="170" x="25" y="570" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-outputs" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#A7F3D0;fontColor=#065F46;fontStyle=1;startSize=30;rounded=1;arcSize=10;shadow=0;glass=0;" value="LIVRABLES &amp; SORTIES GÉNÉRÉES" vertex="1">
+          <mxGeometry height="740" width="200" x="940" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="out-pdf" parent="lane-outputs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10B981;strokeColor=#059669;fontColor=#ffffff;fontStyle=1;" value="Attestations &amp; Reçus&#xa;(PDF &amp; DOCX nominatifs)&#xa;/exports/attestation/" vertex="1">
+          <mxGeometry height="90" width="160" x="20" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="out-presence" parent="lane-outputs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10B981;strokeColor=#059669;fontColor=#ffffff;fontStyle=1;" value="Feuilles de Présence&#xa;(19 Tableaux Excel)&#xa;/exports/fiches_presence/" vertex="1">
+          <mxGeometry height="90" width="160" x="20" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="out-urgences" parent="lane-outputs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10B981;strokeColor=#059669;fontColor=#ffffff;fontStyle=1;" value="Liste Urgences ALJ&#xa;(Synthèse des contacts)&#xa;Liste_Contacts_Urgence.xlsx" vertex="1">
+          <mxGeometry height="90" width="160" x="20" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="out-mails" parent="lane-outputs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10B981;strokeColor=#059669;fontColor=#ffffff;fontStyle=1;" value="Boîte de Réception Membre&#xa;(Attestation PDF jointe +&#xa;Message d&#39;accompagnement)" vertex="1">
+          <mxGeometry height="90" width="160" x="20" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-hello-sync" edge="1" parent="1" source="comp-helloasso" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2563EB;strokeWidth=2;fontColor=#1E3A8A;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" target="comp-synchelloasso" value="1. Interrogation REST">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-drive-main" edge="1" parent="1" source="comp-drive" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0284C7;strokeWidth=2;fontColor=#0F172A;fontStyle=1;exitX=1;exitY=0.3;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" target="comp-mainwindow" value="Téléchargement">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-sync-drive" edge="1" parent="1" source="comp-synchelloasso" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#059669;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=0;exitY=0.75;entryX=0.9;entryY=0.1;" target="comp-drive" value="Téléversement">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-sync-master" edge="1" parent="1" source="comp-synchelloasso" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#ea580c;strokeWidth=2;fontColor=#7c2d12;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.3;entryDx=0;entryDy=0;entryPerimeter=0;" target="comp-masterexcel" value="Mise à jour">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-loader-master" edge="1" parent="1" source="comp-dataloader" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2563EB;strokeWidth=2;fontColor=#1e3a8a;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.7;entryDx=0;entryDy=0;entryPerimeter=0;" target="comp-masterexcel" value="Lecture asynchrone">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-loader-main" edge="1" parent="1" source="comp-dataloader" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="comp-mainwindow" value="Données en cache IHM">
+          <mxGeometry relative="1" x="0.2632" y="-30" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-config-main" edge="1" parent="1" source="comp-config" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#D97706;strokeWidth=1.5;exitX=0;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="comp-mainwindow" value="Structure &amp; Tarifs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-main-workers" edge="1" parent="1" source="comp-mainwindow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=1.5;dashed=1;exitX=0.25;exitY=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="comp-mailsender" value="Déclenchement des tâches d&#39;arrière-plan">
+          <mxGeometry relative="1" x="-0.1163" y="85" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-templates-gen" edge="1" parent="1" source="comp-templates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#D97706;strokeWidth=1.5;exitX=0;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" target="comp-attestgen" value="Modèles physiques">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-attest-out" edge="1" parent="1" source="comp-attestgen" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=1;exitY=0.25;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="out-pdf" value="Génération Word &amp; PDF">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-mail-readpdf" edge="1" parent="1" source="out-pdf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2563EB;strokeWidth=1.5;exitX=0.5;exitY=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="out-mails" value="Pièces Jointes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-mail-smtp" edge="1" parent="1" source="comp-mailsender" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2563EB;strokeWidth=2;fontColor=#1E3A8A;fontStyle=1;exitX=0;exitY=0.5;entryX=1;entryY=0.75;" target="comp-smtp" value="Campagne Emails">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-smtp-inbox" edge="1" parent="1" source="comp-smtp" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitDx=0;exitDy=0;" target="out-mails" value="Réception">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="135" y="760" />
+              <mxPoint x="1040" y="760" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-main-presence" edge="1" parent="1" source="comp-mainwindow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=1;exitY=0.75;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="out-presence" value="Génération">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-main-urgences" edge="1" parent="1" source="comp-mainwindow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="out-urgences" value="Extraction">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="135" />
+              <mxPoint x="600" y="200" />
+              <mxPoint x="920" y="200" />
+              <mxPoint x="920" y="465" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-master-course" edge="1" parent="1" source="comp-masterexcel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#ea580c;strokeWidth=2;fontColor=#7c2d12;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;exitDx=0;exitDy=0;exitPerimeter=0;" target="comp-courseexcel" value="Remplissage &amp; Audit sémantique">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-course-presence" edge="1" parent="1" source="comp-courseexcel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#10B981;strokeWidth=2;fontColor=#065F46;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.75;entryDx=0;entryDy=0;exitDx=0;exitDy=0;exitPerimeter=0;" target="out-presence" value="Extraction">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

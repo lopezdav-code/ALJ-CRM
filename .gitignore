@@ -1,0 +1,40 @@
+# ===== Secrets & identifiants (NE JAMAIS COMMITER) =====
+.env
+client_secret_*.json
+
+# ===== Bases de données & données personnelles adhérents (RGPD) =====
+*.db
+*.db-wal
+*.db-shm
+import/
+exports/
+archive/
+liste adhérent/
+code_source/attestation/
+code_source/Adhésions *.xlsx
+doc/geo_cache.json
+doc/signature.jpg
+doc/QrCode/
+
+# ===== Environnement Python =====
+venv/
+__pycache__/
+*.py[cod]
+
+# ===== Journaux =====
+*.log
+
+# ===== Scripts de diagnostic temporaires (données nominatives) =====
+scripts_temporaires/
+code_source/query_*.py
+
+# ===== Build / Packaging =====
+build/
+dist/
+*.spec.bak
+
+# ===== Système & raccourcis locaux =====
+*.lnk
+Thumbs.db
+desktop.ini
+~$*

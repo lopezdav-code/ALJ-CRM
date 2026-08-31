@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Attestation de Paiement - ALJ Escalade</title>
+    <style>
+        /* Styles de réinitialisation et généraux pour rendu A4 propre */
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #1e293b;
+            background-color: #ffffff;
+            line-height: 1.5;
+            margin: 0;
+            padding: 10mm 15mm 10mm 15mm; /* Marges réduites pour garantir le format 1 page A4 */
+            -webkit-print-color-adjust: exact;
+            box-sizing: border-box;
+        }
+
+        /* Conteneur principal */
+        .receipt-container {
+            max-width: 100%;
+            margin: 0;
+            background: #ffffff;
+            padding: 0;
+        }
+
+        /* En-tête de l'attestation */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #1e3a8a;
+            padding-bottom: 12px;
+            margin-bottom: 15px;
+        }
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        /* Déco d'escalade stylisée en pur CSS */
+        .climb-icon {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #ea580c 100%);
+            clip-path: polygon(50% 0%, 15% 100%, 85% 100%);
+            display: inline-block;
+        }
+        .header-title-block h1 {
+            font-size: 24px;
+            font-weight: 800;
+            color: #1e3a8a;
+            margin: 0;
+            letter-spacing: -0.5px;
+        }
+        .header-title-block p {
+            font-size: 13px;
+            font-weight: 600;
+            color: #ea580c;
+            margin: 3px 0 0 0;
+            text-transform: uppercase;
+        }
+        .meta-info {
+            text-align: right;
+            font-size: 13px;
+            color: #64748b;
+        }
+        .meta-info strong {
+            color: #0f172a;
+        }
+
+        /* Titre du document */
+        .document-title {
+            text-align: center;
+            margin-bottom: 14px;
+        }
+        .document-title h2 {
+            font-size: 28px;
+            font-weight: 800;
+            color: #0f172a;
+            text-transform: uppercase;
+            margin: 0;
+            letter-spacing: 0.5px;
+        }
+        .document-title .divider {
+            width: 80px;
+            height: 4px;
+            background-color: #ea580c;
+            margin: 10px auto 0 auto;
+            border-radius: 2px;
+        }
+
+        /* Corps de texte principal */
+        .content {
+            font-size: 15px;
+            color: #334155;
+            margin-bottom: 14px;
+        }
+        .content p {
+            margin-bottom: 12px;
+            text-align: justify;
+        }
+
+        /* Tableaux et fiches d'informations */
+        .details-card {
+            background-color: #f8fafc;
+            border-left: 5px solid #1e3a8a;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 14px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .detail-item {
+            font-size: 15px;
+        }
+        .detail-item span {
+            color: #64748b;
+            font-weight: 600;
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+        .detail-item strong {
+            color: #0f172a;
+            font-size: 16px;
+        }
+
+        /* Mention légale */
+        .legal-notice {
+            font-size: 13px;
+            font-style: italic;
+            color: #64748b;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 10px;
+            margin-bottom: 14px;
+        }
+
+        /* Zone de signature */
+        .signature-block {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-top: 14px;
+        }
+        .signature-club {
+            text-align: center;
+            width: 250px;
+        }
+        .signature-club p {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #475569;
+        }
+        .signature-placeholder {
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 1px dashed #cbd5e1;
+            background-color: #f8fafc;
+            border-radius: 4px;
+            color: #94a3b8;
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        /* Pied de page */
+        .footer {
+            margin-top: 14px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 10px;
+            text-align: center;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        .footer p {
+            margin: 3px 0;
+        }
+
+        /* Styles optimisés pour l'impression physique */
+        @media print {
+            body {
+                background: none;
+            }
+            .details-card {
+                background-color: #f8fafc !important;
+                border-left: 5px solid #1e3a8a !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .signature-placeholder {
+                background-color: #f8fafc !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .climb-icon {
+                background: #1e3a8a !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="receipt-container">
+        <!-- En-tête -->
+        <div class="header">
+            <div class="header-logo">
+                <img src="logo.png" alt="Logo ALJ" style="max-height: 75px; width: auto; object-fit: contain;">
+                <div class="header-title-block">
+                    <h1>ALJ Escalade</h1>
+                    <p>Amicale Laïque de Jonage</p>
+                </div>
+            </div>
+            <div class="meta-info">
+                <p>Date : <strong>{Date du jour}</strong></p>
+                <p>Saison : <strong>{Saison}</strong></p>
+            </div>
+        </div>
+
+        <!-- Titre de l'attestation -->
+        <div class="document-title">
+            <h2>Attestation de Paiement</h2>
+            <div class="divider"></div>
+        </div>
+
+        <!-- Corps de texte -->
+        <div class="content">
+            <p>
+                Je soussigné, le Président de l'<strong>Amicale Laïque de Jonage (Section Escalade)</strong>, certifie par la présente que la personne mentionnée ci-dessous s'est acquittée de sa cotisation annuelle d'adhésion pour la pratique de l'escalade.
+            </p>
+            <p>
+                Cette attestation est délivrée pour faire valoir ce que de droit, notamment auprès d'un Comité d'Entreprise (CE) ou de tout organisme de remboursement agréé.
+            </p>
+        </div>
+
+        <!-- Carte des détails -->
+        <div class="details-card">
+            <div class="detail-item">
+                <span>Adhérent</span>
+                <strong>{Prénom adhérent} {Nom adhérent}</strong>
+            </div>
+            <div class="detail-item">
+                <span>Payeur distinct</span>
+                <strong>{prénom payeur} {Nom payeur}</strong>
+            </div>
+            <div class="detail-item">
+                <span>Montant perçu</span>
+                <strong>{Montant} €</strong>
+            </div>
+            <div class="detail-item">
+                <span>Moyen de règlement</span>
+                <strong>Règlement HelloAsso (Carte Bancaire)</strong>
+            </div>
+        </div>
+
+        <!-- Mention légale -->
+        <div class="legal-notice">
+            Association régie par la loi du 1er juillet 1901 - SIRET : 32904854000028
+        </div>
+
+        <!-- Pied de page avec signature -->
+        <div class="signature-block">
+            <div style="flex: 1;"></div>
+            <div class="signature-club">
+                <p>Pour le Bureau de l'ALJ Escalade,</p>
+                <div style="height: 60px; display: flex; justify-content: center; align-items: center;">
+                    <img src="doc/signature.jpg" alt="Signature & Tampon" style="max-height: 60px; width: auto; object-fit: contain;">
+                </div>
+            </div>
+        </div>
+
+        <!-- Mentions administratives bas de page -->
+        <div class="footer">
+            <p><strong>Amicale Laïque de Jonage</strong></p>
+            <p>Hall de la Mairie, 69330 Jonage</p>
+            <p>Email : amicalelaique.jonage@gmail.com | SIRET : 32904854000028</p>
+        </div>
+    </div>
+
+</body>
+</html>

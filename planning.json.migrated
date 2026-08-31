@@ -1,0 +1,373 @@
+[
+  {
+    "id": 2,
+    "groupe": "Compétition - U11-U15",
+    "type": "compétition",
+    "categorie_age": "U11-U13(2)",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U11 U13 - enfants nés en 2015, 2016, 2017, 2018"
+    ],
+    "jour": "Lundi",
+    "horaires": "18:00 - 20:00",
+    "encadrants": [
+      "Adrien BERGER"
+    ]
+  },
+  {
+    "id": 1787823829558,
+    "groupe": "Compétition - U11-U15",
+    "type": "compétition",
+    "categorie_age": "U11-U13(2)",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U11 U13 - enfants nés en 2015, 2016, 2017, 2018"
+    ],
+    "jour": "Vendredi",
+    "horaires": "18:00 - 20:00",
+    "encadrants": []
+  },
+  {
+    "id": 1787823890632,
+    "groupe": "Compétition - U11-U15",
+    "type": "compétition",
+    "categorie_age": "U11-U13(2)",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U11 U13 - enfants nés en 2015, 2016, 2017, 2018"
+    ],
+    "jour": "Mercredi",
+    "horaires": "16:00 - 18:00",
+    "encadrants": []
+  },
+  {
+    "id": 4,
+    "groupe": "Loisir - Collège (Groupe A)",
+    "type": "cours",
+    "categorie_age": "2012-2015",
+    "whatsapp_link": "https://chat.whatsapp.com/BkS8vgjK1aPIgcr62SJ0Ff",
+    "helloasso_tarifs": [
+      "Loisir collège - jeunes nés en 2012, 2013, 2014, 2015 - lundi 18h30"
+    ],
+    "jour": "Lundi",
+    "horaires": "18:30 - 20:00",
+    "encadrants": [
+      "Camille DIDIER",
+      "Romain GOETHALS"
+    ]
+  },
+  {
+    "id": 5,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Lundi",
+    "horaires": "20:00 - 22:00",
+    "encadrants": [
+      "Nathalie LEROY"
+    ]
+  },
+  {
+    "id": 8,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Lundi",
+    "horaires": "18:30 - 20:30",
+    "encadrants": [
+      "Nathalie LEROY"
+    ]
+  },
+  {
+    "id": 17,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Mercredi",
+    "horaires": "20:00 - 22:00",
+    "encadrants": [
+      "Magaly HUE",
+      "Mathieu BARAUD"
+    ]
+  },
+  {
+    "id": 19,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Jeudi",
+    "horaires": "18:00 - 22:00",
+    "encadrants": [
+      "Nathalie LEROY",
+      "Boris CATHERIN",
+      "Fabienne LAGARDE"
+    ]
+  },
+  {
+    "id": 20,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Jeudi",
+    "horaires": "18:00 - 22:00",
+    "encadrants": [
+      "Richard ROMANET"
+    ]
+  },
+  {
+    "id": 24,
+    "groupe": "Autonome",
+    "type": "autonome",
+    "categorie_age": "Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Adultes autonomes",
+      "Jeunes Adultes autonomes - nés entre 2001 et 2008"
+    ],
+    "jour": "Samedi",
+    "horaires": "10:30 - 12:30",
+    "encadrants": [
+      "Pascal PARMENTIER"
+    ]
+  },
+  {
+    "id": 6,
+    "groupe": "Loisir - Lycée",
+    "type": "cours",
+    "categorie_age": "2009-2011",
+    "whatsapp_link": "https://chat.whatsapp.com/KchXHvVnBmZA0qs19wQSXt",
+    "helloasso_tarifs": [
+      "Loisir lycée - jeunes nés en 2009, 2010, 2011"
+    ],
+    "jour": "Mardi",
+    "horaires": "18:30 - 20:00",
+    "encadrants": [
+      "David LOPEZ",
+      "Magali FREMY"
+    ]
+  },
+  {
+    "id": 7,
+    "groupe": "Loisir - Adultes débutants",
+    "type": "cours",
+    "categorie_age": "Adulte débutant",
+    "whatsapp_link": "https://chat.whatsapp.com/KpUgXF034zxDUE25jeFEtT",
+    "helloasso_tarifs": [
+      "Cours Adultes débutants",
+      "Cours jeunes Adultes débutants nés entre 2001 et 2008"
+    ],
+    "jour": "Mardi",
+    "horaires": "20:00 - 22:00",
+    "encadrants": [
+      "Magaly HUE",
+      "Olivier BOSSET"
+    ]
+  },
+  {
+    "id": 9,
+    "groupe": "Loisir - Enfants 2016-2018 (Groupe A)",
+    "type": "cours",
+    "categorie_age": "Enfants 2016-2018 Groupe A",
+    "whatsapp_link": "https://chat.whatsapp.com/HZWSt0aCs3yC0D5McxvEgQ",
+    "helloasso_tarifs": [
+      "Loisir enfants nés en 2016, 2017, 2018 - mercredi 10h30"
+    ],
+    "jour": "Mercredi",
+    "horaires": "10:30 - 12:00",
+    "encadrants": [
+      "Théo"
+    ]
+  },
+  {
+    "id": 10,
+    "groupe": "Perfectionnement - U9(2)-U11-U13(1)",
+    "type": "perfectionnement",
+    "categorie_age": "2019-2016",
+    "whatsapp_link": "https://chat.whatsapp.com/IHXZCDQFHdi5MuqXiUI3dC",
+    "helloasso_tarifs": [
+      "Perfectionnement U11 U13 (1)- enfants nés en 2016, 2017, 2018"
+    ],
+    "jour": "Mercredi",
+    "horaires": "13:00 - 14:30",
+    "encadrants": [
+      "Thibault Natale"
+    ]
+  },
+  {
+    "id": 12,
+    "groupe": "Perfectionnement - U13(2)-U15-U17",
+    "type": "perfectionnement",
+    "categorie_age": "2015-2011",
+    "whatsapp_link": "https://chat.whatsapp.com/FjEmQ51dSK77GJIJG0tFzF",
+    "helloasso_tarifs": [
+      "Perfectionnement U13(2) U15 U17 nés 2011, 2012, 2013, 2014, 2015"
+    ],
+    "jour": "Mercredi",
+    "horaires": "14:30 - 16:00",
+    "encadrants": [
+      "Thibault Natale"
+    ]
+  },
+  {
+    "id": 13,
+    "groupe": "Loisir - Enfants 2016-2018 (Groupe B)",
+    "type": "cours",
+    "categorie_age": "Enfants 2016-2018 Groupe B",
+    "whatsapp_link": "https://chat.whatsapp.com/CsqpFTHbh3s1aTwIZo0eFO",
+    "helloasso_tarifs": [
+      "Loisir enfants nés en 2016, 2017, 2018 - mercredi 14h30"
+    ],
+    "jour": "Mercredi",
+    "horaires": "14:30 - 16:00",
+    "encadrants": [
+      "Théo"
+    ]
+  },
+  {
+    "id": 14,
+    "groupe": "Loisir - Enfants 2019-2020 (Groupe A)",
+    "type": "cours",
+    "categorie_age": "Enfants 2019-2020",
+    "whatsapp_link": "https://chat.whatsapp.com/ESGatJNjey45E4FJALbGG7",
+    "helloasso_tarifs": [
+      "Loisir enfants nés en 2019, 2020 - mercredi 9h30"
+    ],
+    "jour": "Mercredi",
+    "horaires": "09:30 - 10:30",
+    "encadrants": [
+      "Thibault Natale"
+    ]
+  },
+  {
+    "id": 16,
+    "groupe": "Compétition - U15-U17-U19",
+    "type": "compétition",
+    "categorie_age": "U15-U17-U19",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U15 U17 - jeunes nés en 2011, 2012, 2013, 2014",
+      "Compétition U15 U17 U19- jeunes nés en 2009, 2010, 2011, 2012, 2013, 2014"
+    ],
+    "jour": "Mercredi",
+    "horaires": "18:00 - 20:00",
+    "encadrants": [
+      "Clément DE LIMA FERREIRA"
+    ]
+  },
+  {
+    "id": 22,
+    "groupe": "Compétition - U15-U17-U19",
+    "type": "compétition",
+    "categorie_age": "U15-U17-U19",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U15 U17 - jeunes nés en 2011, 2012, 2013, 2014",
+      "Compétition U15 U17 U19- jeunes nés en 2009, 2010, 2011, 2012, 2013, 2014"
+    ],
+    "jour": "Vendredi",
+    "horaires": "18:30 - 20:30",
+    "encadrants": [
+      "LORIDANT Stephane"
+    ]
+  },
+  {
+    "id": 1787823912691,
+    "groupe": "Compétition - U15-U17-U19",
+    "type": "compétition",
+    "categorie_age": "U15-U17-U19",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Compétition U15 U17 - jeunes nés en 2011, 2012, 2013, 2014",
+      "Compétition U15 U17 U19- jeunes nés en 2009, 2010, 2011, 2012, 2013, 2014"
+    ],
+    "jour": "Lundi",
+    "horaires": "18:00 - 20:30",
+    "encadrants": []
+  },
+  {
+    "id": 18,
+    "groupe": "U19 Adulte perfectionnement",
+    "type": "cours",
+    "categorie_age": "U19 Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Cours perfectionnement BLOC + Difficulté - U19 et adultes",
+      "Cours perfectionnement BLOC - U19 et adultes",
+      "Cours perfectionnement Difficulté - U19 et adultes"
+    ],
+    "jour": "Mercredi",
+    "horaires": "20:00 - 22:00",
+    "encadrants": [
+      "Magaly HUE",
+      "Mathieu BARAUD"
+    ]
+  },
+  {
+    "id": 23,
+    "groupe": "U19 Adulte perfectionnement",
+    "type": "cours",
+    "categorie_age": "U19 Adultes",
+    "whatsapp_link": "",
+    "helloasso_tarifs": [
+      "Cours perfectionnement BLOC + Difficulté - U19 et adultes",
+      "Cours perfectionnement BLOC - U19 et adultes",
+      "Cours perfectionnement Difficulté - U19 et adultes"
+    ],
+    "jour": "Vendredi",
+    "horaires": "20:30 - 22:00",
+    "encadrants": [
+      "Clément DE LIMA FERREIRA"
+    ]
+  },
+  {
+    "id": 1787824077109,
+    "groupe": "Loisir - Enfants 2019-2020 (Groupe B)",
+    "type": "cours",
+    "categorie_age": "",
+    "whatsapp_link": "https://chat.whatsapp.com/G48K87VW1Lk2C7Wkyg6KLm",
+    "helloasso_tarifs": [
+      "Loisir enfants nés en 2019, 2020 - mercredi 16h"
+    ],
+    "jour": "Mercredi",
+    "horaires": "16:00 - 17:00",
+    "encadrants": []
+  },
+  {
+    "id": 1787824299992,
+    "groupe": "Loisir - Collège (Groupe B)",
+    "type": "cours",
+    "categorie_age": "",
+    "whatsapp_link": "https://chat.whatsapp.com/IOkZnj1RU798kN9QTbxF3f",
+    "helloasso_tarifs": [
+      "Loisir collège - jeunes nés en 2012, 2013, 2014, 2015 - mercredi 13h"
+    ],
+    "jour": "Mercredi",
+    "horaires": "13:30 - 14:30",
+    "encadrants": []
+  }
+]
