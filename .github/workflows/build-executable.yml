@@ -38,7 +38,6 @@ jobs:
     - name: Run Unit Tests (pytest)
       working-directory: code_source
       env:
-        PYTHONUTF8: "1"
         QT_QPA_PLATFORM: offscreen
       run: python -m pytest
 
