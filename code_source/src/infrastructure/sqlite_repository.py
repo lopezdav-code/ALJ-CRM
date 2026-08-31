@@ -62,6 +62,11 @@ EXTRA_COLUMNS = {
     "parental_auth_family": "TEXT DEFAULT 'Non'",     # Nouveau !
 }
 
+# Phase 0 — Versionnement du schéma (PRAGMA user_version) :
+#   1 = schéma legacy (adherents / adherents_seasons)
+#   2 = schéma cible (users / orders / purchases / purchase_options, voir migrate_schema_v2.py)
+SCHEMA_VERSION = 1
+
 class SqliteRepository:
     """
     Gère la persistance locale ultra-légère dans une base de données SQLite des adhérents.
@@ -307,6 +312,16 @@ class SqliteRepository:
             """, default_templates)
             conn.commit()
         
+        # Phase 0 — Gestion de la version du schéma (PRAGMA user_version)
+        cursor.execute("PRAGMA user_version")
+        current_version = cursor.fetchone()[0]
+        if current_version == 0:
+            cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            print(f"🔖 [SQLITE] Schéma tagué en version {SCHEMA_VERSION} (legacy).")
+        elif current_version > SCHEMA_VERSION:
+            print(f"⚠️ [SQLITE] Base plus récente (user_version={current_version}) que le code attendu "
+                  f"({SCHEMA_VERSION}) : migrations de schéma ignorées pour éviter toute régression.")
+
         conn.commit()
         conn.close()
         print("✅ [SQLITE] Initialisation et vérification du schéma d'adhérents accomplies.")
@@ -438,9 +453,15 @@ class SqliteRepository:
         
         now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = os.path.join(backup_dir, f"database_backup_{now_str}.db")
-        
+
         try:
-            shutil.copy2(db_path, backup_path)
+            # API backup SQLite : snapshot cohérent (inclut le journal WAL), contrairement
+            # à une copie fichier brute qui peut capturer un état incohérent.
+            src_conn = cls.get_connection()
+            dst_conn = sqlite3.connect(backup_path)
+            src_conn.backup(dst_conn)
+            dst_conn.close()
+            src_conn.close()
             print(f"💾 [SQLITE] Sauvegarde de BDD créée : {os.path.basename(backup_path)}")
             
             # Gérer la rétention : conserver toutes les sauvegardes des 10 derniers jours (Nouveau !)
