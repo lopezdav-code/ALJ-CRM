@@ -89,25 +89,7 @@ class SqliteRepository:
             is_active INTEGER DEFAULT 0
         );
         """)
-        
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS adherents_seasons (
-            adherent_id INTEGER,
-            season_id INTEGER,
-            order_ref TEXT,
-            order_date TEXT,
-            tarif_name TEXT,
-            amount REAL,
-            status TEXT,
-            is_modified TEXT DEFAULT 'Non',
-            commentaires_correctif TEXT DEFAULT '',
-            email_sent_date TEXT,
-            PRIMARY KEY(adherent_id, season_id),
-            FOREIGN KEY(adherent_id) REFERENCES adherents(id) ON DELETE CASCADE,
-            FOREIGN KEY(season_id) REFERENCES seasons(id) ON DELETE CASCADE
-        );
-        """)
-        
+
         # Insérer les saisons par défaut
         cursor.execute("INSERT OR IGNORE INTO seasons (name, is_active) VALUES ('2025-2026', 0)")
         cursor.execute("INSERT OR IGNORE INTO seasons (name, is_active) VALUES ('2026-2027', 1)")
