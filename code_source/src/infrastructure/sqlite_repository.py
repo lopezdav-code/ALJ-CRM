@@ -67,6 +67,95 @@ EXTRA_COLUMNS = {
 #   2 = schéma cible (users / orders / purchases / purchase_options, voir migrate_schema_v2.py)
 SCHEMA_VERSION = 1
 
+# Phase 2 — Vue de compatibilité : reproduit le format plat legacy (colonnes champ_* / opt_*)
+# à partir du schéma cible users / orders / purchases / purchase_options.
+# Stratégie strangler : le code existant lit cette vue sans modification.
+# Les options d'assurance sont exposées au niveau user (achat porteur de la saison active),
+# reproduisant l'emplacement legacy (colonnes opt_* de la table adherents).
+COMPAT_VIEW_SQL = """
+CREATE VIEW IF NOT EXISTS v_adherents_legacy AS
+SELECT
+    u.legacy_adherent_id AS "id",
+    u.id AS "user_id",
+    u.last_name AS "user_lastName",
+    u.first_name AS "user_firstName",
+    u.birth_date_raw AS "champ_Date de naissance de l'adhérent",
+    u.gender AS "champ_Sexe",
+    u.nationality AS "champ_Nationalité",
+    u.address AS "champ_Adresse : numéro et nom de rue",
+    u.zip_code AS "champ_Code postal",
+    u.city AS "champ_Ville",
+    u.country AS "champ_Pays",
+    u.phone AS "champ_Téléphone ",
+    u.email_primary AS "champ_Adresse mail pour la réception des informations du club",
+    u.email_secondary AS "champ_Deuxième adresse mail pour la réception des informations du club",
+    u.emergency1_name AS "champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule",
+    u.emergency1_phone AS "champ_Personne à prévenir en cas d'urgence - Téléphone",
+    u.emergency2_name AS "champ_Parent 2  à prévenir en cas d'urgence - NOM ET PRENOM (en majuscule)",
+    u.emergency2_phone AS "champ_Parent 2 - Numéro de téléphone portable",
+    u.photo_auth AS "champ_En cas de prise de vue (Photo ou vidéo), j'autorise à ce que l'image de mon enfant (cours enfants) ou la mienne (créneau adultes) puisse être utilisée par l'Amicale Laïque de Jonage à des fins non commerciales",
+    u.health_commitment AS "champ_Je m'engage à compléter mon questionnaire de santé ou téléverser mon certificat médical sur le site  https://www.myffme.fr à réception du mail de confirmation d'adhésion, pour mon enfant (cours enfants) ou moi-même (créneau adultes)",
+    p.is_tribe AS "champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE",
+    u.licence_ffme AS "champ_Numéro de Licence FFME (6 chiffres)",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Assurance Base",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base' LIMIT 1) AS "opt_Montant Assurance Base",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Assurance Base +",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base +' LIMIT 1) AS "opt_Montant Assurance Base +",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Assurance Base ++",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Base ++' LIMIT 1) AS "opt_Montant Assurance Base ++",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Assurance Option ski de piste",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option ski de piste' LIMIT 1) AS "opt_Montant Assurance Option ski de piste",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Assurance Option VTT",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option VTT' LIMIT 1) AS "opt_Montant Assurance Option VTT",
+    (SELECT CASE WHEN po2.id IS NOT NULL THEN 'Oui' END
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Assurance Option Trail",
+    (SELECT po2.amount
+       FROM purchase_options po2 JOIN purchases p2 ON p2.id = po2.purchase_id
+      WHERE p2.user_id = u.id AND po2.option_name = 'Assurance Option Trail' LIMIT 1) AS "opt_Montant Assurance Option Trail",
+    u.badge_rouge AS "badge_rouge",
+    u.autonomie_bloc AS "autonomie_bloc",
+    u.raw_passports AS "raw_passports",
+    u.raw_diplomas AS "raw_diplomas",
+    u.parental_auth_autonomous AS "parental_auth_autonomous",
+    u.parental_auth_family AS "parental_auth_family",
+    o.order_ref AS "order_ref",
+    o.order_date AS "order_date",
+    p.tarif_name AS "tarif_name",
+    p.amount AS "amount",
+    p.status AS "status",
+    p.is_modified AS "is_modified",
+    p.commentaires_correctif AS "commentaires_correctif",
+    p.email_sent_date AS "email_sent_date",
+    s.name AS "season_name",
+    (SELECT COUNT(*) FROM purchases p3
+      WHERE p3.user_id = u.id AND p3.legacy_season_id != p.legacy_season_id) AS "already_member"
+FROM purchases p
+JOIN users u ON u.id = p.user_id
+JOIN orders o ON o.id = p.order_id
+JOIN seasons s ON s.id = o.season_id
+"""
+
 class SqliteRepository:
     """
     Gère la persistance locale ultra-légère dans une base de données SQLite des adhérents.
@@ -312,15 +401,16 @@ class SqliteRepository:
             """, default_templates)
             conn.commit()
         
-        # Phase 0 — Gestion de la version du schéma (PRAGMA user_version)
+        # Phase 0/2 — Gestion de la version du schéma (PRAGMA user_version)
         cursor.execute("PRAGMA user_version")
         current_version = cursor.fetchone()[0]
         if current_version == 0:
             cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             print(f"🔖 [SQLITE] Schéma tagué en version {SCHEMA_VERSION} (legacy).")
-        elif current_version > SCHEMA_VERSION:
-            print(f"⚠️ [SQLITE] Base plus récente (user_version={current_version}) que le code attendu "
-                  f"({SCHEMA_VERSION}) : migrations de schéma ignorées pour éviter toute régression.")
+        elif current_version >= 2:
+            # Base migrée vers le schéma cible : s'assurer que la vue de compatibilité existe
+            cursor.execute(COMPAT_VIEW_SQL)
+            print("🔗 [SQLITE] Vue de compatibilité v_adherents_legacy vérifiée.")
 
         conn.commit()
         conn.close()
@@ -494,6 +584,20 @@ class SqliteRepository:
         conn = cls.get_connection()
         cursor = conn.cursor()
 
+        # Phase 2 — Si la base est migrée (user_version >= 2), lire via la vue de compatibilité
+        try:
+            current_version = cursor.execute("PRAGMA user_version").fetchone()[0]
+        except Exception:
+            current_version = 0
+        if current_version >= 2:
+            try:
+                return cls._load_data_from_compat_view(conn, season_filter)
+            except Exception as e:
+                print(f"❌ [SQLITE] Erreur lors du chargement via la vue de compatibilité : {e}")
+                return []
+            finally:
+                conn.close()
+
         # Liste de toutes les colonnes personnelles de l'adhérent dans la table 'adherents' (Sans colonnes saisonnières !)
         personal_fields = [
             "id", "user_lastName", "user_firstName", "champ_Sexe", "champ_Nationalité",
@@ -581,6 +685,33 @@ class SqliteRepository:
             return []
         finally:
             conn.close()
+
+    @classmethod
+    def _load_data_from_compat_view(cls, conn, season_filter: str) -> list:
+        """Phase 2 — Chargement via v_adherents_legacy (schéma cible v2). Mêmes clés que le chemin legacy."""
+        cursor = conn.cursor()
+        if season_filter in ("Tous", "Toutes les saisons", "Toutes les saisons confondues"):
+            cursor.execute('SELECT * FROM v_adherents_legacy ORDER BY "id" DESC')
+        elif season_filter in ("Non réinscrits", "Anciens (25-26) non réinscrits en 26-27", "Anciens non réinscrits (Présents en 25/26 mais pas en 26/27)"):
+            cursor.execute("""
+                SELECT * FROM v_adherents_legacy
+                WHERE season_name = '2025-2026'
+                  AND "user_id" NOT IN (
+                      SELECT "user_id" FROM v_adherents_legacy WHERE season_name = '2026-2027'
+                  )
+                ORDER BY "id" DESC
+            """)
+        else:
+            cursor.execute('SELECT * FROM v_adherents_legacy WHERE season_name = ? ORDER BY "id" DESC', (season_filter,))
+
+        rows = cursor.fetchall()
+        participants_data = []
+        for row in rows:
+            row_dict = dict(row)
+            # Supprimer le champ d'identifiant interne (comme le chemin legacy)
+            row_dict.pop("id", None)
+            participants_data.append(row_dict)
+        return participants_data
 
     @classmethod
     def export_to_excel(cls, file_path: str) -> bool:

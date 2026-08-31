@@ -25,7 +25,7 @@ if _script_dir not in sys.path:
 
 from paths import ROOT_DIR  # noqa: E402
 from domain.utils import normalize_name  # noqa: E402
-from infrastructure.sqlite_repository import SqliteRepository  # noqa: E402
+from infrastructure.sqlite_repository import SqliteRepository, COMPAT_VIEW_SQL  # noqa: E402
 
 SCHEMA_TARGET_VERSION = 2
 
@@ -215,6 +215,17 @@ def create_target_schema(cur):
     """)
 
 
+def clean_legacy_text(val):
+    """
+    Préserve la distinction NULL / chaîne vide du legacy : le générateur CSV historique
+    applique str(None) ('None') sur les valeurs NULL — la vue de compatibilité doit donc
+    restituer NULL tel quel pour garantir un export octet-pour-octet identique.
+    """
+    if val is None:
+        return None
+    return str(val).strip()
+
+
 def upsert_user(cur, adherent_row, now_iso, field_map):
     """Crée ou complète un user à partir d'une ligne legacy. Retourne (user_id, created)."""
     last = str(adherent_row["user_lastName"] or "").strip()
@@ -233,7 +244,7 @@ def upsert_user(cur, adherent_row, now_iso, field_map):
         user_id = found["id"]
         # Compléter les champs vides (ne jamais écraser une valeur existante)
         for src_col, dst_col in field_map.items():
-            new_val = str(adherent_row[src_col] or "").strip()
+            new_val = clean_legacy_text(adherent_row[src_col])
             if new_val:
                 cur.execute(
                     f'UPDATE users SET "{dst_col}" = ?, updated_at = ? '
@@ -242,7 +253,7 @@ def upsert_user(cur, adherent_row, now_iso, field_map):
                 )
         return user_id, False
 
-    values = {dst: str(adherent_row[src] or "").strip() for src, dst in field_map.items()}
+    values = {dst: clean_legacy_text(adherent_row[src]) for src, dst in field_map.items()}
     values["last_name_key"] = k_last
     values["first_name_key"] = k_first
     values["birth_date"] = dob_iso
@@ -314,6 +325,10 @@ def migrate(skip_excel=False):
     cur.execute("PRAGMA user_version")
     version = cur.fetchone()[0]
     if version >= SCHEMA_TARGET_VERSION:
+        # Idempotent : garantir la présence de la vue de compatibilité (ex: bases migrées
+        # avant l'introduction de la vue), puis vérifier les comptages.
+        cur.execute(COMPAT_VIEW_SQL)
+        conn.commit()
         counts = {
             "users": cur.execute("SELECT COUNT(*) FROM users").fetchone()[0],
             "orders": cur.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
@@ -455,6 +470,7 @@ def migrate(skip_excel=False):
             print("\n❌ [MIGRATION V2] Écart détecté : ROLLBACK effectué, base inchangée.")
             return False
 
+        cur.execute(COMPAT_VIEW_SQL)
         cur.execute(f"PRAGMA user_version = {SCHEMA_TARGET_VERSION}")
         conn.commit()
         conn.close()
