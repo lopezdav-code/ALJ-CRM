@@ -118,7 +118,8 @@ def main():
     
     exit_code = app.exec()
     
-    # Vidage du fichier de logs à la fermeture de l'application
+    # Phase 7 — Fermeture propre : l'historique d'activité est conservé
+    # (plus de truncate à chaque fermeture, qui faisait perdre tout historique).
     try:
         # Restaurer les flux standards d'origine
         if hasattr(sys.stdout, "original_stream") and sys.stdout.original_stream:
@@ -129,11 +130,6 @@ def main():
         # Fermer le fichier de log s'il est ouvert
         if 'log_file' in locals() and log_file and not log_file.closed:
             log_file.close()
-            
-        # Vider complètement le fichier
-        if 'log_file_path' in locals() and os.path.exists(log_file_path):
-            with open(log_file_path, "w", encoding="utf-8") as lf:
-                lf.truncate(0)
     except Exception:
         pass
         
