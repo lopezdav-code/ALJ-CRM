@@ -71,8 +71,8 @@ class TestInfrastructureLot2(unittest.TestCase):
         # 3. Chargement des membres (Read)
         loaded = SqliteRepository.load_direct_data()
         self.assertEqual(len(loaded), 1)
-        self.assertEqual(loaded[0]["user_lastName"], "DUPONT")
-        self.assertEqual(loaded[0]["user_firstName"], "Jean")
+        self.assertEqual(loaded[0]["last_name"], "DUPONT")
+        self.assertEqual(loaded[0]["first_name"], "Jean")
         self.assertEqual(loaded[0]["amount"], 150.0)
         
         # 4. Mise à jour de membre (Update)
@@ -93,8 +93,8 @@ class TestInfrastructureLot2(unittest.TestCase):
         # Vérifier si les modifications sont présentes en base
         loaded_after_update = SqliteRepository.load_direct_data()
         self.assertEqual(len(loaded_after_update), 1)
-        self.assertEqual(loaded_after_update[0]["champ_Téléphone "], "0699999999")
-        self.assertEqual(loaded_after_update[0]["champ_Ville"], "Villeurbanne")
+        self.assertEqual(loaded_after_update[0]["phone"], "0699999999")
+        self.assertEqual(loaded_after_update[0]["city"], "Villeurbanne")
         self.assertEqual(loaded_after_update[0]["is_modified"], "Oui")
         self.assertEqual(loaded_after_update[0]["commentaires_correctif"], "Correction IHM")
         
@@ -243,16 +243,16 @@ class TestInfrastructureLot2(unittest.TestCase):
             loaded = SqliteRepository.load_direct_data()
             
             # Trouver les membres dans les données chargées
-            carlos = next(m for m in loaded if m["user_lastName"] == "MARTINEZ")
-            sophie = next(m for m in loaded if m["user_lastName"] == "DUBOIS")
+            carlos = next(m for m in loaded if m["last_name"] == "MARTINEZ")
+            sophie = next(m for m in loaded if m["last_name"] == "DUBOIS")
             
             # Carlos (par licence) -> Statut "Processed"
             self.assertEqual(carlos["status"], "Processed")
-            self.assertEqual(carlos["champ_Numéro de Licence FFME (6 chiffres)"], "112233")
+            self.assertEqual(carlos["licence_ffme"], "112233")
             
             # Sophie (par nom) -> Statut "Processed" et licence sauvegardée "445566"
             self.assertEqual(sophie["status"], "Processed")
-            self.assertEqual(sophie["champ_Numéro de Licence FFME (6 chiffres)"], "445566")
+            self.assertEqual(sophie["licence_ffme"], "445566")
             
         finally:
             # Nettoyage
@@ -338,8 +338,8 @@ class TestInfrastructureLot2(unittest.TestCase):
             # 5. Vérifier les mises à jour réelles en BDD
             loaded = SqliteRepository.load_direct_data()
 
-            luc = next(m for m in loaded if m["user_lastName"] == "RODRIGUEZ")
-            maria = next(m for m in loaded if m["user_lastName"] == "GARCIA")
+            luc = next(m for m in loaded if m["last_name"] == "RODRIGUEZ")
+            maria = next(m for m in loaded if m["last_name"] == "GARCIA")
 
             self.assertEqual(luc["badge_rouge"], "Oui")
             self.assertEqual(luc["autonomie_bloc"], "Oui")
@@ -593,7 +593,7 @@ class TestInfrastructureLot2(unittest.TestCase):
         
         # Charger et vérifier que c'est bien actif
         loaded = SqliteRepository.load_direct_data("2026-2027")
-        match = next(m for m in loaded if m["user_lastName"] == "CLAPET_TEST")
+        match = next(m for m in loaded if m["last_name"] == "CLAPET_TEST")
         self.assertEqual(match["status"], "Processed")
         self.assertEqual(match["order_ref"], "ORD-ACTIVE-123")
         
@@ -611,7 +611,7 @@ class TestInfrastructureLot2(unittest.TestCase):
         
         # Vérifier que la commande active a été CONSERVÉE (priorité supérieure)
         loaded = SqliteRepository.load_direct_data("2026-2027")
-        match = next(m for m in loaded if m["user_lastName"] == "CLAPET_TEST")
+        match = next(m for m in loaded if m["last_name"] == "CLAPET_TEST")
         self.assertEqual(match["status"], "Processed")
         self.assertEqual(match["order_ref"], "ORD-ACTIVE-123")
         self.assertEqual(float(match["amount"]), 246.0)
@@ -631,7 +631,7 @@ class TestInfrastructureLot2(unittest.TestCase):
         
         # Vérifier qu'il est bien Canceled
         loaded = SqliteRepository.load_direct_data("2026-2027")
-        match = next(m for m in loaded if m["user_lastName"] == "CLAPET_TEST2")
+        match = next(m for m in loaded if m["last_name"] == "CLAPET_TEST2")
         self.assertEqual(match["status"], "Canceled")
         
         # Upserter la version active
@@ -648,7 +648,7 @@ class TestInfrastructureLot2(unittest.TestCase):
         
         # Vérifier qu'il a bien été mis à jour à Processed
         loaded = SqliteRepository.load_direct_data("2026-2027")
-        match = next(m for m in loaded if m["user_lastName"] == "CLAPET_TEST2")
+        match = next(m for m in loaded if m["last_name"] == "CLAPET_TEST2")
         self.assertEqual(match["status"], "Processed")
         self.assertEqual(match["order_ref"], "ORD-ACTIVE-888")
 

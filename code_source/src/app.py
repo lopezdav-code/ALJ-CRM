@@ -10,7 +10,6 @@ if _script_dir not in sys.path:
 
 from PySide6.QtWidgets import QApplication
 from presentation.main_window import MainWindow
-from paths import ROOT_DIR
 
 def find_free_port(start_port=8000, max_port=8099):
     """Trouve un port local disponible en testant dynamiquement l'occupation."""
@@ -46,93 +45,49 @@ def start_backend_server(port):
         print(f"⚠️ [SYSTEM] Impossible de démarrer le serveur API local : {e}")
 
 def main():
-    # Configurer le logging unifié dans app_activity.log
-    import datetime
-    log_file_path = os.path.join(ROOT_DIR, "app_activity.log")
-    
-    class LoggerRedirector(object):
-        def __init__(self, original_stream, log_file, prefix="INFO"):
-            self.original_stream = original_stream
-            self.log_file = log_file
-            self.prefix = prefix
+    # Phase 10 - Logging structure : stdout -> INFO, stderr -> ERROR,
+    # fichier rotatif app_activity.log (historique conserve) + console.
+    from logger import PrintToLogInterceptor
+    sys.stdout = PrintToLogInterceptor(level=20)   # logging.INFO
+    sys.stderr = PrintToLogInterceptor(level=40)   # logging.ERROR
 
-        def write(self, str_val):
-            # Écrire sur le flux console d'origine
-            self.original_stream.write(str_val)
-            self.original_stream.flush()
-            # Écrire dans le fichier de log
-            if str_val.strip():
-                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                try:
-                    self.log_file.write(f"{now_str} [{self.prefix}] - {str_val.strip()}\n")
-                    self.log_file.flush()
-                except Exception:
-                    pass
-
-        def flush(self):
-            self.original_stream.flush()
-            try:
-                self.log_file.flush()
-            except Exception:
-                pass
-
-        def __getattr__(self, name):
-            return getattr(self.original_stream, name)
-
-    try:
-        log_file = open(log_file_path, "a", encoding="utf-8", buffering=1)
-        sys.stdout = LoggerRedirector(sys.stdout, log_file, "INFO")
-        sys.stderr = LoggerRedirector(sys.stderr, log_file, "ERROR")
-    except Exception as e:
-        print(f"⚠️ [SYSTEM] Impossible d'initialiser le fichier de log unifié : {e}")
-
-    # 1. Trouver un port réseau disponible
+    # 1. Trouver un port reseau disponible
     port = find_free_port()
     # 2. Stocker le port dans l'environnement pour que l'IHM puisse construire le bon lien URL
     os.environ["FASTAPI_PORT"] = str(port)
 
-    # 3. Lancer le serveur FastAPI en tâche de fond (daemon=True) sur le port trouvé
+    # 3. Lancer le serveur FastAPI en tache de fond (daemon=True) sur le port trouve
     server_thread = threading.Thread(target=start_backend_server, args=(port,), daemon=True)
     server_thread.start()
 
+    import datetime
     print("\n================================================================================")
-    print("🎬 [STARTUP] ALJ ESCALADE MANAGER — DÉMARRAGE DE L'APPLICATION (PySide6)")
+    print("🎬 [STARTUP] ALJ ESCALADE MANAGER - DEMARRAGE DE L'APPLICATION (PySide6)")
     print("================================================================================")
-    print(f"📂 Répertoire : {os.getcwd()}")
-    print(f"💻 Système   : {sys.platform}")
+    print(f"📂 Repertoire : {os.getcwd()}")
+    print(f"💻 Systeme   : {sys.platform}")
     print(f"⏳ Lancement : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("🚀 Initialisation et chargement de l'interface graphique (IHM)...")
-    
+
     app = QApplication(sys.argv)
-    
-    # Appliquer une police système propre par défaut
+
+    # Appliquer une police systeme propre par defaut
     font = app.font()
     font.setFamily("Segoe UI")
     font.setPointSize(10)
     app.setFont(font)
-    
+
     window = MainWindow()
     window.showMaximized()
-    print("✅ [SYSTEM] Interface graphique affichée avec succès et prête.")
-    
+    print("✅ [SYSTEM] Interface graphique affichee avec succes et prete.")
+
     exit_code = app.exec()
-    
-    # Phase 7 — Fermeture propre : l'historique d'activité est conservé
-    # (plus de truncate à chaque fermeture, qui faisait perdre tout historique).
-    try:
-        # Restaurer les flux standards d'origine
-        if hasattr(sys.stdout, "original_stream") and sys.stdout.original_stream:
-            sys.stdout = sys.stdout.original_stream
-        if hasattr(sys.stderr, "original_stream") and sys.stderr.original_stream:
-            sys.stderr = sys.stderr.original_stream
-            
-        # Fermer le fichier de log s'il est ouvert
-        if 'log_file' in locals() and log_file and not log_file.closed:
-            log_file.close()
-    except Exception:
-        pass
-        
+
+    # Fermeture propre : l'historique d'activite est conserve (fichier rotatif).
+    import logging
+    logging.shutdown()
     sys.exit(exit_code)
+
 
 if __name__ == "__main__":
     main()

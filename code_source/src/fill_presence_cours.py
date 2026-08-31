@@ -127,7 +127,7 @@ def audit_prefilled_members(prefilled_sections, df_db):
     # Pre-index database by normalized name for fast lookup
     db_by_name = {}
     for idx, row in df_db.iterrows():
-        norm_key = (normalize_string(row['user_lastName']), normalize_string(row['user_firstName']))
+        norm_key = (normalize_string(row["last_name"]), normalize_string(row["first_name"]))
         db_by_name[norm_key] = row
         
     for idx_sec, sec in enumerate(prefilled_sections, 1):
@@ -397,8 +397,8 @@ def main():
                 matches = df_valid[df_valid['tarif_name'].str.strip() == tariff]
                 for _, row in matches.iterrows():
                     section_members.append({
-                        "firstName": str(row['user_firstName']).strip(),
-                        "lastName": str(row['user_lastName']).strip()
+                        "firstName": str(row["first_name"]).strip(),
+                        "lastName": str(row["last_name"]).strip()
                     })
         else:
             if title not in ["Enfant 2019-2020"]: # Skip Enfant 2019-2020 on Monday since we know it has no tariff

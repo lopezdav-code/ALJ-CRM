@@ -47,6 +47,7 @@ class Member:
     is_tribe: str = ""
     licence_ffme: str = ""
     insurance: InsuranceOptions = field(default_factory=InsuranceOptions)
+    is_modified: str = "Non"
     commentaires_correctif: str = ""
     email_sent_date: str = ""
     member_id: str = ""
@@ -151,6 +152,7 @@ class Member:
             is_tribe=str(pick("champ_Famille : nous sommes une tribu de 3...", "is_tribe")).strip(),
             licence_ffme=clean_float_str(pick("champ_Numéro de Licence FFME (6 chiffres)", "licence_ffme")),
             insurance=ins,
+            is_modified=str(data.get("is_modified") or "Non").strip(),
             commentaires_correctif=str(data.get("commentaires_correctif") or "").strip(),
             email_sent_date=str(data.get("email_sent_date") or "").strip(),
             badge_rouge=str(data.get("badge_rouge") or "Non").strip(),
@@ -205,6 +207,7 @@ class Member:
             "opt_Montant Assurance Option VTT": self.insurance.amount_vtt,
             "opt_Assurance Option Trail": "Oui" if self.insurance.has_trail else "Non",
             "opt_Montant Assurance Option Trail": self.insurance.amount_trail,
+            "is_modified": self.is_modified,
             "commentaires_correctif": self.commentaires_correctif,
             "email_sent_date": self.email_sent_date,
             "badge_rouge": self.badge_rouge,

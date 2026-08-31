@@ -143,16 +143,23 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
         for idx, member in enumerate(participants_to_process, 1):
             try:
                 # Récupérer les informations de l'adhérent
-                user_last = member.get("user_lastName") or "".strip()
-                user_first = member.get("user_firstName") or "".strip()
+                def _pick(d, *keys, default=""):
+                    for k in keys:
+                        v = d.get(k)
+                        if v is not None and str(v).strip() != "":
+                            return v
+                    return default
+
+                user_last = str(_pick(member, "last_name", "user_lastName")).strip()
+                user_first = str(_pick(member, "first_name", "user_firstName")).strip()
                 
                 # S'il n'y a pas d'adhérent valide (nom et prénom vides), on passe
                 if not user_last and not user_first:
                     continue
                     
                 # Infos payeur (par défaut l'adhérent s'il n'y a pas d'infos payeur distinctes)
-                payer_last = member.get("payer_lastName") or "".strip() or user_last
-                payer_first = member.get("payer_firstName") or "".strip() or user_first
+                payer_last = str(_pick(member, "payer_last_name", "payer_lastName")).strip() or user_last
+                payer_first = str(_pick(member, "payer_first_name", "payer_firstName")).strip() or user_first
                 
                 # Montant payé et filtrage si 0 €
                 amount = member.get("amount", 0.0)
@@ -300,7 +307,7 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                 generated_count += 1
                 
             except Exception as member_err:
-                print(f"[ERREUR] Échec de la génération pour {member.get('user_lastName')} {member.get('user_firstName')} : {member_err}")
+                print(f"[ERREUR] Échec de la génération pour {member.get('last_name')} {member.get('first_name')} : {member_err}")
                 error_count += 1
                 
     finally:

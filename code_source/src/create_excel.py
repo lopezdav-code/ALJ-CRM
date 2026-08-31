@@ -213,8 +213,8 @@ def update_membership_excel():
             if o_ref.endswith(".0"):
                 o_ref = o_ref[:-2]
                 
-            f_name = normalize_name(p.get("user_firstName", ""))
-            l_name = normalize_name(p.get("user_lastName", ""))
+            f_name = normalize_name(p.get("first_name", ""))
+            l_name = normalize_name(p.get("last_name", ""))
             existing_keys.add((o_ref, f_name, l_name))
             
             # Calculer et enregistrer le score maximal existant pour cet adhérent
@@ -227,7 +227,7 @@ def update_membership_excel():
                 excel_order_counts[o_ref] += 1
             
             # Extraire la licence FFME de la BDD
-            lic_val = str(p.get("champ_Numéro de Licence FFME (6 chiffres)", "")).strip()
+            lic_val = str(p.get("licence_ffme", "")).strip()
             if lic_val.endswith(".0"):
                 lic_val = lic_val[:-2]
             if lic_val and lic_val.lower() not in ("", "nan", "aucune", "non"):
@@ -417,19 +417,19 @@ def generate_ffme_csv(participants_data, output_path=None):
         if "attente" in tarif_name or (amount == 0.0 and not is_manual) or "annul" in status or "cancel" in status or "termin" in status:
             continue
 
-        nom = str(p.get("user_lastName", "")).strip().upper()
+        nom = str(p.get("last_name", "")).strip().upper()
         if not nom: nom = "INCONNU"
 
-        prenom = str(p.get("user_firstName", "")).strip()
+        prenom = str(p.get("first_name", "")).strip()
         if not prenom: prenom = "INCONNU"
 
         # 1. Licence
-        lic_num = clean_digits_only(p.get("champ_Numéro de Licence FFME (6 chiffres)", ""))
+        lic_num = clean_digits_only(p.get("licence_ffme", ""))
         if len(lic_num) < 5 or len(lic_num) > 10:
             lic_num = ""
 
         # 2. DOB
-        dob_val = p.get("champ_Date de naissance de l'adhérent", "")
+        dob_val = p.get("birth_date", "")
         dob_date = None
         if isinstance(dob_val, (datetime.datetime, datetime.date)):
             dob_date = dob_val
@@ -446,7 +446,7 @@ def generate_ffme_csv(participants_data, output_path=None):
         dob = dob_date.strftime("%d/%m/%Y")
             
         # 3. Sexe
-        sexe_raw = str(p.get("champ_Sexe", "")).strip().upper()
+        sexe_raw = str(p.get("gender", "")).strip().upper()
         if sexe_raw.startswith(("M", "H", "G")):
             sexe = "H"
         elif sexe_raw.startswith(("F", "D")):
@@ -455,13 +455,13 @@ def generate_ffme_csv(participants_data, output_path=None):
             sexe = "" if lic_num else "H"
             
         # 4. Pays
-        pays_raw = str(p.get("champ_Pays", "France")).strip().upper()
+        pays_raw = str(p.get("country", "France")).strip().upper()
         pays = "FR" if "FR" in pays_raw or pays_raw == "FRANCE" or pays_raw == "" else pays_raw[:2]
         if not pays and not lic_num:
             pays = "FR"
             
         # 5. Nationalité
-        nat_raw = str(p.get("champ_Nationalité", "Francaise")).strip().upper()
+        nat_raw = str(p.get("nationality", "Francaise")).strip().upper()
         if "FR" in nat_raw or nat_raw == "FRANCE" or nat_raw == "":
             nat = "FR"
         elif "SUED" in nat_raw or "SWE" in nat_raw:
@@ -472,12 +472,12 @@ def generate_ffme_csv(participants_data, output_path=None):
             nat = "FR" if not lic_num else ""
             
         # 6. Adresse
-        adresse = str(p.get("champ_Adresse : numéro et nom de rue", "")).strip()[:255]
+        adresse = str(p.get("address", "")).strip()[:255]
         if not adresse and not lic_num:
             adresse = "ADRESSE NON COMMUNIQUEE"
             
         # 7. Code postal
-        cp = clean_digits_only(p.get("champ_Code postal", ""))
+        cp = clean_digits_only(p.get("zip_code", ""))
         if pays == "FR":
             if cp:
                 cp = cp.zfill(5)[:5]
@@ -487,12 +487,12 @@ def generate_ffme_csv(participants_data, output_path=None):
             cp = cp[:10]
             
         # 8. Ville
-        ville = str(p.get("champ_Ville", "")).strip().upper()[:100]
+        ville = str(p.get("city", "")).strip().upper()[:100]
         if not ville and not lic_num:
             ville = "JONAGE"
             
         # 9. Téléphones
-        tel_raw = clean_digits_only(p.get("champ_Téléphone ", ""))
+        tel_raw = clean_digits_only(p.get("phone", ""))
         if pays == "FR" and tel_raw:
             if tel_raw.startswith("33"):
                 tel_raw = "0" + tel_raw[2:]
@@ -500,16 +500,16 @@ def generate_ffme_csv(participants_data, output_path=None):
         tel = tel_raw
         
         # 10. Courriels
-        email = str(p.get("champ_Adresse mail pour la réception des informations du club", "")).strip().lower()[:100]
+        email = str(p.get("email_primary", "")).strip().lower()[:100]
         if not email:
             email = str(p.get("payer_email", "")).strip().lower()[:100]
         if not email and not lic_num:
             email = "contact@amicale-laique-jonage.fr"
             
-        email2 = str(p.get("champ_Deuxième adresse mail pour la réception des informations du club", "")).strip().lower()[:100]
+        email2 = str(p.get("email_secondary", "")).strip().lower()[:100]
         
         # 11. PAP
-        pap_raw = str(p.get("champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule", "")).strip()
+        pap_raw = str(p.get("emergency1_name", "")).strip()
         pap_nom = ""
         pap_prenom = ""
         if pap_raw:
@@ -520,10 +520,10 @@ def generate_ffme_csv(participants_data, output_path=None):
             else:
                 pap_nom = pap_raw.upper()[:100]
                 
-        pap_tel = clean_digits_only(p.get("champ_Personne à prévenir en cas d'urgence - Téléphone", ""))[:15]
+        pap_tel = clean_digits_only(p.get("emergency1_phone", ""))[:15]
         
         # 12. Type licence (J, A, F)
-        is_tribu = str(p.get("champ_Famille : nous sommes une tribu de 3 ou plus inscrits ce qui permet un code de réduction : FAMILLE", "")).lower()
+        is_tribu = str(p.get("is_tribe", "")).lower()
         if is_tribu in ("true", "vrai", "oui", "1"):
             type_licence = "F"
         else:

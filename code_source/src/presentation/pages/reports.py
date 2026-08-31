@@ -377,9 +377,9 @@ class ReportsPage(QWidget):
                 if "annul" in str(status).lower():
                     continue
                     
-                addr = row.get("champ_Adresse : numéro et nom de rue") or ""
-                city = row.get("champ_Ville") or ""
-                zip_code = row.get("champ_Code postal") or ""
+                addr = row.get("address") or ""
+                city = row.get("city") or ""
+                zip_code = row.get("zip_code") or ""
                 
                 city_upper = str(city).strip().upper() if city else ""
                 addr_clean = str(addr).strip() if addr else ""
@@ -406,7 +406,7 @@ class ReportsPage(QWidget):
                         
                 if not is_resolved:
                     unresolved_list.append({
-                        "name": f"{row.get('user_firstName', '').strip().title()} {row.get('user_lastName', '').strip().upper()}",
+                        "name": f"{row.get('first_name', '').strip().title()} {row.get('last_name', '').strip().upper()}",
                         "tarif": row.get("tarif_name") or "".strip() or "Aucun",
                         "address": f"{addr_clean}, {zip_clean} {city_upper}" if addr_clean else city_upper,
                         "status": "⚠️ Adresse non reconnue" if in_cache else "⏳ En attente de géocodage"
@@ -623,9 +623,9 @@ class ReportsPage(QWidget):
                 if "annul" in str(status).lower():
                     continue
                     
-                addr = row.get("champ_Adresse : numéro et nom de rue") or ""
-                city = row.get("champ_Ville") or ""
-                zip_code = row.get("champ_Code postal") or ""
+                addr = row.get("address") or ""
+                city = row.get("city") or ""
+                zip_code = row.get("zip_code") or ""
                 
                 city_upper = str(city).strip().upper() if city else ""
                 addr_clean = str(addr).strip() if addr else ""

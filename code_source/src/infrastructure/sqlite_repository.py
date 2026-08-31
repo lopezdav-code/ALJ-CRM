@@ -392,21 +392,23 @@ class SqliteRepository:
     @classmethod
     def export_to_excel(cls, file_path: str) -> bool:
         """
-        Exporte l'ensemble des données d'adhérents de la saison active SQLite vers un fichier Excel.
+        Phase 9 — Exporte les adhérents de la saison active vers un fichier Excel,
+        via Member.to_dict() (adaptateur vers le format colonnes historique).
         """
         cls.setup_database()
-        data = cls.load_direct_data(season_filter="2026-2027") # Filtrer sur la saison active !
+        members = cls.get_members(season_filter="2026-2027")
 
         excel_rows = []
-        for row in data:
+        for m in members:
+            d = m.to_dict()
             excel_row = {}
             # Reconstituer toutes les colonnes d'origine de CORRECTIVE_MAP
             for excel_col, cache_key in CORRECTIVE_MAP.items():
-                excel_row[excel_col] = row.get(cache_key, "")
+                excel_row[excel_col] = d.get(cache_key, "")
 
             # Ajouter les colonnes supplémentaires indispensables
             for col_key in EXTRA_COLUMNS.keys():
-                excel_row[col_key] = row.get(col_key, "")
+                excel_row[col_key] = d.get(col_key, "")
 
             excel_rows.append(excel_row)
 

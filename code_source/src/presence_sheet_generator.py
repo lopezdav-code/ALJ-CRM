@@ -318,7 +318,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         group_participants = participants_by_group[group_name]
         
         # Trier par prénom adhérent (user_firstName), insensible à la casse
-        group_participants.sort(key=lambda x: str(x.get("user_firstName") or "").strip().lower())
+        group_participants.sort(key=lambda x: str(x.get("first_name") or "").strip().lower())
         
         # 2. Charger une nouvelle copie du template
         wb = openpyxl.load_workbook(template_path)
@@ -567,8 +567,8 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         max_active_col = start_date_col + len(session_dates) - 1 if session_dates else start_date_col
         
         for p in group_participants:
-            first_name = str(p.get("user_firstName") or "").strip().capitalize()
-            last_name = str(p.get("user_lastName") or "").strip().upper()
+            first_name = str(p.get("first_name") or "").strip().capitalize()
+            last_name = str(p.get("last_name") or "").strip().upper()
             badge_rouge = str(p.get("badge_rouge", "Non")).strip()
             autonomie_bloc = str(p.get("autonomie_bloc", "Non")).strip()
             has_orange = "Oui" if "orange" in str(p.get("raw_passports") or "").lower() else "Non"
