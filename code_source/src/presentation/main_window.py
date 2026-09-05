@@ -573,11 +573,8 @@ class MainWindow(QMainWindow):
             members_page.base_model.update_data(members_list)
             members_page.update_counter(len(members_list))
             
-            # Actualiser le double filtre des tarifs sur la page des membres
-            members_page.tarif_type_filter.blockSignals(True)
-            members_page.tarif_type_filter.setCurrentIndex(0)
-            members_page.tarif_type_filter.blockSignals(False)
-            members_page.on_tarif_type_changed()
+            # Actualiser les filtres (tarifs + statuts dynamiques) sur la page des membres
+            members_page.notify_members_reloaded()
             
             print(f"✅ [SYSTEM] {len(members_list)} adhérents chargés de façon asynchrone au démarrage.")
             

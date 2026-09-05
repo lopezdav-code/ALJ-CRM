@@ -97,8 +97,8 @@ class TestPresentationLot5(unittest.TestCase):
              patch("os.path.exists", return_value=True) as mock_exists:
              
             page.open_template_folder()
-            mock_exists.assert_called_once_with(os.path.join(ROOT_DIR, "liste adhérent"))
-            mock_startfile.assert_called_once_with(os.path.join(ROOT_DIR, "liste adhérent"))
+            mock_exists.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
+            mock_startfile.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
 
 if __name__ == "__main__":
     unittest.main()

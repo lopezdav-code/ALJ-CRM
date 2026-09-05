@@ -3,15 +3,226 @@ import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QTableView, QHeaderView, QSplitter, QComboBox,
-    QDateEdit, QCheckBox
+    QDateEdit, QCheckBox, QPushButton, QDialog, QScrollArea,
+    QFrame, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
 
 from paths import ROOT_DIR
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
+from infrastructure.schema_v2 import normalize_status
 from presentation.components.member_table_model import MemberTableModel
 from presentation.components.member_detail_panel import MemberDetailPanel
+
+# Tarif isolé dans son propre sous-groupe de la pop-up de sélection, désélectionné par défaut
+WAITING_LIST_TARIF = "Liste d'attente cours"
+
+# Statut désélectionné par défaut dans la pop-up des statuts (onglet Communications)
+# pour ne jamais envoyer d'e-mail aux personnes ayant annulé leur inscription.
+CANCELLED_STATUS = "Annulé"
+
+class SubCategoryDialog(QDialog):
+    """
+    Pop-up de sélection multi-catégories : une case à cocher par sous-catégorie,
+    regroupées par type (Séance autonome, Cours, Compétition...),
+    avec boutons "Tout sélectionner" / "Tout désélectionner".
+    La sélection est appliquée en direct (la set `selected` est mutée par référence).
+    """
+    def __init__(self, groups, selected: set, on_change=None, parent=None,
+                 title="Sélection des sous-catégories"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+        self.selected = selected  # Set muté en direct par le dialogue
+        self.on_change = on_change
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 12)
+        layout.setSpacing(10)
+
+        self.checkboxes = []
+
+        # Zone défilante contenant les groupes de cases à cocher
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+
+        for group_name, tarifs in groups:
+            group_label = QLabel(group_name)
+            group_label.setStyleSheet(
+                "color: #1E293B; font-size: 12px; font-weight: bold;"
+                "margin-top: 8px; border-bottom: 1px solid #E2E8F0;"
+            )
+            container_layout.addWidget(group_label)
+            for tarif in tarifs:
+                cb = QCheckBox(tarif)
+                cb.setChecked(tarif in self.selected)
+                cb.setStyleSheet("color: #475569; font-size: 11px;")
+                cb.stateChanged.connect(lambda _, box=cb: self._on_checkbox_changed(box))
+                container_layout.addWidget(cb)
+                self.checkboxes.append(cb)
+
+        container_layout.addStretch(1)
+        scroll.setWidget(container)
+        layout.addWidget(scroll, 1)
+
+        # Boutons Tout sélectionner / Tout désélectionner
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self.select_all_btn = QPushButton("Tout sélectionner")
+        self.deselect_all_btn = QPushButton("Tout désélectionner")
+        for btn in (self.select_all_btn, self.deselect_all_btn):
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #F1F5F9;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 11px;
+                    color: #475569;
+                }
+                QPushButton:hover {
+                    background-color: #E2E8F0;
+                }
+            """)
+        self.select_all_btn.clicked.connect(self.select_all)
+        self.deselect_all_btn.clicked.connect(self.deselect_all)
+        btn_row.addWidget(self.select_all_btn)
+        btn_row.addWidget(self.deselect_all_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        # Bouton Fermer
+        close_box = QDialogButtonBox(QDialogButtonBox.Close)
+        close_box.setStyleSheet("""
+            QPushButton {
+                background-color: #3B82F6;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2563EB;
+            }
+        """)
+        close_box.rejected.connect(self.reject)
+        layout.addWidget(close_box)
+
+    def _on_checkbox_changed(self, box: QCheckBox):
+        if box.isChecked():
+            self.selected.add(box.text())
+        else:
+            self.selected.discard(box.text())
+        if self.on_change:
+            self.on_change()
+
+    def select_all(self):
+        for cb in self.checkboxes:
+            cb.blockSignals(True)
+            cb.setChecked(True)
+            cb.blockSignals(False)
+            self.selected.add(cb.text())
+        if self.on_change:
+            self.on_change()
+
+    def deselect_all(self):
+        for cb in self.checkboxes:
+            cb.blockSignals(True)
+            cb.setChecked(False)
+            cb.blockSignals(False)
+        self.selected.clear()
+        if self.on_change:
+            self.on_change()
+
+
+# ============================================================================
+# Fonctions réutilisables de construction des filtres (onglets Adhérents
+# et Communications) : regroupement des tarifs par type et liste des statuts.
+# ============================================================================
+
+def get_tariff_category(tarif_name: str) -> str:
+    """Retourne la catégorie principale associée à un nom de tarif."""
+    if not tarif_name:
+        return "Autre"
+    t_lower = tarif_name.lower()
+    if "autonome" in t_lower:
+        return "Séance autonome"
+    elif "compétition" in t_lower or "compet" in t_lower:
+        return "Compétition"
+    elif "cours" in t_lower or "loisir" in t_lower or "perfectionnement" in t_lower:
+        return "Cours"
+    return "Autre"
+
+def build_tarif_groups(members_list):
+    """Retourne les tarifs disponibles regroupés par catégorie, dans un ordre logique.
+    'Liste d'attente cours' est isolé dans son propre sous-groupe, placé en premier."""
+    unique_tarifs = sorted(set(m.tarif_name for m in members_list if m.tarif_name))
+    groups = {}
+    waiting = []
+    for t in unique_tarifs:
+        if t == WAITING_LIST_TARIF:
+            waiting.append(t)
+        else:
+            groups.setdefault(get_tariff_category(t), []).append(t)
+
+    order = ["Séance autonome", "Cours", "Compétition", "Autre"]
+    ordered_groups = [(g, groups[g]) for g in order if g in groups] + \
+                     [(g, groups[g]) for g in groups if g not in order]
+
+    # Sous-groupe distinct et seul pour la liste d'attente, en tête de la pop-up
+    if waiting:
+        ordered_groups.insert(0, ("Liste d'attente", waiting))
+    return ordered_groups
+
+def build_default_tarif_selection(members_list):
+    """Sélection par défaut des sous-catégories : toutes sauf la liste d'attente."""
+    return set(
+        m.tarif_name for m in members_list
+        if m.tarif_name and m.tarif_name != WAITING_LIST_TARIF
+    )
+
+def build_status_list(members_list):
+    """Liste des statuts présents chez les adhérents (normalisés, cf. schema_v2),
+    dans l'ordre canonique puis alphabétique."""
+    statuses = set(
+        normalize_status(m.status)
+        for m in members_list
+        if m.status and str(m.status).strip()
+    )
+    statuses.discard("")
+    statuses.discard("None")
+    canonical = ["Validé", "Traité", "Terminé", "En cours", "Annulé"]
+    return [s for s in canonical if s in statuses] + sorted(statuses - set(canonical))
+
+def parse_order_date(value):
+    """Parse une date d'inscription et retourne une date sans heure ni fuseau horaire
+    (formats gérés : ISO avec heure/fuseau '2026-08-12T09:27:29+02:00', ISO simple
+    '2025-09-01', 'JJ/MM/AAAA'). Retourne None si illisible."""
+    date_raw = str(value or "").strip()
+    if not date_raw:
+        return None
+    try:
+        return datetime.datetime.strptime(date_raw[:10], "%Y-%m-%d").date()
+    except ValueError:
+        pass
+    try:
+        import pandas as pd
+        parsed = pd.to_datetime(date_raw, utc=True, errors="coerce", dayfirst=True)
+        if pd.isna(parsed):
+            return None
+        return parsed.date()
+    except Exception:
+        return None
+
 
 class MembersPage(QWidget):
     """
@@ -20,6 +231,7 @@ class MembersPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.members_list = []
+        self.selected_sub_tarifs = set()  # Sous-catégories de tarif cochées dans la pop-up
         self.init_ui()
         # Ne pas charger de manière synchrone au démarrage pour optimiser le temps de lancement !
 
@@ -62,7 +274,7 @@ class MembersPage(QWidget):
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
 
-        # Barre des Filtres (Saison, Email valide, Tarifs, Email envoyé, Attestation générée)
+        # Barre des Filtres (Saison, Statuts, Tarifs, Email envoyé, Attestation générée)
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(8)
 
@@ -78,9 +290,10 @@ class MembersPage(QWidget):
         self.season_filter.currentIndexChanged.connect(self.on_season_changed)
         filters_layout.addWidget(self.season_filter)
 
-        # 1. Filtre par statut de commande
+        # 1. Filtre par statut de commande (dynamique : peuplé depuis les adhérents chargés,
+        #    cf. schema_v2.STATUS_NORMALIZATION)
         self.status_filter = QComboBox()
-        self.status_filter.addItems(["Tous les statuts", "Validated", "Terminé", "En cours", "Annulé"])
+        self.status_filter.addItems(["Tous les statuts"])
         self.status_filter.setStyleSheet(self.get_combobox_style())
         self.status_filter.currentIndexChanged.connect(self.on_filters_changed)
         filters_layout.addWidget(self.status_filter)
@@ -93,19 +306,26 @@ class MembersPage(QWidget):
         self.tarif_type_filter.currentIndexChanged.connect(self.on_tarif_type_changed)
         filters_layout.addWidget(self.tarif_type_filter)
 
-        # 2b. Filtre de sous-catégorie (tarif spécifique)
-        self.tarif_sub_filter = QComboBox()
-        self.tarif_sub_filter.addItems(["Toutes les sous-catégories"])
-        self.tarif_sub_filter.setStyleSheet(self.get_combobox_style())
-        self.tarif_sub_filter.currentIndexChanged.connect(self.on_filters_changed)
+        # 2b. Filtre de sous-catégorie (pop-up de sélection multi-critères, regroupée par type)
+        self.tarif_sub_filter = QPushButton("Toutes les sous-catégories ▾")
+        self.tarif_sub_filter.setCursor(Qt.PointingHandCursor)
+        self.tarif_sub_filter.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 11px;
+                color: #475569;
+                min-width: 110px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #F8FAFC;
+            }
+        """)
+        self.tarif_sub_filter.clicked.connect(self.open_sub_category_popup)
         filters_layout.addWidget(self.tarif_sub_filter)
-
-        # 3. Filtre Adresse mail valide
-        self.email_filter = QComboBox()
-        self.email_filter.addItems(["Tous les e-mails", "Avec e-mail", "Sans e-mail"])
-        self.email_filter.setStyleSheet(self.get_combobox_style())
-        self.email_filter.currentIndexChanged.connect(self.on_filters_changed)
-        filters_layout.addWidget(self.email_filter)
 
         # 4. Filtre Email envoyé
         self.sent_filter = QComboBox()
@@ -231,40 +451,92 @@ class MembersPage(QWidget):
 
     def get_tariff_category(self, tarif_name: str) -> str:
         """Retourne la catégorie principale associée à un nom de tarif."""
-        if not tarif_name:
-            return "Autre"
-        t_lower = tarif_name.lower()
-        if "autonome" in t_lower:
-            return "Séance autonome"
-        elif "compétition" in t_lower or "compet" in t_lower:
-            return "Compétition"
-        elif "cours" in t_lower or "loisir" in t_lower or "perfectionnement" in t_lower:
-            return "Cours"
-        return "Autre"
+        return get_tariff_category(tarif_name)
+
+    def get_tarif_groups(self):
+        """Retourne les tarifs disponibles regroupés par catégorie (pop-up de sélection)."""
+        return build_tarif_groups(self.members_list)
+
+    def get_default_sub_selection(self):
+        """Sélection par défaut des sous-catégories : toutes sauf la liste d'attente."""
+        return build_default_tarif_selection(self.members_list)
+
+    def update_sub_filter_button(self):
+        """Met à jour le libellé du bouton filtre de sous-catégories selon la sélection."""
+        count = len(self.selected_sub_tarifs)
+        if count == 0 or self.selected_sub_tarifs == self.get_default_sub_selection() | {WAITING_LIST_TARIF}:
+            self.tarif_sub_filter.setText("Toutes les sous-catégories ▾")
+        elif self.selected_sub_tarifs == self.get_default_sub_selection():
+            self.tarif_sub_filter.setText("Toutes sauf liste d'attente ▾")
+        else:
+            self.tarif_sub_filter.setText(f"Sous-catégories ({count}) ▾")
+
+    def open_sub_category_popup(self):
+        """Ouvre la pop-up de sélection des sous-catégories, regroupées par type."""
+        dialog = SubCategoryDialog(
+            self.get_tarif_groups(),
+            self.selected_sub_tarifs,
+            on_change=self.on_sub_selection_changed,
+            parent=self
+        )
+        dialog.exec()
+        self.on_filters_changed()
+
+    def on_sub_selection_changed(self):
+        """Déclenché à chaque changement de case à cocher dans la pop-up (filtrage en direct)."""
+        self.update_sub_filter_button()
+        self.on_filters_changed()
 
     def on_tarif_type_changed(self):
         """Déclenché lorsque la catégorie de tarif principale change."""
         type_sel = self.tarif_type_filter.currentText()
-        
-        # Bloquer temporairement les signaux pour éviter de déclencher on_filters_changed en boucle
-        self.tarif_sub_filter.blockSignals(True)
-        self.tarif_sub_filter.clear()
-        self.tarif_sub_filter.addItem("Toutes les sous-catégories")
-        
-        # Filtrer les tarifs uniques selon la catégorie principale sélectionnée
-        unique_tarifs = sorted(list(set([m.tarif_name for m in self.members_list if m.tarif_name])))
-        
-        filtered_sub = []
-        for t in unique_tarifs:
-            cat = self.get_tariff_category(t)
-            if type_sel == "Tous les types" or cat == type_sel:
-                filtered_sub.append(t)
-                
-        self.tarif_sub_filter.addItems(filtered_sub)
-        self.tarif_sub_filter.blockSignals(False)
-        
+
+        # Retirer les sous-catégories sélectionnées qui n'appartiennent plus au type choisi
+        if type_sel != "Tous les types":
+            self.selected_sub_tarifs = {
+                t for t in self.selected_sub_tarifs
+                if self.get_tariff_category(t) == type_sel
+            }
+            self.update_sub_filter_button()
+
         # Déclencher le filtrage global
         self.on_filters_changed()
+
+    def refresh_status_filter(self):
+        """Peuple dynamiquement le filtre de statuts : seuls les statuts possédant
+        au moins un adhérent dans la liste chargée sont affichés."""
+        self.status_filter.blockSignals(True)
+        previous = self.status_filter.currentText()
+        self.status_filter.clear()
+        self.status_filter.addItem("Tous les statuts")
+
+        ordered = build_status_list(self.members_list)
+        self.status_filter.addItems(ordered)
+
+        # Restaurer la sélection précédente si toujours disponible
+        idx = self.status_filter.findText(previous)
+        if idx > 0:
+            self.status_filter.setCurrentIndex(idx)
+        self.status_filter.blockSignals(False)
+
+    def notify_members_reloaded(self):
+        """À appeler après une injection/mise à jour de self.members_list (chargement
+        synchrone ou asynchrone) : réinitialise les filtres de tarifs (sélection par
+        défaut = tout sauf la liste d'attente), repeuple le filtre des statuts
+        et applique le tri par défaut sur la date d'inscription (la plus récente en premier)."""
+        self.tarif_type_filter.blockSignals(True)
+        self.tarif_type_filter.setCurrentIndex(0)
+        self.tarif_type_filter.blockSignals(False)
+        self.selected_sub_tarifs = self.get_default_sub_selection()
+        self.update_sub_filter_button()
+        self.refresh_status_filter()
+        self.on_filters_changed()
+
+        # Tri par défaut du tableau : date d'inscription décroissante (la plus récente en haut)
+        date_col = next(
+            i for i, c in enumerate(MemberTableModel.COLUMNS) if c[1] == "order_date"
+        )
+        self.table_view.sortByColumn(date_col, Qt.DescendingOrder)
 
     def on_season_changed(self):
         """Déclenché lorsque l'utilisateur change de saison dans la liste déroulante."""
@@ -304,14 +576,8 @@ class MembersPage(QWidget):
             self.base_model.update_data(self.members_list)
             self.update_counter(len(self.members_list))
             
-            # Mettre à jour les deux sous-filtres des tarifs
-            # On réinitialise d'abord le type de tarif à "Tous les types" pour repeupler correctement
-            self.tarif_type_filter.blockSignals(True)
-            self.tarif_type_filter.setCurrentIndex(0)
-            self.tarif_type_filter.blockSignals(False)
-            
-            # Repeupler le filtre des sous-catégories
-            self.on_tarif_type_changed()
+            # Réinitialiser les filtres de tarifs et peupler le filtre des statuts
+            self.notify_members_reloaded()
             
             print(f"✅ [MEMBERS] {len(self.members_list)} adhérents chargés dans l'IHM depuis SQLite.")
         except Exception as e:
@@ -325,8 +591,7 @@ class MembersPage(QWidget):
         search_text = self.search_input.text().strip().lower()
         status_sel = self.status_filter.currentText()
         type_sel = self.tarif_type_filter.currentText()
-        sub_sel = self.tarif_sub_filter.currentText()
-        email_sel = self.email_filter.currentText()
+        sub_selection = self.selected_sub_tarifs
         sent_sel = self.sent_filter.currentText()
         att_sel = self.attestation_filter.currentText()
 
@@ -342,34 +607,28 @@ class MembersPage(QWidget):
             if not match_search:
                 continue
 
-            # 2. Filtre de statut de commande
-            if status_sel != "Tous les statuts" and m.status != status_sel:
+            # 2. Filtre de statut de commande (comparaison sur statut normalisé : insensible
+            #    à la casse/accents, gère les variantes Processed/Canceled/Validated...)
+            if status_sel != "Tous les statuts" and normalize_status(m.status) != normalize_status(status_sel):
                 continue
 
-            # 3. Filtre de tarif (catégorie principale et sous-catégorie)
+            # 3. Filtre de tarif (catégorie principale et sous-catégories via la pop-up)
             if type_sel != "Tous les types":
                 m_cat = self.get_tariff_category(m.tarif_name)
                 if m_cat != type_sel:
                     continue
             
-            if sub_sel != "Toutes les sous-catégories" and m.tarif_name != sub_sel:
+            if sub_selection and m.tarif_name not in sub_selection:
                 continue
 
-            # 4. Filtre avec ou sans email
-            has_email = bool(m.primary_email or m.payer_email)
-            if email_sel == "Avec e-mail" and not has_email:
-                continue
-            if email_sel == "Sans e-mail" and has_email:
-                continue
-
-            # 5. Filtre email envoyé
+            # 4. Filtre email envoyé
             is_sent = bool(m.email_sent_date)
             if sent_sel == "Envoyés" and not is_sent:
                 continue
             if sent_sel == "Non envoyés" and is_sent:
                 continue
 
-            # 6. Filtre attestation générée
+            # 5. Filtre attestation générée
             from attestation_generator import get_safe_filename
             filename = get_safe_filename(m.user_last_name, m.user_first_name, m.order_ref)
             pdf_path = os.path.join(ROOT_DIR, "exports", "attestation", filename.replace(".docx", ".pdf"))
@@ -380,21 +639,17 @@ class MembersPage(QWidget):
             if att_sel == "Non générées" and has_pdf:
                 continue
 
-            # 7. Nouveau Filtre d'inscription après la date sélectionnée (croisement ultra-robuste)
+            # 6. Filtre d'inscription après la date sélectionnée
+            #    (comparaison de DATES sans heure/fuseau : les horodatages HelloAsso
+            #    avec fuseau '+02:00' étaient exclus à tort par une TypeError)
             if self.date_checkbox.isChecked():
-                import pandas as pd
                 filter_qdate = self.date_edit.date()
-                # Créer un objet datetime comparable
-                filter_dt = datetime.datetime(filter_qdate.year(), filter_qdate.month(), filter_qdate.day())
-                
-                try:
-                    m_dt = pd.to_datetime(m.order_date)
-                    if pd.isna(m_dt) or m_dt.to_pydatetime() < filter_dt:
-                        continue
-                except Exception:
+                filter_date = datetime.date(filter_qdate.year(), filter_qdate.month(), filter_qdate.day())
+                m_date = parse_order_date(m.order_date)
+                if m_date is None or m_date < filter_date:
                     continue
 
-            # 8. Filtre Nouveau membre (déjà adhérent == Non)
+            # 7. Filtre Nouveau membre (déjà adhérent == Non)
             if self.new_member_checkbox.isChecked():
                 if m.already_member != "Non":
                     continue

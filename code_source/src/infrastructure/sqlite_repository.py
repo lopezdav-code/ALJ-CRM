@@ -151,6 +151,14 @@ class SqliteRepository:
             """, default_templates)
             conn.commit()
         
+        # Création de la table de réglages applicatifs (clé/valeur) : texte WhatsApp, etc. (Nouveau !)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+        """)
+        
         # Phase 0/5 — Gestion de la version du schéma (PRAGMA user_version)
         cursor.execute("PRAGMA user_version")
         current_version = cursor.fetchone()[0]
@@ -526,39 +534,56 @@ class SqliteRepository:
         finally:
             conn.close()
     @classmethod
-    def merge_ffme_licensees(cls, excel_path: str) -> dict:
+    def prepare_ffme_licensees(cls, excel_path: str) -> dict:
         """
-        Phase 5 - Importe la liste des licencies FFME depuis un fichier Excel et la
-        fusionne avec les utilisateurs du schema v2 (licence, passeports, statut).
+        Phase A de l'import FFME — lit le fichier Excel, charge les utilisateurs et
+        applique le rapprochement automatique (N° de licence puis Nom/Prénom).
+        Ne modifie PAS la base. Retourne :
+          {
+            "updates":   [(match_type, licence, passeports, diplomas, user_id), ...],
+            "unmatched": [{"nom", "prenom", "licence", "birth_date", "passeports", "diplomes"}, ...],
+            "users":     [{"id", "last_name", "first_name", "licence_ffme", "birth_date"}, ...],
+            "stats":     {"total_processed", "matched_by_licence", "matched_by_name", "errors"},
+          }
         """
-        cls.create_db_backup()
         import pandas as pd
         from domain.utils import normalize_name
 
-        stats = {"total_processed": 0, "matched_by_licence": 0, "matched_by_name": 0,
-                 "not_found": 0, "errors": []}
+        prep = {"updates": [], "unmatched": [], "users": [],
+                "stats": {"total_processed": 0, "matched_by_licence": 0,
+                          "matched_by_name": 0, "errors": []}}
+        stats = prep["stats"]
 
         if not os.path.exists(excel_path):
             stats["errors"].append(f"Fichier introuvable : {excel_path}")
-            return stats
+            return prep
         try:
             df = pd.read_excel(excel_path)
         except Exception as e:
             stats["errors"].append(f"Erreur de lecture Excel : {e}")
-            return stats
+            return prep
 
         required_cols = ["Nom", "Pr\u00e9nom", "N\u00b0 de licence"]
         for col in required_cols:
             if col not in df.columns:
                 stats["errors"].append(f"Colonne requise manquante dans le fichier Excel : {col}")
-                return stats
+                return prep
 
         cls.setup_database()
         conn = cls.get_connection()
-        cursor = conn.cursor()
         try:
-            cursor.execute("SELECT id, last_name, first_name, licence_ffme, raw_passports FROM users")
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, last_name, first_name, licence_ffme,
+                       COALESCE(birth_date, birth_date_raw, '') AS birth_date
+                FROM users
+            """)
             users = [dict(row) for row in cursor.fetchall()]
+            prep["users"] = [
+                {"id": u["id"], "last_name": u["last_name"], "first_name": u["first_name"],
+                 "licence_ffme": u["licence_ffme"], "birth_date": u["birth_date"]}
+                for u in users
+            ]
 
             users_by_licence = {}
             users_by_name = {}
@@ -574,7 +599,12 @@ class SqliteRepository:
                 if nk and fk:
                     users_by_name[(nk, fk)] = u
 
-            updates = []  # (status, licence, passports, diplomas, user_id)
+            def _cell_str(row, key):
+                val = row.get(key)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    return ""
+                return str(val).strip() if not hasattr(val, "strftime") else val.strftime("%d/%m/%Y")
+
             for idx, row in df.iterrows():
                 stats["total_processed"] += 1
                 raw_lic = row["N\u00b0 de licence"]
@@ -598,41 +628,81 @@ class SqliteRepository:
                         match_type = "name"
                 if matched:
                     final_lic = lic_str if lic_str else str(matched["licence_ffme"] or "")
-                    passports_str = str(row.get("Passeports") or "").strip()
+                    passports_str = _cell_str(row, "Passeports")
                     if passports_str.lower() in ("nan", "none", ""):
                         passports_str = ""
-                    diplomas_str = str(row.get("Dipl\u00f4mes") or "").strip()
+                    diplomas_str = _cell_str(row, "Dipl\u00f4mes")
                     if diplomas_str.lower() in ("nan", "none", ""):
                         diplomas_str = ""
-                    updates.append(("Processed", final_lic, passports_str, diplomas_str, matched["id"]))
+                    prep["updates"].append(("Terminé", final_lic, passports_str, diplomas_str, matched["id"]))
                     if match_type == "licence":
                         stats["matched_by_licence"] += 1
                     else:
                         stats["matched_by_name"] += 1
                 else:
-                    stats["not_found"] += 1
-
-            if updates:
-                cursor.executemany("""
-                    UPDATE users
-                    SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
-                    WHERE id = ?
-                """, [(u[1], u[2], u[3], u[4]) for u in updates])
-                cursor.executemany("""
-                    UPDATE purchases
-                    SET status = ?, status_normalized = ?
-                    WHERE user_id = ? AND order_id IN (
-                        SELECT id FROM orders
-                        WHERE season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
-                    )
-                """, [(u[0], schema_v2.normalize_status(u[0]), u[4]) for u in updates])
-                conn.commit()
+                    prep["unmatched"].append({
+                        "nom": nom, "prenom": prenom, "licence": lic_str,
+                        "birth_date": _cell_str(row, "Date de naissance"),
+                        "passeports": _cell_str(row, "Passeports"),
+                        "diplomes": _cell_str(row, "Dipl\u00f4mes"),
+                    })
         except Exception as e:
-            conn.rollback()
-            stats["errors"].append(f"Erreur lors de la fusion en BDD : {e}")
+            stats["errors"].append(f"Erreur lors du rapprochement FFME : {e}")
         finally:
             conn.close()
+        return prep
+
+    @classmethod
+    def apply_ffme_matches(cls, updates: list) -> bool:
+        """
+        Phase B de l'import FFME — écrit en base les associations validées :
+        updates = [(match_type, licence, passeports, diplomas, user_id), ...]
+        Met à jour la licence/passeports/diplômes de l'utilisateur et bascule
+        ses achats de la saison active en statut "Terminé" (licence FFME confirmée).
+        """
+        if not updates:
+            return True
+        cls.create_db_backup()
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.executemany("""
+                UPDATE users
+                SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
+                WHERE id = ?
+            """, [(u[1], u[2], u[3], u[4]) for u in updates])
+            cursor.executemany("""
+                UPDATE purchases
+                SET status = ?, status_normalized = ?
+                WHERE user_id = ? AND order_id IN (
+                    SELECT id FROM orders
+                    WHERE season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
+                )
+            """, [(u[0], schema_v2.normalize_status(u[0]), u[4]) for u in updates])
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"[SQLITE] Erreur lors de la fusion FFME en BDD : {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    @classmethod
+    def merge_ffme_licensees(cls, excel_path: str) -> dict:
+        """
+        Import FFME non interactif (rétrocompatibilité / scripts) :
+        rapprochement automatique + écriture directe, sans association manuelle.
+        """
+        prep = cls.prepare_ffme_licensees(excel_path)
+        stats = prep["stats"]
+        if not stats["errors"]:
+            if not cls.apply_ffme_matches(prep["updates"]):
+                stats["errors"].append("Erreur lors de la fusion en BDD.")
+        stats["not_found"] = len(prep["unmatched"])
         return stats
+
     @classmethod
     def merge_autonomes_data(cls, excel_path: str) -> dict:
         """
@@ -1200,6 +1270,50 @@ class SqliteRepository:
             return cursor.rowcount > 0
         except Exception as e:
             print(f"❌ [SQLITE] Erreur lors de la suppression du template d'email '{name}' : {e}")
+            return False
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_whatsapp_template(cls) -> str:
+        """
+        Récupère le texte d'invitation WhatsApp personnalisé enregistré en BDD.
+        Retourne None si aucun texte n'a été sauvegardé.
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT value FROM app_settings WHERE key = ?", ("whatsapp_template",))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            value = row["value"]
+            return value if value and value.strip() else None
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de la récupération du texte WhatsApp : {e}")
+            return None
+        finally:
+            conn.close()
+
+    @classmethod
+    def save_whatsapp_template(cls, text: str) -> bool:
+        """
+        Enregistre ou met à jour le texte d'invitation WhatsApp personnalisé dans la BDD.
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO app_settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, ("whatsapp_template", text))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de l'enregistrement du texte WhatsApp : {e}")
             return False
         finally:
             conn.close()

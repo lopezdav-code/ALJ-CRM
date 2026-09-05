@@ -9,9 +9,11 @@ from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from paths import ROOT_DIR
 
 # Configuration paths
-COURS_PATH = os.path.join(ROOT_DIR, "liste adhérent", "Cours.xlsx")
-BACKUP_PATH = os.path.join(ROOT_DIR, "liste adhérent", "Cours - Template-Vide.xlsx")
-REPORT_PATH = os.path.join(ROOT_DIR, "liste adhérent", "Rapport_Remplissage_Cours.md")
+TEMPLATE_DIR = os.path.join(ROOT_DIR, "doc", "template")
+OUTPUT_DIR = os.path.join(ROOT_DIR, "exports", "liste adhérent")
+COURS_PATH = os.path.join(OUTPUT_DIR, "Cours.xlsx")
+BACKUP_PATH = os.path.join(TEMPLATE_DIR, "Cours - Template-Vide.xlsx")
+REPORT_PATH = os.path.join(OUTPUT_DIR, "Rapport_Remplissage_Cours.md")
 
 # Weekday names mapping
 DAYS_OF_WEEK = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
@@ -196,7 +198,7 @@ def main():
     
     # 1. Définir les chemins de template et de sortie dynamique
     template_path = BACKUP_PATH
-    old_default_path = os.path.join(ROOT_DIR, "liste adhérent", "Cours.xlsx")
+    old_default_path = os.path.join(ROOT_DIR, "exports", "liste adhérent", "Cours.xlsx")
     
     print(f"📋 Modèle (Template) utilisé pour le remplissage : {template_path}")
     
@@ -206,7 +208,8 @@ def main():
     new_filename = f"Cours-{date_str}-{time_str}.xlsx"
     
     global COURS_PATH
-    COURS_PATH = os.path.join(ROOT_DIR, "liste adhérent", new_filename)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    COURS_PATH = os.path.join(OUTPUT_DIR, new_filename)
     
     # 2. S'assurer de la présence du template d'origine
     if not os.path.exists(template_path):
@@ -219,7 +222,7 @@ def main():
             return None
             
     # 3. Déplacer l'ancien Cours.xlsx et les anciens Cours-*.xlsx dans le dossier d'archives
-    archive_dir = os.path.join(ROOT_DIR, "liste adhérent", "archive")
+    archive_dir = os.path.join(ROOT_DIR, "exports", "liste adhérent", "archive")
     os.makedirs(archive_dir, exist_ok=True)
     
     if os.path.exists(old_default_path):
@@ -231,7 +234,7 @@ def main():
         except Exception as e:
             print(f"⚠️ Impossible de déplacer l'ancien fichier de cours : {e}")
             
-    for f in glob.glob(os.path.join(ROOT_DIR, "liste adhérent", "Cours-*.xlsx")):
+    for f in glob.glob(os.path.join(ROOT_DIR, "exports", "liste adhérent", "Cours-*.xlsx")):
         # Ne pas déplacer le fichier en cours d'écriture
         if f != COURS_PATH:
             try:
@@ -597,9 +600,9 @@ def generate_report(db_path, audit_results, section_stats, missing_sections, pos
 
 Généré le : **{now_str}**
 Base de données source : `{os.path.basename(db_path)}`
-Nouveau fichier de cours généré : `liste adhérent/{cours_filename}`
-Fichier modèle de base utilisé : `liste adhérent/Cours - Template-Vide.xlsx`
-Historique des anciennes feuilles archivé dans : `liste adhérent/archive/`
+Nouveau fichier de cours généré : `exports/liste adhérent/{cours_filename}`
+Fichier modèle de base utilisé : `doc/template/Cours - Template-Vide.xlsx`
+Historique des anciennes feuilles archivé dans : `exports/liste adhérent/archive/`
 
 ---
 

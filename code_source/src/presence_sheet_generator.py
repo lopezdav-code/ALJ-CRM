@@ -4,7 +4,12 @@ import openpyxl
 import datetime
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from openpyxl.utils import range_boundaries, get_column_letter
+from openpyxl.worksheet.properties import PageSetupProperties
+from openpyxl.worksheet.page import PageMargins
 from paths import ROOT_DIR
+
+# Pictogramme compact remplaçant le mot "Autonomes" dans la colonne "Autorisation" (votre demande !)
+PICTO_AUTONOME = "🧗"
 
 def style_range(ws, cell_range, outer_side, inner_side=None):
     """Applique un contour extérieur et des bordures intérieures optionnelles à une plage de cellules."""
@@ -35,6 +40,65 @@ DAY_NAME_TO_WEEKDAY = {
     "dimanche": 7
 }
 
+# ============================================================================
+# Calendrier officiel de la saison 2026-2027 (Vacances Zone A) :
+# début/fin des cours, vacances scolaires, jours fériés et fermetures
+# exceptionnelles de la salle. Les fiches de présence ne listent que les
+# séances réelles : les dates tombant sur ces périodes sont exclues.
+# ============================================================================
+SEASON_COURSE_START = datetime.date(2026, 9, 14)   # Début des cours
+SEASON_COURSE_END = datetime.date(2027, 6, 25)     # Fin des cours
+
+PUBLIC_HOLIDAYS = {
+    datetime.date(2026, 11, 11): "Armistice 1918",
+    datetime.date(2027, 3, 29): "Lundi de Pâques",
+    datetime.date(2027, 5, 6): "Jeudi de l'Ascension",
+    datetime.date(2027, 5, 17): "Lundi de Pentecôte",
+}
+
+SCHOOL_HOLIDAYS_ZONE_A = [
+    ("Toussaint", datetime.date(2026, 10, 17), datetime.date(2026, 11, 2)),
+    ("Noël", datetime.date(2026, 12, 19), datetime.date(2027, 1, 4)),
+    ("Hiver", datetime.date(2027, 2, 13), datetime.date(2027, 3, 1)),
+    ("Printemps", datetime.date(2027, 4, 10), datetime.date(2027, 4, 26)),
+]
+
+SALLE_CLOSURES = [
+    ("Championnat régional U11-U13", datetime.date(2027, 3, 19), datetime.date(2027, 4, 4)),
+]
+
+def is_course_day(day: datetime.date) -> bool:
+    """True si une séance peut avoir lieu ce jour (hors vacances scolaires,
+    jours fériés, fermetures de salle et hors période de cours de la saison)."""
+    if day < SEASON_COURSE_START or day > SEASON_COURSE_END:
+        return False
+    if day in PUBLIC_HOLIDAYS:
+        return False
+    for _, h_start, h_end in SCHOOL_HOLIDAYS_ZONE_A:
+        if h_start <= day <= h_end:
+            return False
+    for _, c_start, c_end in SALLE_CLOSURES:
+        if c_start <= day <= c_end:
+            return False
+    return True
+
+def find_group_qrcode(*candidate_names):
+    """Cherche le QRCode WhatsApp d'un groupe dans exports/qrcodes.
+    Retourne le chemin du fichier .png ou None si introuvable."""
+    qrcodes_dir = os.path.join(ROOT_DIR, "exports", "qrcodes")
+    if not os.path.isdir(qrcodes_dir):
+        return None
+    for name in candidate_names:
+        if not name:
+            continue
+        safe = "".join([c for c in str(name) if c.isalnum() or c in (" ", "-", "_")]).strip()
+        if not safe:
+            continue
+        path = os.path.join(qrcodes_dir, f"QRCode_WhatsApp_{safe}.png")
+        if os.path.exists(path):
+            return path
+    return None
+
 def clean_filename(name):
     """Nettoie le nom d'un groupe pour en faire un nom de fichier valide."""
     safe = "".join(c for c in name if c.isalnum() or c in (" ", "-", "_"))
@@ -42,6 +106,33 @@ def clean_filename(name):
     # Limiter la longueur et retirer les d'underscores multiples
     safe = re.sub(r'_{2,}', '_', safe)
     return safe.strip("_")
+
+def _parse_birthdate(val):
+    """Convertit une date de naissance (datetime, date ou texte) en datetime.date, ou None si illisible."""
+    if isinstance(val, datetime.datetime):
+        return val.date()
+    if isinstance(val, datetime.date):
+        return val
+    s = str(val or "").strip()
+    if not s or s.lower() in ("nat", "none", "nan"):
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d/%m/%y"):
+        try:
+            if "T" in s and fmt == "%Y-%m-%dT%H:%M:%S":
+                return datetime.datetime.strptime(s[:19], fmt).date()
+            return datetime.datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+def _identity_key(p):
+    """Clé d'identité simple d'un participant (prénom, nom, date de naissance) pour éviter les doublons."""
+    dob = _parse_birthdate(p.get("champ_Date de naissance de l'adhérent"))
+    return (
+        str(p.get("first_name") or "").strip().lower(),
+        str(p.get("last_name") or "").strip().lower(),
+        dob.isoformat() if dob else ""
+    )
 
 def format_encadrants(encadrants_list):
     """Sépare les prénoms et noms des encadrants pour correspondre aux cases séparées du template."""
@@ -203,13 +294,13 @@ def find_planning_match_dynamically(tarif_name, planning_data):
         
     return None
 
-def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False):
+def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False):
     """
     Génère des feuilles de présence au format Excel pour les groupes spécifiés.
     Génère un fichier par groupe de tarif (colonne tarif_name) ou un seul fichier fusionné (Nouveau !).
     """
     root_dir = ROOT_DIR
-    template_path = os.path.join(root_dir, "Template Export liste adhérents à imprimer.xlsx")
+    template_path = os.path.join(root_dir, "doc", "template", "Template Export liste adhérents à imprimer.xlsx")
     output_dir = os.path.join(root_dir, "exports", "fiches_presence")
     
     os.makedirs(output_dir, exist_ok=True)
@@ -252,16 +343,12 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
 
     border_cell_thin = Border(left=thin_gray, right=thin_gray, top=thin_gray, bottom=thin_gray)
     border_cell_header = Border(left=thin_gray, right=thin_gray, top=thick_blue, bottom=double_blue)
-    border_metadata = Border(left=thick_blue, right=thick_blue, top=thick_blue, bottom=thick_blue)
 
     # Couleurs de fond
     fill_zebra_light_gray = PatternFill(start_color="EAEAEA", end_color="EAEAEA", fill_type="solid") # Une ligne sur deux active
     fill_white = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
     fill_header_date = PatternFill(start_color="F2F4F8", end_color="F2F4F8", fill_type="solid") # En-tête des dates
-    fill_metadata = PatternFill(start_color="E6EEF8", end_color="E6EEF8", fill_type="solid") # En-têtes groupe / encadrants
 
-    font_slot_title = Font(name="Segoe UI", size=16, bold=True, color="1E3A8A") # TITRE DU CRENEAU EN GROS (E1)
-    font_metadata = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
     font_date_header = Font(name="Segoe UI", size=8, bold=True, color="374151")
     font_student_name = Font(name="Segoe UI", size=9, bold=False, color="1F2937")
 
@@ -282,13 +369,13 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             if g == "Adultes & Jeunes Adultes autonomes":
                 sub_parts = [
                     p for p in participants_data 
-                    if p.get("tarif_name") or "".strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
+                    if str(p.get("tarif_name") or "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
                     and "annul" not in str(p.get("status") or "").lower()
                 ]
             else:
                 sub_parts = [
                     p for p in participants_data 
-                    if p.get("tarif_name") or "".strip() == g
+                    if str(p.get("tarif_name") or "").strip() == g
                     and "annul" not in str(p.get("status") or "").lower()
                 ]
             for p in sub_parts:
@@ -303,19 +390,49 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             if group_name == "Adultes & Jeunes Adultes autonomes":
                 participants_by_group[group_name] = [
                     p for p in participants_data 
-                    if p.get("tarif_name") or "".strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
+                    if str(p.get("tarif_name") or "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
                     and "annul" not in str(p.get("status") or "").lower()
                 ]
             else:
                 participants_by_group[group_name] = [
                     p for p in participants_data 
-                    if p.get("tarif_name") or "".strip() == group_name
+                    if str(p.get("tarif_name") or "").strip() == group_name
                     and "annul" not in str(p.get("status") or "").lower()
                 ]
         loop_groups = selected_groups
 
+    # Si auth_only : repérer les jeunes mineurs avec au moins une autorisation parentale
+    # (Autonomes / Famille), répartis dans l'ensemble des groupes, afin de les AJOUTER
+    # en plus des membres de la sélection, sans rien retirer (votre demande !)
+    authorized_minors = []
+    if auth_only:
+        today = datetime.date.today()
+        for p in participants_data:
+            has_auth = (
+                str(p.get("parental_auth_autonomous") or "").strip() == "Oui"
+                or str(p.get("parental_auth_family") or "").strip() == "Oui"
+            )
+            if not has_auth:
+                continue
+            dob = _parse_birthdate(p.get("champ_Date de naissance de l'adhérent"))
+            # Mineur = moins de 18 ans ; si la date de naissance est absente/illisible, on se fie au drapeau d'autorisation
+            if dob is not None:
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                if age >= 18:
+                    continue
+            authorized_minors.append(p)
+
     for group_name in loop_groups:
         group_participants = participants_by_group[group_name]
+        
+        # Ajouter les mineurs autorisés à la sélection, sans créer de doublon (votre demande !)
+        if authorized_minors:
+            existing_keys = [_identity_key(p) for p in group_participants]
+            for minor in authorized_minors:
+                minor_key = _identity_key(minor)
+                if minor_key not in existing_keys:
+                    group_participants.append(minor)
+                    existing_keys.append(minor_key)
         
         # Trier par prénom adhérent (user_firstName), insensible à la casse
         group_participants.sort(key=lambda x: str(x.get("first_name") or "").strip().lower())
@@ -455,63 +572,31 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         if not group_days:
             group_days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
                     
-        coach_last, coach_first = format_encadrants(encadrants_list)
         count_members = len(group_participants)
         
-        # 4. Remplir les cellules d'en-tête du template et appliquer du style/bordures
+        # 4. Préparer l'en-tête : titre, horaire, puis suppression des anciens éléments
         ws.sheet_view.showGridLines = False
         
-        formatted_coaches = f"{coach_first} {coach_last}".strip()
-        formatted_coaches = formatted_coaches if formatted_coaches != "- -" else "-"
-        
-        # Si impression fusionnée, ne pas noter les horaires et le nom des encadrants dans G2 et L2 (votre demande !)
-        if merge_groups:
-            formatted_coaches = "-"
-            horaire = "-"
-        
-        # Nettoyage des anciennes cases C1:Q2 si elles existaient dans le template
-        for r in range(1, 3):
-            for c_idx in range(3, 18):
+        # Nettoyage complet des lignes 1 à 3 (ancien logo, nom de groupe, créneau, encadrants, horaire)
+        for r in range(1, 4):
+            for c_idx in range(1, 101):
                 cell_to_clean = ws.cell(row=r, column=c_idx)
                 cell_to_clean.value = None
                 cell_to_clean.border = Border()
                 cell_to_clean.fill = PatternFill(fill_type=None)
 
-        ws['C1'] = group_name  # Nom du groupe
-        ws['C2'] = f"Créneau : {count_members} personnes"
-        ws['G2'] = formatted_coaches
-        ws['L2'] = f"Horaire : {horaire}"
+        # 4b. Titre de la fiche : nom du groupe (ligne 1) et horaire (ligne 2)
+        title_cell = ws.cell(row=1, column=1, value=group_name)
+        title_cell.font = Font(name="Segoe UI", size=14, bold=True, color="1E3A8A")
+        title_cell.alignment = align_left
+        ws.row_dimensions[1].height = 24
 
-        # Style du bloc d'en-tête C1:O2 en une seule "carte"
-        ws.merge_cells("C1:O1")
-        ws.merge_cells("C2:F2")
-        ws.merge_cells("G2:K2")
-        ws.merge_cells("L2:O2")
-
-        for row in range(1, 3):
-            for col in range(3, 16):
-                c = ws.cell(row=row, column=col)
-                c.fill = fill_metadata
-                if row == 1:
-                    c.font = font_slot_title
-                    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                else:
-                    c.font = font_metadata
-
-        # Alignements spécifiques pour la ligne 2
-        ws['C2'].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        ws['G2'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        ws['L2'].alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-
-        # Bordure globale pour toute la carte C1:O2
-        style_range(ws, "C1:O2", thick_blue, inner_side=thin_gray)
-        
-        # Vider entièrement la ligne 3 pour qu'elle reste vide (Saut de ligne sous l'en-tête)
-        for col in range(1, 100):
-            c_cell = ws.cell(row=3, column=col)
-            c_cell.value = None
-            c_cell.border = Border()
-            c_cell.fill = PatternFill(fill_type=None)
+        horaire_cell = ws.cell(row=2, column=1, value=f"🕐 Horaire : {horaire}")
+        horaire_cell.font = Font(name="Segoe UI", size=10, bold=True, color="374151")
+        horaire_cell.alignment = align_left
+        ws.row_dimensions[2].height = 16
+        # Ligne 3 : espaceur fin avant le tableau
+        ws.row_dimensions[3].height = 6
 
         # 5. Remplir la ligne 4 avec les dates de séances calculées et les nouvelles colonnes Badge Rouge / Passeport Orange
         session_dates = []
@@ -520,23 +605,30 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             if target_weekdays:
                 curr = start_date
                 while curr <= end_date:
-                    if curr.isoweekday() in target_weekdays:
+                    # Uniquement les jours du créneau du groupe, hors vacances/fériés/fermetures
+                    if curr.isoweekday() in target_weekdays and is_course_day(curr):
                         session_dates.append(curr)
                     curr += datetime.timedelta(days=1)
                     
         # Définir l'en-tête pour les trois colonnes d'audits de badges et d'autonomie FFME
-        ws.cell(row=4, column=3, value="Badge rouge")
-        ws.cell(row=4, column=4, value="Bloc")
-        ws.cell(row=4, column=5, value="Passeport Orange")
-        ws.column_dimensions['C'].width = 12
-        ws.column_dimensions['D'].width = 8
-        ws.column_dimensions['E'].width = 15
+        # (masquables via l'option "Masquer les colonnes Badge/Bloc/Passeport" pour gagner de la place)
+        if hide_badge_cols:
+            start_date_col = 4 if auth_only else 3
+            auth_col = 3
+        else:
+            ws.cell(row=4, column=3, value="Badge rouge")
+            ws.cell(row=4, column=4, value="Bloc")
+            ws.cell(row=4, column=5, value="Passeport Orange")
+            ws.column_dimensions['C'].width = 12
+            ws.column_dimensions['D'].width = 8
+            ws.column_dimensions['E'].width = 15
+            start_date_col = 7 if auth_only else 6
+            auth_col = 6
 
-        start_date_col = 7 if auth_only else 6
         if auth_only:
-            # Saisie de l'en-tête "Autorisation" en colonne F (6) (votre demande !)
-            ws.cell(row=4, column=6, value="Autorisation")
-            ws.column_dimensions['F'].width = 18
+            # Saisie de l'en-tête "Autorisation" (colonne F, ou C si badges masqués)
+            ws.cell(row=4, column=auth_col, value="Autorisation")
+            ws.column_dimensions[get_column_letter(auth_col)].width = 13
 
         if session_dates:
             col_idx = start_date_col # Les dates de séances commencent maintenant à la colonne F (Col 6) ou G (Col 7)
@@ -569,28 +661,32 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         for p in group_participants:
             first_name = str(p.get("first_name") or "").strip().capitalize()
             last_name = str(p.get("last_name") or "").strip().upper()
-            badge_rouge = str(p.get("badge_rouge", "Non")).strip()
-            autonomie_bloc = str(p.get("autonomie_bloc", "Non")).strip()
-            has_orange = "Oui" if "orange" in str(p.get("raw_passports") or "").lower() else "Non"
             
-            # Saisie de prénom, nom, badge rouge, autonomie bloc et passeport orange
+            # Saisie de prénom et nom (+ colonnes d'audit badges si non masquées)
             cell_first = ws.cell(row=row_idx, column=1, value=first_name)
             cell_last = ws.cell(row=row_idx, column=2, value=last_name)
-            cell_badge = ws.cell(row=row_idx, column=3, value=badge_rouge)
-            cell_bloc = ws.cell(row=row_idx, column=4, value=autonomie_bloc)
-            cell_orange = ws.cell(row=row_idx, column=5, value=has_orange)
             
-            cells_to_style = [cell_first, cell_last, cell_badge, cell_bloc, cell_orange]
+            cells_to_style = [cell_first, cell_last]
+            
+            if not hide_badge_cols:
+                badge_rouge = str(p.get("badge_rouge", "Non")).strip()
+                autonomie_bloc = str(p.get("autonomie_bloc", "Non")).strip()
+                has_orange = "Oui" if "orange" in str(p.get("raw_passports") or "").lower() else "Non"
+                cell_badge = ws.cell(row=row_idx, column=3, value=badge_rouge)
+                cell_bloc = ws.cell(row=row_idx, column=4, value=autonomie_bloc)
+                cell_orange = ws.cell(row=row_idx, column=5, value=has_orange)
+                cells_to_style += [cell_badge, cell_bloc, cell_orange]
             
             if auth_only:
                 # Composer les autorisations (votre demande !)
                 auths = []
                 if str(p.get("parental_auth_autonomous", "Non")).strip() == "Oui":
-                    auths.append("Autonomes")
+                    auths.append(PICTO_AUTONOME)
                 if str(p.get("parental_auth_family", "Non")).strip() == "Oui":
                     auths.append("Famille")
-                auths_str = ", ".join(auths) if auths else "Aucune"
-                cell_auth = ws.cell(row=row_idx, column=6, value=auths_str)
+                # Toujours créer la cellule (même vide) pour conserver le fond zébré
+                # une ligne sur deux, comme les autres colonnes (correction !)
+                cell_auth = ws.cell(row=row_idx, column=auth_col, value=", ".join(auths) if auths else None)
                 cells_to_style.append(cell_auth)
             
             # Alternance couleur (une ligne sur deux)
@@ -627,9 +723,35 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 c_cell.value = None
                 c_cell.fill = no_fill
                 c_cell.border = no_border
+
+        # 6b. QRCode WhatsApp du groupe (si disponible), placé SOUS le tableau en colonne A
+        qr_candidates = [
+            match_info.get("groupe_planning") if match_info else None,
+            lookup_name,
+            group_name,
+        ]
+        if merge_groups:
+            qr_candidates.extend(selected_groups)
+        qr_path = find_group_qrcode(*qr_candidates)
+        # table_bottom_row vaut row_idx - 1 : le QR est placé 2 lignes sous le tableau
+        qr_anchor_row = row_idx + 1
+        if qr_path:
+            try:
+                from openpyxl.drawing.image import Image as XLImage
+                qr_img = XLImage(qr_path)
+                qr_img.width = 90   # pixels
+                qr_img.height = 90  # pixels
+                ws.add_image(qr_img, f"A{qr_anchor_row}")
+                print(f"[PRESENCE] QRCode du groupe ajouté sous le tableau : {os.path.basename(qr_path)}")
+            except Exception as qr_err:
+                print(f"[ATTENTION PRESENCE] Impossible d'ajouter le QRCode : {qr_err}")
                 
         # Style pour la ligne 4 (Prénom / Nom / Badge / Bloc / Passeport en-têtes de colonnes)
-        header_cols = (1, 2, 3, 4, 5, 6) if auth_only else (1, 2, 3, 4, 5)
+        header_cols = [1, 2]
+        if not hide_badge_cols:
+            header_cols += [3, 4, 5]
+        if auth_only:
+            header_cols.append(auth_col)
         for c_idx in header_cols:
             cell_hdr = ws.cell(row=4, column=c_idx)
             cell_hdr.font = font_date_header
@@ -654,6 +776,17 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                             top=cell_border.border.top or thin_gray,
                             bottom=cell_border.border.bottom or thin_gray
                         )
+
+        # 7b. Trait épais de séparation avant la première colonne de dates
+        # (même style que les séparateurs de changement de mois)
+        for r_border in range(4, row_idx):
+            cell_border = ws.cell(row=r_border, column=start_date_col)
+            cell_border.border = Border(
+                left=medium_black,
+                right=cell_border.border.right,
+                top=cell_border.border.top,
+                bottom=cell_border.border.bottom
+            )
 
         # 8. Ajouter une bordure extérieure épaisse pour tout le tableau (ligne 4 à row_idx - 1)
         table_top_row = 4
@@ -681,23 +814,38 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                     
                 cell.border = Border(left=b_left, right=b_right, top=b_top, bottom=b_bottom)
 
-        # 9. Ajouter le logo logo.png s'il existe à l'emplacement A1
-        logo_path = os.path.join(root_dir, "logo.png")
-        if os.path.exists(logo_path):
-            try:
-                from openpyxl.drawing.image import Image
-                img = Image(logo_path)
-                # Adapter la taille pour un rendu élégant (90x90 px)
-                img.width = 90
-                img.height = 90
-                ws.add_image(img, 'A1')
-                print("[PRESENCE] Logo inséré avec succès en A1.")
-            except Exception as ie:
-                print(f"[ATTENTION PRESENCE] Impossible d'insérer le logo : {ie}")
-                
-        # 9. Forcer la mise en page en A3 Vertical (Portrait) pour l'impression
-        ws.page_setup.orientation = 'portrait'  # Portrait
+        # 9. Mise en page calculée pour une impression A3 Paysage (votre demande !)
+        ws.page_setup.orientation = 'landscape'  # Paysage
         ws.page_setup.paperSize = 8  # PAPERSIZE_A3 (8 dans Excel Page Setup)
+        
+        # Calcul de la largeur totale du tableau (1 unité de largeur Excel ≈ 2,05 mm)
+        total_width_units = 0
+        for col in range(1, max_active_col + 1):
+            dim = ws.column_dimensions[get_column_letter(col)]
+            total_width_units += dim.width if dim.width else 8.43
+        # Largeur utile d'un A3 paysage : 420 mm - marges gauche/droite (0,3" x 2)
+        printable_width_mm = 420 - (0.3 + 0.3) * 25.4
+        estimated_scale = int(printable_width_mm / (total_width_units * 2.05) * 100)
+        
+        if estimated_scale >= 55:
+            # Le tableau tient en largeur : ajustement automatique sur une page de large
+            # et répartition des lignes sur autant de pages que nécessaire.
+            ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+        else:
+            # Tableau trop large pour rester lisible : échelle plafonnée à 55 %,
+            # les colonnes excédentaires passent sur les pages suivantes.
+            ws.page_setup.scale = 55
+            
+        # Sauts de page : répéter la ligne des en-têtes de colonnes (ligne 4) en haut
+        # de chaque page (page 2, 3, ...) et Prénom/Nom si débordement horizontal.
+        ws.print_title_rows = '4:4'
+        ws.print_title_cols = 'A:B'
+        # La zone d'impression inclut les lignes 1-2 (titre + horaire) et le QRCode sous le tableau
+        print_bottom_row = qr_anchor_row + 6 if qr_path else table_bottom_row
+        ws.print_area = f"A1:{get_column_letter(max_active_col)}{print_bottom_row}"
+        ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
         
         # 10. Sauvegarder le fichier Excel de manière sécurisée
         safe_name = clean_filename(group_name)

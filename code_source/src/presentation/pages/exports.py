@@ -323,9 +323,9 @@ class ExportsPage(QWidget):
             self.ffme_stats_lbl.setText(f"⚠️ Impossible de charger les statistiques de l'export FFME : {e}")
 
     def open_template_folder(self):
-        """Ouvre le dossier contenant le modèle de présence dans l'explorateur Windows."""
+        """Ouvre le dossier contenant les modèles de documents dans l'explorateur Windows."""
         import os
-        template_dir = os.path.join(ROOT_DIR, "liste adhérent")
+        template_dir = os.path.join(ROOT_DIR, "doc", "template")
         if os.path.exists(template_dir):
             try:
                 os.startfile(template_dir)
@@ -341,6 +341,7 @@ class ExportsPage(QWidget):
         end_date_str = None
         merge_groups = False
         auth_only = False
+        hide_badge_cols = False
         cours_pdf = False
         
         if export_type == "presence":
@@ -363,6 +364,7 @@ class ExportsPage(QWidget):
                 end_date_str = dialog.end_date_str
                 merge_groups = dialog.merge_groups
                 auth_only = dialog.auth_only  # Nouveau !
+                hide_badge_cols = dialog.hide_badge_cols  # Nouveau !
             except Exception as e:
                 QMessageBox.critical(self, "Erreur d'initialisation", f"Impossible d'analyser les groupes pour l'export : {e}")
                 return
@@ -384,7 +386,8 @@ class ExportsPage(QWidget):
             end_date_str=end_date_str,
             merge_groups=merge_groups,
             auth_only=auth_only,
-            cours_pdf=cours_pdf  # Nouveau !
+            cours_pdf=cours_pdf,  # Nouveau !
+            hide_badge_cols=hide_badge_cols  # Nouveau !
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
@@ -407,7 +410,7 @@ class ExportsPage(QWidget):
                 # Lire et afficher le rapport détaillé de remplissage dans la console de logs !
                 try:
                     from paths import ROOT_DIR
-                    report_path = os.path.join(ROOT_DIR, "liste adhérent", "Rapport_Remplissage_Cours.md")
+                    report_path = os.path.join(ROOT_DIR, "exports", "liste adhérent", "Rapport_Remplissage_Cours.md")
                     if os.path.exists(report_path):
                         with open(report_path, "r", encoding="utf-8") as rf:
                             report_content = rf.read()
@@ -431,6 +434,7 @@ class ExportsPage(QWidget):
             from PySide6.QtWidgets import QMessageBox
             
             is_dir = os.path.isdir(file_path)
+            export_type = getattr(self.worker, "export_type", "") if getattr(self, "worker", None) else ""
             
             if is_cours_summary:
                 # Créer un pop-up QMessageBox HTML personnalisé pour afficher le résumé de remplissage Cours.xlsx !
@@ -447,6 +451,25 @@ class ExportsPage(QWidget):
                         os.startfile(file_path)
                     except Exception as err:
                         self.log_area.append(f"⚠️ Impossible d'ouvrir le fichier automatiquement : {err}")
+            elif export_type == "ffme":
+                # Pop-up de validation FFME : ouvrir le dossier généré + portail fédéral
+                box = QMessageBox(self)
+                box.setWindowTitle("Export FFME terminé")
+                box.setTextFormat(Qt.TextFormat.RichText)
+                box.setText(
+                    "✅ <b>Le fichier d'import FFME a été généré avec succès !</b><br><br>"
+                    f"<code>{os.path.basename(file_path)}</code><br><br>"
+                    "Que souhaitez-vous faire ?"
+                )
+                folder_btn = box.addButton("📂 Ouvrir le dossier", QMessageBox.ButtonRole.ActionRole)
+                ffme_btn = box.addButton("🌐 FFME", QMessageBox.ButtonRole.ActionRole)
+                box.addButton("Fermer", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                
+                if box.clickedButton() == folder_btn:
+                    self.open_export_folder(file_path)
+                elif box.clickedButton() == ffme_btn:
+                    self.open_ffme_portal()
             else:
                 # Pop-up classique pour les autres types d'exports
                 title = "Ouverture de l'export"
@@ -473,6 +496,40 @@ class ExportsPage(QWidget):
         # Actualiser les statistiques FFME après chaque fin d'exportation
         self.update_ffme_stats()
 
+    def open_export_folder(self, file_path: str):
+        """Ouvre le dossier contenant le fichier généré (fichier sélectionné dans l'Explorateur)."""
+        try:
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{os.path.abspath(file_path)}"')
+        except Exception:
+            try:
+                os.startfile(os.path.dirname(os.path.abspath(file_path)))
+            except Exception as err:
+                self.log_area.append(f"❌ [ERREUR] Impossible d'ouvrir le dossier : {err}")
+
+    def open_ffme_portal(self):
+        """Ouvre la page de saisie des licences via CSV sur le portail fédéral (Chrome si disponible)."""
+        url = "https://myffme.fr/federal/gestion-des-licences/saisir-les-licences-via-csv/2027"
+        chrome_candidates = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]
+        for chrome_path in chrome_candidates:
+            if os.path.exists(chrome_path):
+                try:
+                    import subprocess
+                    subprocess.Popen([chrome_path, "--new-window", url])
+                    return
+                except Exception:
+                    continue
+        # Repli : navigateur par défaut du système
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception as err:
+            self.log_area.append(f"❌ [ERREUR] Impossible d'ouvrir le portail FFME : {err}")
+
 
 class GroupSelectionDialog(QDialog):
     """Dialogue modal permettant de cocher individuellement les cours à exporter (Lot 5)."""
@@ -484,6 +541,7 @@ class GroupSelectionDialog(QDialog):
         self.end_date_str = None
         self.merge_groups = False  # Nouveau !
         self.auth_only = False     # Nouveau !
+        self.hide_badge_cols = False  # Nouveau !
         self.init_ui()
 
     def init_ui(self):
@@ -667,8 +725,11 @@ class GroupSelectionDialog(QDialog):
         self.merge_checkbox = QCheckBox("🔄 Fusionner tous les groupes cochés sur une seule feuille")
         options_layout.addWidget(self.merge_checkbox)
         
-        self.auth_checkbox = QCheckBox("🚸 Inclure uniquement les jeunes avec autorisation parentale (Autonomes / Famille)")
+        self.auth_checkbox = QCheckBox("➕ Ajouter les jeunes avec autorisation parentale (Autonomes / Famille) répartis dans les autres groupes")
         options_layout.addWidget(self.auth_checkbox)
+
+        self.hide_badge_checkbox = QCheckBox("🖨️ Masquer les colonnes Badge rouge / Bloc / Passeport Orange (gagne de l'espace)")
+        options_layout.addWidget(self.hide_badge_checkbox)
         
         layout.addLayout(options_layout)
 
@@ -731,6 +792,7 @@ class GroupSelectionDialog(QDialog):
         # Récupérer et formater les dates sélectionnées et l'état de fusion (Nouveau !)
         self.merge_groups = self.merge_checkbox.isChecked()
         self.auth_only = self.auth_checkbox.isChecked()  # Nouveau !
+        self.hide_badge_cols = self.hide_badge_checkbox.isChecked()
         self.start_date_str = self.start_date_edit.date().toString("dd/MM/yyyy")
         self.end_date_str = self.end_date_edit.date().toString("dd/MM/yyyy")
         self.accept()

@@ -2,11 +2,208 @@ import os
 import glob
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
-    QFrame, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLineEdit, QTabWidget, QComboBox
+    QFrame, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLineEdit, QTabWidget, QComboBox,
+    QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
 from presentation.workers import FFMEMergeWorker, AutonomesMergeWorker, SaisonMergeWorker
 from paths import ROOT_DIR
+
+
+class ManualMatchDialog(QDialog):
+    """
+    Fenêtre modale proposant la sélection manuelle d'un adhérent de la base
+    pour un licencié FFME qui n'a pas été trouvé automatiquement.
+    Recherche tolérante par tokens : "BOURDAUD HUI Marine" retrouve "BOURDAUD Marine".
+    """
+    def __init__(self, person: dict, users: list, parent=None):
+        super().__init__(parent)
+        self.person = person
+        self.users = users
+        self.selected_user_id = None
+        self.setWindowTitle("Association manuelle FFME")
+        self.setModal(True)
+        self.resize(560, 520)
+        self.init_ui()
+        self.populate_table()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        # Cadre récapitulatif du licencié FFME introuvable
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #FEF2F2;
+                border: 1px solid #FECACA;
+                border-radius: 6px;
+            }
+        """)
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(12, 10, 12, 10)
+        info_title = QLabel("⚠️ Licencié FFME non trouvé automatiquement dans la base :")
+        info_title.setStyleSheet("font-size: 12px; font-weight: bold; color: #B91C1C;")
+        info_layout.addWidget(info_title)
+        p = self.person
+        details = f"👤 {p.get('nom', '')} {p.get('prenom', '')}"
+        if p.get("licence"):
+            details += f"   |   🪪 N° licence : {p['licence']}"
+        if p.get("birth_date"):
+            details += f"   |   🎂 Né(e) le : {p['birth_date']}"
+        info_lbl = QLabel(details)
+        info_lbl.setStyleSheet("font-size: 13px; color: #1E293B; font-weight: bold;")
+        info_lbl.setWordWrap(True)
+        info_layout.addWidget(info_lbl)
+        help_lbl = QLabel(
+            "Sélectionnez l'adhérent correspondant dans la liste ci-dessous "
+            "(recherche par nom/prénom possible), ou ignorez cette ligne."
+        )
+        help_lbl.setStyleSheet("font-size: 11px; color: #64748B;")
+        help_lbl.setWordWrap(True)
+        info_layout.addWidget(help_lbl)
+        layout.addWidget(info_frame)
+
+        # Recherche
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Filtrer les adhérents (nom, prénom...)")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+        """)
+        self.search_input.textChanged.connect(self.populate_table)
+        layout.addWidget(self.search_input)
+
+        # Table des adhérents de la base
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Nom", "Prénom", "N° Licence", "Naissance"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setDefaultSectionSize(26)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                gridline-color: #F1F5F9;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #F8FAFC;
+                color: #64748B;
+                padding: 6px;
+                font-weight: bold;
+                border: none;
+                border-bottom: 1px solid #E2E8F0;
+            }
+        """)
+        self.table.itemDoubleClicked.connect(lambda _: self.accept_selection())
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        layout.addWidget(self.table)
+
+        # Boutons
+        btn_layout = QHBoxLayout()
+        self.associate_btn = QPushButton("🔗 Associer cet adhérent")
+        self.associate_btn.setCursor(Qt.PointingHandCursor)
+        self.associate_btn.setEnabled(False)
+        self.associate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #059669; }
+            QPushButton:disabled { background-color: #94A3B8; }
+        """)
+        self.associate_btn.clicked.connect(self.accept_selection)
+
+        skip_btn = QPushButton("⏭️ Ignorer (laisser non trouvé)")
+        skip_btn.setCursor(Qt.PointingHandCursor)
+        skip_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F1F5F9;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #E2E8F0; }
+        """)
+        skip_btn.clicked.connect(self.reject)
+
+        btn_layout.addWidget(self.associate_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(skip_btn)
+        layout.addLayout(btn_layout)
+
+    def _user_tokens(self, user: dict) -> set:
+        from domain.utils import normalize_name
+        return set(normalize_name(f"{user.get('last_name', '')} {user.get('first_name', '')}").split())
+
+    def populate_table(self):
+        """Remplit la table avec les adhérents filtrés, triés par pertinence."""
+        from domain.utils import normalize_name
+        search_tokens = set(normalize_name(self.search_input.text()).split())
+        person_tokens = set(normalize_name(
+            f"{self.person.get('nom', '')} {self.person.get('prenom', '')}"
+        ).split())
+
+        candidates = []
+        for u in self.users:
+            u_tokens = self._user_tokens(u)
+            if search_tokens:
+                # Au moins un token de recherche présent dans le nom de l'adhérent
+                if not (search_tokens & u_tokens):
+                    continue
+                score = len(search_tokens & u_tokens)
+            else:
+                # Pas de recherche : tri par pertinence par rapport au licencié FFME
+                score = len(person_tokens & u_tokens)
+            candidates.append((score, u))
+
+        # Tri : pertinence décroissante puis nom/prénom alphabétique
+        candidates.sort(key=lambda t: (-t[0], str(t[1].get("last_name", "")).lower(),
+                                       str(t[1].get("first_name", "")).lower()))
+
+        self.table.setRowCount(len(candidates))
+        for r, (_, u) in enumerate(candidates):
+            birth = str(u.get("birth_date") or "").split(" ")[0]
+            lic = str(u.get("licence_ffme") or "").replace(".0", "")
+            for c, val in enumerate([u.get("last_name", ""), u.get("first_name", ""), lic, birth]):
+                item = QTableWidgetItem(str(val))
+                item.setData(Qt.UserRole, u.get("id"))
+                self.table.setItem(r, c, item)
+
+        # Pré-remplir la recherche avec le nom FFME (une seule fois, si vide)
+        if not self.search_input.text() and self.person.get("nom"):
+            self.search_input.setText(self.person["nom"])
+
+        self.table.clearSelection()
+        self.associate_btn.setEnabled(False)
+
+    def on_selection_changed(self):
+        self.associate_btn.setEnabled(bool(self.table.selectedItems()))
+
+    def accept_selection(self):
+        selected = self.table.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        self.selected_user_id = self.table.item(row, 0).data(Qt.UserRole)
+        self.accept()
 
 class ImportDataPage(QWidget):
     """
@@ -294,8 +491,25 @@ class FFMEImportWidget(QWidget):
 
         self.worker = FFMEMergeWorker(file_path)
         self.worker.progress.connect(self.on_progress)
+        # Connexion bloquante : le worker se met en pause pendant l'affichage de la fenêtre
+        self.worker.manual_match_requested.connect(self.on_manual_match_requested, Qt.BlockingQueuedConnection)
         self.worker.finished.connect(self.on_finished)
         self.worker.start()
+
+    def on_manual_match_requested(self, payload: dict):
+        """Affiche la fenêtre de sélection manuelle pour un licencié non trouvé.
+        Le worker (thread d'import) est bloqué en attendant la réponse."""
+        person = payload.get("person", {})
+        dialog = ManualMatchDialog(person, payload.get("users", []), self)
+        dialog.exec()
+        # La réponse passe par l'attribut partagé du worker (le payload est copié par Qt)
+        self.worker.manual_result["user_id"] = dialog.selected_user_id
+
+        who = f"{person.get('nom', '')} {person.get('prenom', '')}".strip()
+        if dialog.selected_user_id:
+            self.log_area.append(f"🤝 [MANUEL] {who} associé manuellement à un adhérent de la base.")
+        else:
+            self.log_area.append(f"⏭️ [MANUEL] {who} ignoré (restera non trouvé).")
 
     def on_progress(self, message: str, percent: int):
         self.progress_bar.setValue(percent)
@@ -311,7 +525,12 @@ class FFMEImportWidget(QWidget):
             self.lbl_stat_total.setText(f"📋 Lignes traitées : {stats['total_processed']}")
             self.lbl_stat_licence.setText(f"🟢 Associés par N° de licence (Statut Terminé) : {stats['matched_by_licence']}")
             self.lbl_stat_name.setText(f"🔑 Associés par Nom/Prénom (Nouveau N° enregistré & Statut Terminé) : {stats['matched_by_name']}")
-            self.lbl_stat_notfound.setText(f"🔴 Licenciés FFME non trouvés en base locale : {stats['not_found']}")
+            matched_manually = stats.get("matched_manually", 0)
+            not_found = stats.get("not_found", 0)
+            self.lbl_stat_notfound.setText(
+                f"🔴 Licenciés FFME non trouvés en base locale : {not_found}"
+                + (f"  (dont {matched_manually} associé(s) manuellement)" if matched_manually else "")
+            )
             self.stats_frame.setVisible(True)
 
             try:
@@ -328,7 +547,8 @@ class FFMEImportWidget(QWidget):
                 f"- Lignes traitées : {stats['total_processed']}\n"
                 f"- Associés par licence : {stats['matched_by_licence']}\n"
                 f"- Associés par nom/prénom : {stats['matched_by_name']}\n"
-                f"- Non trouvés : {stats['not_found']}"
+                f"- Associés manuellement : {stats.get('matched_manually', 0)}\n"
+                f"- Non trouvés : {stats.get('not_found', 0)}"
             )
         else:
             errors = "\n".join(stats.get("errors", ["Une erreur inconnue est survenue."]))

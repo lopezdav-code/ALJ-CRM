@@ -246,12 +246,12 @@ class TestInfrastructureLot2(unittest.TestCase):
             carlos = next(m for m in loaded if m["last_name"] == "MARTINEZ")
             sophie = next(m for m in loaded if m["last_name"] == "DUBOIS")
             
-            # Carlos (par licence) -> Statut "Processed"
-            self.assertEqual(carlos["status"], "Processed")
+            # Carlos (par licence) -> Statut "Terminé"
+            self.assertEqual(carlos["status"], "Terminé")
             self.assertEqual(carlos["licence_ffme"], "112233")
             
-            # Sophie (par nom) -> Statut "Processed" et licence sauvegardée "445566"
-            self.assertEqual(sophie["status"], "Processed")
+            # Sophie (par nom) -> Statut "Terminé" et licence sauvegardée "445566"
+            self.assertEqual(sophie["status"], "Terminé")
             self.assertEqual(sophie["licence_ffme"], "445566")
             
         finally:

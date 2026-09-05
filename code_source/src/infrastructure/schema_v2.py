@@ -20,6 +20,8 @@ SCHEMA_TARGET_VERSION = 2
 SEASON_ACTIVE = "2026-2027"
 
 # Table de priorité des statuts — CENTRALISÉE (phase 3)
+# "Terminé" = licence FFME confirmée : état le plus avancé du workflow, il ne doit
+# jamais être rétrogradé par une nouvelle synchro HelloAsso ("Validated"/"Validé").
 STATUS_PRIORITY = {
     "processed": 10,
     "traité": 10,
@@ -27,8 +29,8 @@ STATUS_PRIORITY = {
     "validated": 9,
     "validé": 8,
     "valide": 8,
-    "terminé": 7,
-    "termine": 7,
+    "terminé": 10,
+    "termine": 10,
     "en cours": 5,
     "canceled": 1,
     "annulé": 1,
@@ -422,7 +424,9 @@ def insert_purchase_v2(cur, order_id, user_id, rec, now_iso,
     except (ValueError, TypeError):
         amt_val = 0.0
     new_status = str(_get(rec, "status") or "Validé").strip()
-    tarif = str(_get(rec, "tarif_name") or "")
+    # Normalisation : supprimer les espaces de début/fin (sinon des variantes
+    # comme "Liste d'attente cours " et "Liste d'attente cours" coexistent en BDD)
+    tarif = str(_get(rec, "tarif_name") or "").strip()
     new_score = purchase_priority_score(new_status, tarif, amt_val)
 
     cur.execute("SELECT id, status, tarif_name, amount FROM purchases WHERE order_id=? AND user_id=?",

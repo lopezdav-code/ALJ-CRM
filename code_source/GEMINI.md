@@ -65,14 +65,14 @@ C:\Users\a138672\OneDrive - Worldline\Desktop\Import Export Script\code_source\
    - Incorpore une fonction d'audit exhaustive pour détecter les écarts de tarifs, les doublons, et les dossiers en attente.
 
 7. **`presence_sheet_generator.py` (Fiches de Présence d'un cours)**
-   - S'appuie sur `Template Export liste adhérents à imprimer.xlsx` et le planning structuré `planning.json` (situé dans le répertoire parent) pour générer des fiches de présence d'activité hebdomadaire dans le dossier `liste adhérent`.
+   - S'appuie sur le modèle `doc/template/Template Export liste adhérents à imprimer.xlsx` et le planning structuré `planning.json` (situé dans le répertoire parent) pour générer des fiches de présence d'activité hebdomadaire dans le dossier `exports/fiches_presence`.
 
 8. **`urgency_contact_generator.py` (Fiches d'Urgence)**
    - Extrait les contacts de sécurité de l'intégralité des membres actifs inscrits.
    - Produit une feuille Excel unifiée, stylisée, et configurée pour une impression verticale A4 propre pour l'affichage en salle de sport ou le cahier d'urgence des encadrants.
 
 9. **`attestation_generator.py` (Générateur d'Attestations de Paiement)**
-   - Remplace les balises de fusion dans un modèle Word (`ATTESTATION DE PAIEMENT_adulte.docx` situé dans le dossier parent).
+   - Remplace les balises de fusion dans un modèle Word (`doc/template/ATTESTATION DE PAIEMENT_adulte.docx`).
    - S'interface avec l'instance locale de Microsoft Word via COM (`win32com.client`) pour compiler le document Word (.docx) en fichier PDF (.pdf).
 
 10. **`server.py` (API de Visualisation)**

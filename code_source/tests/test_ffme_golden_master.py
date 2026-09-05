@@ -34,7 +34,7 @@ class TestFFMEGoldenMaster(unittest.TestCase):
         if not os.path.exists(REFERENCE):
             raise unittest.SkipTest(
                 "Fixture de référence absente (tests/fixtures/import_ffme_reference.csv). "
-                "Copier exports/import_ffme_20260830_173135.csv vers ce chemin pour activer le test."
+                "Copier exports/ffme/import_ffme_20260830_173135.csv vers ce chemin pour activer le test."
             )
 
     def test_export_ffme_identique_reference(self):

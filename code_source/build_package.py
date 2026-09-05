@@ -83,9 +83,8 @@ if os.path.exists(src_doc):
     except Exception as doc_err:
         print(f"⚠️ Impossible de copier le dossier 'doc' : {doc_err}")
 
-# Copie des fichiers Excel modèles et icônes
+# Copie des icônes (le modèle Excel de présence est inclus via le dossier 'doc/template')
 files_to_copy = [
-    "Template Export liste adhérents à imprimer.xlsx",
     "logo.png",
     "logo.ico"
 ]

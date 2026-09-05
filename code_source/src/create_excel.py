@@ -361,7 +361,7 @@ def generate_ffme_csv(participants_data, output_path=None):
     Génère le CSV d'import FFME.
     Si output_path est fourni (tests de non-régression), écrit à cet emplacement exact
     sans horodatage ni archivage. Sinon, comportement historique : fichier horodaté
-    dans exports/ avec archivage des anciens CSV.
+    dans exports/ffme/ avec archivage des anciens CSV.
     """
     print("\nGénération simultanée du fichier CSV FFME...")
     if output_path:
@@ -373,15 +373,15 @@ def generate_ffme_csv(participants_data, output_path=None):
         csv_filename = f"import_ffme_{timestamp}.csv"
 
         root_dir = ROOT_DIR
-        exports_dir = os.path.join(root_dir, "exports")
-        os.makedirs(exports_dir, exist_ok=True)
-        csv_path = os.path.join(exports_dir, csv_filename)
+        ffme_dir = os.path.join(root_dir, "exports", "ffme")
+        os.makedirs(ffme_dir, exist_ok=True)
+        csv_path = os.path.join(ffme_dir, csv_filename)
 
         # Archiver les anciens fichiers import_ffme
-        archive_dir = os.path.join(exports_dir, "archive")
+        archive_dir = os.path.join(ffme_dir, "archive")
         os.makedirs(archive_dir, exist_ok=True)
         import shutil
-        for old_file in glob.glob(os.path.join(exports_dir, "import_ffme_*.csv")):
+        for old_file in glob.glob(os.path.join(ffme_dir, "import_ffme_*.csv")):
             if os.path.basename(old_file) != csv_filename:
                 try:
                     shutil.move(old_file, os.path.join(archive_dir, os.path.basename(old_file)))

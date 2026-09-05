@@ -79,5 +79,44 @@ class TestPresentationLot3(unittest.TestCase):
             win.on_nav_changed(1)
             self.assertIn("updated_account@gmail.com", win.drive_status.text())
 
+    @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
+    def test_communications_popup_filters_default(self):
+        """Vérifie les pop-up tarifs/statuts de l'onglet Communications :
+        défaut = tous les tarifs sauf la liste d'attente, tous les statuts sauf Annulé."""
+        app = QApplication.instance() or QApplication([])
+        from domain.models import Member
+
+        def make_member(ref, status, tarif, email):
+            return Member(
+                order_ref=ref, order_date="2026-08-01", status=status, amount=1.0,
+                user_last_name=f"Nom{ref}", user_first_name="Prenom",
+                payer_first_name="Jean", payer_last_name="Dupont", payer_email=email,
+                tarif_name=tarif
+            )
+
+        comm = CommunicationsPage()
+        m1 = make_member("1", "Validated", "Cours Adultes débutants", "a@test.com")
+        m2 = make_member("2", "Canceled", "Loisir enfants nés en 2016, 2017, 2018 - mercredi 10h30", "c@test.com")
+        m3 = make_member("3", "Terminé", "Liste d'attente cours", "e@test.com")
+
+        comm.load_members(members_list=[m1, m2, m3])
+
+        # Sélections par défaut : tarifs hors liste d'attente, statuts hors Annulé
+        self.assertEqual(
+            comm.selected_tarifs,
+            {"Cours Adultes débutants", "Loisir enfants nés en 2016, 2017, 2018 - mercredi 10h30"}
+        )
+        self.assertEqual(comm.selected_statuses, {"Validé", "Terminé"})
+        self.assertEqual(comm.tarif_filter.text(), "Tous sauf liste d'attente ▾")
+        self.assertEqual(comm.status_filter.text(), "Tous sauf annulés ▾")
+
+        # L'annulé et la liste d'attente sont masqués de la liste des destinataires
+        comm.on_filters_changed()
+        visible = [comm.list_widget.item(i).text()
+                   for i in range(comm.list_widget.count())
+                   if not comm.list_widget.item(i).isHidden()]
+        self.assertEqual(len(visible), 1)
+        self.assertIn("a@test.com", visible[0])
+
 if __name__ == "__main__":
     unittest.main()

@@ -295,7 +295,7 @@ class MemberDetailPanel(QFrame):
             self.add_info_row(self.sec_payment, "Date d'achat :", str(member.order_date).split(" ")[0] if member.order_date else "")
             self.add_info_row(self.sec_payment, "Tarif :", member.tarif_name)
             self.add_info_row(self.sec_payment, "Montant payé :", f"{member.amount:.2f} €")
-            self.add_info_row(self.sec_payment, "E-mail Payeur :", member.payer_email)
+            self.add_info_row(self.sec_payment, "E-mail utilisé pour le paiement :", member.payer_email or "Non renseigné")
             self.add_info_row(self.sec_payment, "Statut :", member.status)
 
             # Section 3 : Coordonnées
@@ -366,7 +366,12 @@ class MemberDetailPanel(QFrame):
             self.add_info_row(self.sec_payment, "Date d'achat :", str(member.order_date).split(" ")[0] if member.order_date else "")
             self.add_info_row(self.sec_payment, "Tarif :", member.tarif_name)
             self.add_info_row(self.sec_payment, "Montant payé :", f"{member.amount:.2f} €")
-            self.add_combobox_row(self.sec_payment, "Statut :", "status", member.status or "Processed", ["Processed", "Annulé"])
+            self.add_info_row(self.sec_payment, "E-mail utilisé pour le paiement :", member.payer_email or "Non renseigné")
+            # Statuts normalisés (+ statut brut courant pour ne pas créer un faux changement)
+            status_opts = ["Validé", "Traité", "Terminé", "En cours", "Annulé"]
+            if member.status and member.status not in status_opts:
+                status_opts.append(member.status)
+            self.add_combobox_row(self.sec_payment, "Statut :", "status", member.status, status_opts)
 
             # Section 3 : Coordonnées (Champs d'écriture !)
             self.add_editable_row(self.sec_contact, "E-mail Principal :", "primary_email", member.primary_email or member.payer_email)

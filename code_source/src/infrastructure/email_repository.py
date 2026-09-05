@@ -36,9 +36,11 @@ class EmailRepository:
             print(f"⚠️ Impossible d'écrire dans le journal d'audit des e-mails : {e}")
 
     @classmethod
-    def send_email(cls, to_email: str, subject: str, body: str, attachment_path: str = "") -> bool:
+    def send_email(cls, to_email: str, subject: str, body: str, attachment_path: str = "", html_body: str = None, inline_images: list = None) -> bool:
         """
         Envoie un e-mail avec pièce jointe en sélectionnant dynamiquement le meilleur canal configuré (Gmail API ou SMTP).
+        Si html_body est fourni, une version HTML (multipart/alternative) est jointe au texte brut,
+        avec les images inline éventuelles (liste de tuples (chemin, Content-ID)).
         """
         # Récupérer les identifiants depuis le SecretStore
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
@@ -58,8 +60,25 @@ class EmailRepository:
         msg["Subject"] = subject
         msg["To"] = to_email
         msg["From"] = gmail_user if use_oauth2 else smtp_from
-        
-        msg.attach(MIMEText(body, "plain"))
+
+        if html_body:
+            # Version riche : texte brut + HTML, avec logos intégrés en pièces jointes inline
+            from email.mime.image import MIMEImage
+            alt_part = MIMEMultipart("alternative")
+            alt_part.attach(MIMEText(body, "plain", "utf-8"))
+            related_part = MIMEMultipart("related")
+            related_part.attach(MIMEText(html_body, "html", "utf-8"))
+            for img_path, img_cid in (inline_images or []):
+                if img_path and os.path.exists(img_path):
+                    with open(img_path, "rb") as f_img:
+                        img_part = MIMEImage(f_img.read())
+                    img_part.add_header("Content-ID", f"<{img_cid}>")
+                    img_part.add_header("Content-Disposition", "inline", filename=os.path.basename(img_path))
+                    related_part.attach(img_part)
+            alt_part.attach(related_part)
+            msg.attach(alt_part)
+        else:
+            msg.attach(MIMEText(body, "plain"))
 
         # Ajout des pièces jointes (prend en charge un chemin unique sous forme de chaîne ou une liste de chemins)
         attachments = []

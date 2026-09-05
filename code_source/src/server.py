@@ -673,15 +673,29 @@ def get_pivot_table(season: str = "Toutes les saisons"):
             # 4. Saison
             season_name = row.get("season_name", "Inconnue")
             
+            # 5. Date d'inscription (normalisée en ISO AAAA-MM-JJ pour un tri
+            #    et un filtrage chronologiques dans le TCD ; format source variable)
+            date_iso = ""
+            date_raw = str(row.get("order_date") or "").strip()
+            if date_raw:
+                try:
+                    import datetime as _datetime
+                    date_iso = _datetime.datetime.strptime(date_raw[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+                except ValueError:
+                    date_iso = ""
+            month_iso = date_iso[:7] if date_iso else ""
+            
             pivot_records.append({
                 "Nom": (row.get("last_name") or "").strip().upper(),
                 "Pr\u00e9nom": (row.get("first_name") or "").strip().title(),
                 "Sexe": (row.get("gender") or "Inconnu").strip().title() or "Inconnu",
                 "Ville": city_clean,
-                "Groupe / Tarif": row.get("tarif_name") or "".strip() or "Aucun",
+                "Groupe / Tarif": str(row.get("tarif_name") or "").strip() or "Aucun",
                 "Statut": status_clean,
                 "Saison": season_name,
                 "Type d'Adhésion": inscription_type,
+                "Date d'Inscription": date_iso or "Inconnue",
+                "Mois d'Inscription": month_iso or "Inconnue",
             })
             
         pivot_data_json = json.dumps(pivot_records, ensure_ascii=False)
@@ -783,7 +797,7 @@ def get_pivot_table(season: str = "Toutes les saisons"):
 
     <div class="header">
         <h1>📊 Tableau Croisé Dynamique — ALJ Escalade</h1>
-        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Jour de cours, Ville, Sexe, Statut, etc.)</p>
+        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Jour de cours, Ville, Sexe, Statut, Date d'inscription, etc.)</p>
     </div>
 
     <div class="container">

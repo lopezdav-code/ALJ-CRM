@@ -94,10 +94,10 @@ Les variables d'environnement sensibles comme `HELLOASSO_CLIENT_SECRET` ou `SMTP
 
 Certains éléments référencés dans le code d'origine pointent vers des ressources locales situées en dehors du périmètre immédiat du dossier de code source :
 *   **Fichiers modèles et d'accompagnement** :
-    *   `Template Export liste adhérents à imprimer.xlsx` (attendu dans le dossier parent `Import Export Script`).
+    *   `doc/template/Template Export liste adhérents à imprimer.xlsx` (modèle des fiches de présence).
     *   `planning.json` et `tarif_mapping.json` (attendus dans le dossier parent).
-    *   `ATTESTATION DE PAIEMENT_adulte.docx` (attendu dans le dossier parent).
-    *   `Cours.xlsx` (attendu dans `Import Export Script/liste adhérent/`).
+    *   `doc/template/ATTESTATION DE PAIEMENT_adulte.docx` (modèle d'attestation).
+    *   `exports/liste adhérent/Cours.xlsx` (sorties du remplissage des cours).
 *   **Ressources visuelles** :
     *   `logo.png` (recherché pour agrémenter les feuilles de présence d'un entête visuel).
 

@@ -127,7 +127,7 @@ class SendEmailCampaignWorker(QThread):
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(int, int)  # (succès, échecs)
 
-    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, parent=None):
+    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, add_signature: bool = False, parent=None):
         super().__init__(parent)
         self.subject = subject
         self.body = body
@@ -138,6 +138,7 @@ class SendEmailCampaignWorker(QThread):
         self.use_secondary_email = use_secondary_email
         self.use_payer_email = use_payer_email
         self.whatsapp_template = whatsapp_template
+        self.add_signature = add_signature
 
     def run(self):
         success_count = 0
@@ -213,8 +214,11 @@ class SendEmailCampaignWorker(QThread):
             msg_body = self.body
             
             # Personnaliser le corps du message avec le Prénom et le Nom de l'adhérent (Nouveau !)
+            # Support des deux syntaxes : {Prénom}/{Nom} (IHM) et {first_name}/{last_name} (modèles BDD)
             msg_body = msg_body.replace("{Prénom}", m.user_first_name.strip().title())
             msg_body = msg_body.replace("{Nom}", m.user_last_name.strip().upper())
+            msg_body = msg_body.replace("{first_name}", m.user_first_name.strip().title())
+            msg_body = msg_body.replace("{last_name}", m.user_last_name.strip().upper())
             qr_path = None
             qr_status_msg = "⚠️ QRCode non joint (Option désactivée)" if not self.attach_whatsapp else "⚠️ QRCode non joint (Aucun créneau correspondant)"
             
@@ -311,12 +315,23 @@ class SendEmailCampaignWorker(QThread):
                 if qr_path and os.path.exists(qr_path):
                     attachments.append(qr_path)
 
+                # 4. Préparer les versions texte brut et HTML (avec signature du club optionnelle)
+                from email_html import build_email_html, build_signature_plain, get_inline_images
+                plain_body = msg_body
+                html_body = build_email_html(msg_body, add_signature=self.add_signature, image_src_mode="cid")
+                inline_imgs = None
+                if self.add_signature:
+                    plain_body = msg_body + "\n\n" + build_signature_plain()
+                    inline_imgs = get_inline_images()
+
                 # Appel du repository d'email découplé et robuste en joignant les pièces jointes !
                 EmailRepository.send_email(
                     to_email=email_dest,
                     subject=self.subject,
-                    body=msg_body,
-                    attachment_path=attachments
+                    body=plain_body,
+                    attachment_path=attachments,
+                    html_body=html_body,
+                    inline_images=inline_imgs
                 )
                 
                 # Enregistrer la date d'envoi d'e-mail directement dans SQLite
@@ -348,7 +363,7 @@ class ExportWorker(QThread):
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, str, str) # (succès, message_résultat, chemin_fichier)
 
-    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, parent=None):
+    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, parent=None):
         super().__init__(parent)
         self.export_type = export_type
         self.selected_groups = selected_groups
@@ -357,6 +372,7 @@ class ExportWorker(QThread):
         self.merge_groups = merge_groups
         self.auth_only = auth_only
         self.cours_pdf = cours_pdf
+        self.hide_badge_cols = hide_badge_cols
 
     def convert_excel_to_pdf(self, excel_path: str, pdf_path: str) -> bool:
         """
@@ -436,7 +452,7 @@ class ExportWorker(QThread):
                     self.progress.emit("\n👉 Veuillez compléter leurs fiches dans l'onglet 'Adhérents' ou modifier le fichier HelloAsso pour les inclure.\n", 80)
                 
                 # Retrouver le fichier CSV nouvellement généré
-                csv_files = glob.glob(os.path.join(ROOT_DIR, "exports", "import_ffme_*.csv"))
+                csv_files = glob.glob(os.path.join(ROOT_DIR, "exports", "ffme", "import_ffme_*.csv"))
                 csv_files.sort(key=os.path.getmtime, reverse=True)
                 new_file_path = csv_files[0] if csv_files else ""
                 
@@ -462,7 +478,8 @@ class ExportWorker(QThread):
                     start_date_str=self.start_date_str, 
                     end_date_str=self.end_date_str,
                     merge_groups=self.merge_groups,
-                    auth_only=self.auth_only
+                    auth_only=self.auth_only,
+                    hide_badge_cols=self.hide_badge_cols
                 )
                 if success:
                     dest_dir = os.path.join(ROOT_DIR, "exports", "fiches_presence")
@@ -562,10 +579,10 @@ class ExportWorker(QThread):
                     f"</div>"
                 )
                 
-                # Retrouver dynamiquement le fichier Cours-*.xlsx qui a été nouvellement généré dans 'liste adhérent'
-                cours_files = glob.glob(os.path.join(ROOT_DIR, "liste adhérent", "Cours-*.xlsx"))
+                # Retrouver dynamiquement le fichier Cours-*.xlsx qui a été nouvellement généré dans 'exports/liste adhérent'
+                cours_files = glob.glob(os.path.join(ROOT_DIR, "exports", "liste adhérent", "Cours-*.xlsx"))
                 cours_files.sort(key=os.path.getmtime, reverse=True)
-                file_path = cours_files[0] if cours_files else os.path.join(ROOT_DIR, "liste adhérent", "Cours.xlsx")
+                file_path = cours_files[0] if cours_files else os.path.join(ROOT_DIR, "exports", "liste adhérent", "Cours.xlsx")
                 
                 if self.cours_pdf:
                     pdf_path = file_path.replace(".xlsx", ".pdf")
@@ -714,13 +731,21 @@ class LocalDataLoaderWorker(QThread):
 class FFMEMergeWorker(QThread):
     """
     Worker asynchrone pour l'importation et la fusion de la liste des licenciés FFME.
+    Pour chaque licencié non trouvé automatiquement, un signal `manual_match_requested`
+    est émis (connexion bloquante) afin que l'IHM propose une fenêtre de sélection
+    manuelle d'un adhérent de la base.
     """
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, dict) # (succès, statistiques)
+    # Payload : {"person": {...}, "users": [...]}
+    # NB : PySide6 copie les arguments lors d'une livraison queued — la réponse
+    # de l'IHM est donc écrite dans self.manual_result (objet partagé par référence).
+    manual_match_requested = Signal(dict)
 
     def __init__(self, file_path: str, parent=None):
         super().__init__(parent)
         self.file_path = file_path
+        self.manual_result = {"user_id": None}
 
     def run(self):
         try:
@@ -742,11 +767,44 @@ class FFMEMergeWorker(QThread):
             if os.path.abspath(self.file_path) != os.path.abspath(dest_path):
                 shutil.copy2(self.file_path, dest_path)
             
-            self.progress.emit("Lancement de la fusion avec la base de données locale...", 60)
+            self.progress.emit("Rapprochement automatique avec la base de données locale...", 60)
             
             from infrastructure.sqlite_repository import SqliteRepository
-            stats = SqliteRepository.merge_ffme_licensees(dest_path)
-            
+            prep = SqliteRepository.prepare_ffme_licensees(dest_path)
+            stats = prep["stats"]
+
+            if stats["errors"] and not prep["updates"]:
+                self.progress.emit(f"❌ Échec du rapprochement : {stats['errors'][0]}", 100)
+                self.finished.emit(False, stats)
+                return
+
+            stats.setdefault("matched_manually", 0)
+            stats.setdefault("not_found", 0)
+
+            # Association manuelle des licenciés non trouvés (fenêtre IHM, connexion bloquante)
+            if prep["unmatched"]:
+                self.progress.emit(
+                    f"🤝 {len(prep['unmatched'])} licencié(s) FFME non trouvé(s) : association manuelle requise...", 70
+                )
+            for person in prep["unmatched"]:
+                self.manual_result = {"user_id": None}
+                self.manual_match_requested.emit({"person": person, "users": prep["users"]})
+                # Connexion bloquante : on reprend ici après fermeture de la fenêtre
+                user_id = self.manual_result.get("user_id")
+                if user_id:
+                    prep["updates"].append((
+                        "Terminé", person["licence"], person.get("passeports", ""),
+                        person.get("diplomes", ""), user_id
+                    ))
+                    stats["matched_manually"] += 1
+                else:
+                    stats["not_found"] = stats.get("not_found", 0) + 1
+
+            if prep["updates"]:
+                self.progress.emit("Écriture des associations dans la base de données...", 80)
+                if not SqliteRepository.apply_ffme_matches(prep["updates"]):
+                    stats["errors"].append("Erreur lors de l'écriture des associations en BDD.")
+
             if stats.get("errors"):
                 self.progress.emit(f"❌ Échec de la fusion : {stats['errors'][0]}", 100)
                 self.finished.emit(False, stats)

@@ -58,7 +58,7 @@ class TestAttestationGenerator(unittest.TestCase):
         # mais pour le test unitaire on va simuler l'écriture d'un fichier et sa vérification.
         
         # Testons l'écriture d'un document Word
-        template_path = os.path.join(ROOT_DIR, "doc", "ATTESTATION DE PAIEMENT_adulte.docx")
+        template_path = os.path.join(ROOT_DIR, "doc", "template", "ATTESTATION DE PAIEMENT_adulte.docx")
         if os.path.exists(template_path):
             doc = docx.Document(template_path)
             

@@ -99,8 +99,8 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
         print(f"Dossier de destination utilisé : {output_dir}")
         
     # 4. Vérification des chemins de modèles
-    template_path_docx = os.path.join(root_dir, "doc", "ATTESTATION DE PAIEMENT_adulte.docx")
-    template_path_html = os.path.join(root_dir, "doc", "ATTESTATION_TEMPLATE.html")
+    template_path_docx = os.path.join(root_dir, "doc", "template", "ATTESTATION DE PAIEMENT_adulte.docx")
+    template_path_html = os.path.join(root_dir, "doc", "template", "ATTESTATION_TEMPLATE.html")
     
     if output_format in ("docx", "both") and not os.path.exists(template_path_docx):
         print(f"[ERREUR] Modèle Word d'attestation introuvable : {template_path_docx}")
