@@ -1,17 +1,18 @@
 import os
+import json
 import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
     QListWidgetItem, QSplitter, QComboBox, QCheckBox, QMessageBox,
-    QRadioButton, QDialog, QGroupBox, QDateEdit
+    QRadioButton, QDialog, QGroupBox, QDateEdit, QScrollArea
 )
 from PySide6.QtCore import Qt, QDate
 from PIL import Image, ImageDraw
 
 from paths import CODE_ROOT
 from domain.models import Member
-from infrastructure.sqlite_repository import SqliteRepository
+from infrastructure.sqlite_repository import SqliteRepository, DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME
 from infrastructure.schema_v2 import normalize_status
 from presentation.workers import SendEmailCampaignWorker
 from presentation.pages.members import (
@@ -350,6 +351,7 @@ class CommunicationsPage(QWidget):
         """)
         form_layout = QVBoxLayout(form_frame)
         form_layout.setSpacing(10)
+        self.form_frame = form_frame
 
         # Section de Gestion des modèles d'e-mails (Nouveau !)
         form_layout.addWidget(QLabel("Modèle d'e-mail :"))
@@ -422,6 +424,85 @@ class CommunicationsPage(QWidget):
         template_bar.addWidget(self.btn_delete_template)
         
         form_layout.addLayout(template_bar)
+
+        # Section Adresse d'expédition (De) : choisissable et sauvegardable avec le modèle (Nouveau !)
+        form_layout.addWidget(QLabel("Adresse d'expédition (De) :"))
+        sender_bar = QHBoxLayout()
+        sender_bar.setSpacing(6)
+
+        self.sender_email_combo = QComboBox()
+        self.sender_email_combo.setEditable(True)
+        self.sender_email_combo.setToolTip(
+            "Adresse utilisée comme expéditeur (De) des e-mails.\n"
+            "Elle est enregistrée avec le modèle d'e-mail et réutilisée à chaque envoi.\n"
+            "Astuce : elle doit correspondre à un alias configuré sur le compte d'envoi."
+        )
+        self.sender_email_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px;
+                color: #1E293B;
+                min-width: 220px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                selection-background-color: #EFF6FF;
+                selection-color: #1E293B;
+            }
+            QComboBox QLineEdit {
+                border: none;
+                background: transparent;
+                color: #1E293B;
+            }
+        """)
+        sender_bar.addWidget(self.sender_email_combo, 1)
+
+        self.btn_save_sender = QPushButton("💾 Enregistrer")
+        self.btn_save_sender.setToolTip(
+            "Enregistre cette adresse comme expéditeur par défaut de la Communication "
+            "(elle est aussi mémorisée dans la liste déroulante)."
+        )
+        self.btn_save_sender.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        self.btn_save_sender.clicked.connect(self.on_save_sender_clicked)
+        sender_bar.addWidget(self.btn_save_sender)
+
+        form_layout.addLayout(sender_bar)
+
+        # Nom d'affichage de l'expéditeur (colonne « De » des messageries) (Nouveau !)
+        form_layout.addWidget(QLabel("Nom d'affichage de l'expéditeur (visible par les destinataires) :"))
+        self.sender_name_input = QLineEdit()
+        self.sender_name_input.setPlaceholderText(DEFAULT_SENDER_NAME)
+        self.sender_name_input.setToolTip(
+            "Nom affiché dans la colonne « De » des messageries (ex : Amicale Laïque Jonage - Inscriptions).\n"
+            "Il est enregistré avec le modèle d'e-mail et réutilisé à chaque envoi."
+        )
+        self.sender_name_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px;
+                color: #1E293B;
+            }
+        """)
+        form_layout.addWidget(self.sender_name_input)
 
         # Objet du mail
         form_layout.addWidget(QLabel("Objet du courriel :"))
@@ -673,7 +754,59 @@ class CommunicationsPage(QWidget):
 
         form_layout.addLayout(send_row)
 
-        right_layout.addWidget(form_frame)
+        # Formulaire défilable : garantit la lisibilité de tous les champs sur les petits écrans
+        # (la barre de progression et les logs restent visibles en dehors de la zone défilante).
+        form_frame.setMinimumWidth(540)
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setFrameShape(QFrame.NoFrame)
+        self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.form_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollArea > QWidget {
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background: #F1F5F9;
+                width: 10px;
+                border-radius: 5px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #CBD5E1;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #94A3B8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                background: #F1F5F9;
+                height: 10px;
+                border-radius: 5px;
+                margin: 0;
+            }
+            QScrollBar::handle:horizontal {
+                background: #CBD5E1;
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #94A3B8;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
+        self.form_scroll.setWidget(form_frame)
+        right_layout.addWidget(self.form_scroll, 1)
 
         # Barre de progression
         self.progress_bar = QProgressBar()
@@ -699,6 +832,7 @@ class CommunicationsPage(QWidget):
         # Zone d'affichage des logs
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
+        self.log_area.setMinimumHeight(80)  # Reste lisible même sur les petits écrans
         self.log_area.setPlaceholderText("Les comptes-rendus d'envois SMTP / Gmail REST s'afficheront ici...")
         self.log_area.setStyleSheet("""
             QTextEdit {
@@ -721,8 +855,81 @@ class CommunicationsPage(QWidget):
 
         layout.addWidget(self.splitter)
         
+        # Initialiser la liste des adresses d'expédition disponibles (Nouveau !)
+        self.init_sender_combo()
+
         # Charger les templates d'email initiaux (Nouveau !)
         self.load_email_templates()
+
+    # ------------------------------------------------------------------
+    # Gestion de l'adresse d'expédition (De) — choisie / enregistrable (Nouveau !)
+    # ------------------------------------------------------------------
+    def get_saved_sender_emails(self) -> list:
+        """Retourne la liste des adresses d'expédition mémorisées en BDD."""
+        raw = SqliteRepository.get_app_setting("sender_emails", "") or ""
+        try:
+            items = json.loads(raw)
+            if not isinstance(items, list):
+                items = []
+        except Exception:
+            items = [e.strip() for e in raw.split(",") if e.strip()]
+        return [str(e).strip() for e in items if str(e).strip() and "@" in str(e)]
+
+    def init_sender_combo(self):
+        """Pré-remplit la liste déroulante des adresses d'expédition :
+        adresse par défaut du club + adresses mémorisées + dernière adresse utilisée."""
+        default_saved = (SqliteRepository.get_app_setting("default_sender_email", "") or "").strip()
+        first = default_saved or DEFAULT_SENDER_EMAIL
+
+        emails = [first]
+        for em in [DEFAULT_SENDER_EMAIL] + self.get_saved_sender_emails():
+            if em.lower() not in [x.lower() for x in emails]:
+                emails.append(em)
+
+        self.sender_email_combo.blockSignals(True)
+        self.sender_email_combo.clear()
+        self.sender_email_combo.addItems(emails)
+        self.sender_email_combo.setCurrentText(first)
+        self.sender_email_combo.blockSignals(False)
+
+        # Nom d'affichage de l'expédition mémorisé (Nouveau !)
+        saved_name = (SqliteRepository.get_app_setting("default_sender_name", "") or "").strip()
+        self.sender_name_input.setText(saved_name or DEFAULT_SENDER_NAME)
+
+    def remember_sender_email(self, email: str, name: str = None):
+        """Mémorise une adresse d'expédition : ajout à la liste déroulante + définition par défaut."""
+        email = (email or "").strip()
+        if not email or "@" not in email:
+            return
+        saved = self.get_saved_sender_emails()
+        if email.lower() not in [x.lower() for x in saved]:
+            saved.append(email)
+            SqliteRepository.save_app_setting("sender_emails", json.dumps(saved, ensure_ascii=False))
+        SqliteRepository.save_app_setting("default_sender_email", email)
+        if name is not None:
+            SqliteRepository.save_app_setting("default_sender_name", (name or "").strip() or DEFAULT_SENDER_NAME)
+
+    def get_current_sender_email(self) -> str:
+        """Retourne l'adresse d'expédition courante (saisie ou sélectionnée dans l'IHM)."""
+        return self.sender_email_combo.currentText().strip()
+
+    def get_current_sender_name(self) -> str:
+        """Retourne le nom d'affichage de l'expéditeur courant (saisi dans l'IHM)."""
+        return self.sender_name_input.text().strip() or DEFAULT_SENDER_NAME
+
+    def on_save_sender_clicked(self):
+        """Enregistre l'adresse et le nom d'affichage courants comme expéditeur par défaut."""
+        email = self.get_current_sender_email()
+        if not email or "@" not in email:
+            QMessageBox.warning(
+                self, "Adresse invalide",
+                "Veuillez saisir une adresse e-mail d'expédition valide (contenant un '@')."
+            )
+            return
+        name = self.get_current_sender_name()
+        self.remember_sender_email(email, name)
+        self.init_sender_combo()
+        self.log_area.append(f"💾 [EXPÉDITION] Expéditeur par défaut enregistré : {name} <{email}>")
 
     def on_season_changed(self):
         """Déclenché lorsque l'utilisateur change de saison dans la liste déroulante."""
@@ -909,6 +1116,7 @@ class CommunicationsPage(QWidget):
         body = self.body_input.toPlainText()
 
         self.log_area.append(f"ℹ️ [INFO] Lancement de la campagne d'envoi pour {len(selected_members)} destinataires...")
+        self.log_area.append(f"📤 [EXPÉDITION] Expéditeur utilisé : {self.get_current_sender_name()} <{self.get_current_sender_email() or DEFAULT_SENDER_EMAIL}>")
         
         self.worker = SendEmailCampaignWorker(
             subject=subject,
@@ -920,15 +1128,32 @@ class CommunicationsPage(QWidget):
             use_secondary_email=self.use_secondary_email_cb.isChecked(),
             use_payer_email=self.use_payer_email_cb.isChecked(),
             whatsapp_template=self.whatsapp_template_input.toPlainText(), # Nouveau !
-            add_signature=self.signature_yes_radio.isChecked()
+            add_signature=self.signature_yes_radio.isChecked(),
+            sender_email=self.get_current_sender_email(), # Adresse d'expédition (De) choisie (Nouveau !)
+            sender_name=self.get_current_sender_name()    # Nom d'affichage de l'expéditeur (Nouveau !)
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
+        # La génération d'attestations PDF s'appuie sur QtWebEngine (Chromium) qui n'est pas
+        # thread-safe : délégation au thread principal via une connexion bloquante.
+        self.worker.pdf_generation_requested.connect(self.on_pdf_generation_requested, Qt.BlockingQueuedConnection)
         self.worker.start()
 
     def on_progress(self, message: str, percent: int):
         self.progress_bar.setValue(percent)
         self.log_area.append(message)
+
+    def on_pdf_generation_requested(self, payload):
+        """Slot exécuté sur le thread principal (connexion bloquante) : QtWebEngine (Chromium)
+        n'est pas thread-safe, toute génération d'attestation PDF doit passer par ici."""
+        from presentation.pdf_render_service import get_pdf_render_service
+        result = get_pdf_render_service().render_attestations(
+            payload.get("participants"),
+            output_format=payload.get("output_format", "pdf"),
+            test_mode=payload.get("test_mode", False)
+        )
+        if self.worker is not None:
+            self.worker.pdf_result = result
 
     def on_view_html_clicked(self):
         """Ouvre une fenêtre affichant le code HTML exact du courriel qui sera envoyé."""
@@ -1141,10 +1366,16 @@ class CommunicationsPage(QWidget):
         to_lbl = QLabel(f"<b>À :</b> {to_display}")
         to_lbl.setTextFormat(Qt.TextFormat.RichText)
         to_lbl.setWordWrap(True)
+        from_display = self.get_current_sender_email() or DEFAULT_SENDER_EMAIL
+        from_name_display = self.get_current_sender_name()
+        from_lbl = QLabel(f"<b>De :</b> {from_name_display} &lt;{from_display}&gt;")
+        from_lbl.setTextFormat(Qt.TextFormat.RichText)
+        from_lbl.setWordWrap(True)
         subject_lbl = QLabel(f"<b>Objet :</b> {subject or '(vide)'}")
         subject_lbl.setTextFormat(Qt.TextFormat.RichText)
         subject_lbl.setWordWrap(True)
         header_layout.addWidget(to_lbl)
+        header_layout.addWidget(from_lbl)
         header_layout.addWidget(subject_lbl)
         dlg_layout.addWidget(header_frame)
 
@@ -1234,9 +1465,25 @@ class CommunicationsPage(QWidget):
         
         self.subject_input.blockSignals(False)
         self.body_input.blockSignals(False)
+        
+        # Charger l'adresse et le nom d'expédition mémorisés pour ce modèle (Nouveau !)
+        # Repli : expéditeur par défaut sauvegardé, puis valeurs du club
+        sender = (tmpl.get("sender_email") or "").strip()
+        if not sender:
+            sender = (SqliteRepository.get_app_setting("default_sender_email", "") or "").strip()
+        if not sender:
+            sender = DEFAULT_SENDER_EMAIL
+        self.sender_email_combo.setCurrentText(sender)
+
+        sender_name = (tmpl.get("sender_name") or "").strip()
+        if not sender_name:
+            sender_name = (SqliteRepository.get_app_setting("default_sender_name", "") or "").strip()
+        if not sender_name:
+            sender_name = DEFAULT_SENDER_NAME
+        self.sender_name_input.setText(sender_name)
 
     def on_save_template_clicked(self):
-        """Enregistre les modifications apportées au template sélectionné."""
+        """Enregistre les modifications apportées au template sélectionné (avec son expéditeur)."""
         current_name = self.template_selector.currentText().strip()
         if not current_name:
             QMessageBox.warning(self, "Pas de modèle", "Veuillez sélectionner ou créer un modèle avant d'enregistrer.")
@@ -1244,11 +1491,21 @@ class CommunicationsPage(QWidget):
             
         subject = self.subject_input.text().strip()
         body = self.body_input.toPlainText()
+        sender_email = self.get_current_sender_email()
+        sender_name = self.get_current_sender_name()
+        if not sender_email or "@" not in sender_email:
+            QMessageBox.warning(
+                self, "Adresse d'expédition invalide",
+                "L'adresse d'expédition (De) doit être une adresse e-mail valide (contenant un '@').\n"
+                "Exemple : inscription@alj-escalade.fr"
+            )
+            return
         
         from infrastructure.sqlite_repository import SqliteRepository
-        success = SqliteRepository.save_email_template(current_name, subject, body)
+        success = SqliteRepository.save_email_template(current_name, subject, body, sender_email=sender_email, sender_name=sender_name)
         if success:
-            self.log_area.append(f"💾 [MODÈLE] Modèle d'e-mail '{current_name}' enregistré avec succès en BDD.")
+            self.remember_sender_email(sender_email, sender_name)
+            self.log_area.append(f"💾 [MODÈLE] Modèle d'e-mail '{current_name}' enregistré avec succès en BDD (expédition : {sender_name} <{sender_email}>).")
             self.load_email_templates()
             self.template_selector.setCurrentText(current_name)
         else:
@@ -1277,6 +1534,8 @@ class CommunicationsPage(QWidget):
         name = name.strip()
         subject = "Sujet du nouveau courriel"
         body = "Bonjour {first_name},\n\nSaisissez votre texte ici."
+        sender_email = self.get_current_sender_email()
+        sender_name = self.get_current_sender_name()
         
         from infrastructure.sqlite_repository import SqliteRepository
         # Vérifier si existe déjà
@@ -1285,9 +1544,10 @@ class CommunicationsPage(QWidget):
             QMessageBox.warning(self, "Modèle Existant", f"Un modèle nommé '{name}' existe déjà.")
             return
             
-        success = SqliteRepository.save_email_template(name, subject, body)
+        success = SqliteRepository.save_email_template(name, subject, body, sender_email=sender_email, sender_name=sender_name)
         if success:
-            self.log_area.append(f"➕ [MODÈLE] Nouveau modèle '{name}' créé avec succès.")
+            self.remember_sender_email(sender_email, sender_name)
+            self.log_area.append(f"➕ [MODÈLE] Nouveau modèle '{name}' créé avec succès (expédition : {sender_name} <{sender_email}>).")
             self.load_email_templates()
             self.template_selector.setCurrentText(name)
         else:

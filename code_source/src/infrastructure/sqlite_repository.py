@@ -23,6 +23,12 @@ EXTRA_COLUMNS = {
 #   2 = schéma cible (users / orders / purchases / purchase_options, voir migrate_schema_v2.py)
 SCHEMA_VERSION = 1
 
+# Adresse d'expédition par défaut des e-mails de la Communication (choisissable/sauvegardable dans l'IHM)
+DEFAULT_SENDER_EMAIL = "inscription@alj-escalade.fr"
+
+# Nom d'affichage de l'expéditeur (visible dans la colonne « De » des messageries)
+DEFAULT_SENDER_NAME = "Amicale Laïque Jonage - Inscriptions"
+
 # Phase 2 - vue de compatibilite : definie dans infrastructure/schema_v2.py (COMPAT_VIEW_SQL)
 
 class SqliteRepository:
@@ -146,22 +152,54 @@ class SqliteRepository:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
             subject TEXT NOT NULL,
-            body TEXT NOT NULL
+            body TEXT NOT NULL,
+            sender_email TEXT DEFAULT '',
+            sender_name TEXT DEFAULT ''
         );
         """)
-        
+
+        # S'assurer de la présence de la colonne sender_email (adresse d'expédition) pour les BDD existantes (migration auto)
+        try:
+            cursor.execute("SELECT sender_email FROM email_templates LIMIT 1")
+        except sqlite3.OperationalError:
+            print("🔧 [SQLITE] Ajout de la colonne 'sender_email' à la table email_templates...")
+            cursor.execute("ALTER TABLE email_templates ADD COLUMN sender_email TEXT DEFAULT ''")
+            conn.commit()
+
+        # S'assurer de la présence de la colonne sender_name (nom d'affichage de l'expéditeur) pour les BDD existantes (migration auto)
+        try:
+            cursor.execute("SELECT sender_name FROM email_templates LIMIT 1")
+        except sqlite3.OperationalError:
+            print("🔧 [SQLITE] Ajout de la colonne 'sender_name' à la table email_templates...")
+            cursor.execute("ALTER TABLE email_templates ADD COLUMN sender_name TEXT DEFAULT ''")
+            conn.commit()
+
+        # Renseigner l'adresse d'expédition par défaut sur les modèles qui n'en ont pas encore
+        cursor.execute("SELECT COUNT(*) FROM email_templates WHERE sender_email IS NULL OR TRIM(sender_email) = ''")
+        if cursor.fetchone()[0] > 0:
+            cursor.execute("UPDATE email_templates SET sender_email = ? WHERE sender_email IS NULL OR TRIM(sender_email) = ''", (DEFAULT_SENDER_EMAIL,))
+            conn.commit()
+
+        # Renseigner le nom d'affichage par défaut sur les modèles qui n'en ont pas encore
+        cursor.execute("SELECT COUNT(*) FROM email_templates WHERE sender_name IS NULL OR TRIM(sender_name) = ''")
+        if cursor.fetchone()[0] > 0:
+            cursor.execute("UPDATE email_templates SET sender_name = ? WHERE sender_name IS NULL OR TRIM(sender_name) = ''", (DEFAULT_SENDER_NAME,))
+            conn.commit()
+
         # Seed des templates par défaut si vides (Nouveau !)
         cursor.execute("SELECT COUNT(*) FROM email_templates")
         cnt_tmpl = cursor.fetchone()[0]
         if cnt_tmpl == 0:
             default_templates = [
-                ("Attestation standard", "Attestation de paiement escalade - Amicale Laïque de Jonage", 
-                 "Bonjour {first_name},\n\nNous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage pour la saison.\n\nSportivement,\nL'équipe ALJ Escalade"),
-                ("Relance inscription", "Rappel : Finalisation de votre inscription ALJ Escalade", 
-                 "Bonjour {first_name},\n\nSauf erreur de notre part, il nous manque encore certains éléments pour finaliser votre dossier d'adhésion pour la saison.\nNous vous invitons à vous connecter sur votre espace licencié pour vérifier le statut de votre certificat médical.\n\nSportivement,\nL'équipe ALJ Escalade")
+                ("Attestation standard", "Attestation de paiement escalade - Amicale Laïque de Jonage",
+                 "Bonjour {first_name},\n\nNous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage pour la saison.\n\nSportivement,\nL'équipe ALJ Escalade",
+                 DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME),
+                ("Relance inscription", "Rappel : Finalisation de votre inscription ALJ Escalade",
+                 "Bonjour {first_name},\n\nSauf erreur de notre part, il nous manque encore certains éléments pour finaliser votre dossier d'adhésion pour la saison.\nNous vous invitons à vous connecter sur votre espace licencié pour vérifier le statut de votre certificat médical.\n\nSportivement,\nL'équipe ALJ Escalade",
+                 DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME)
             ]
             cursor.executemany("""
-                INSERT INTO email_templates (name, subject, body) VALUES (?, ?, ?)
+                INSERT INTO email_templates (name, subject, body, sender_email, sender_name) VALUES (?, ?, ?, ?, ?)
             """, default_templates)
             conn.commit()
         
@@ -1317,13 +1355,13 @@ class SqliteRepository:
     def get_email_templates(cls) -> list:
         """
         Récupère l'ensemble des templates d'emails enregistrés en BDD.
-        Retourne une liste de dicts : [{"name": ..., "subject": ..., "body": ...}]
+        Retourne une liste de dicts : [{"name": ..., "subject": ..., "body": ..., "sender_email": ..., "sender_name": ...}]
         """
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT name, subject, body FROM email_templates ORDER BY name ASC")
+            cursor.execute("SELECT name, subject, body, sender_email, sender_name FROM email_templates ORDER BY name ASC")
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
         except Exception as e:
@@ -1333,19 +1371,24 @@ class SqliteRepository:
             conn.close()
 
     @classmethod
-    def save_email_template(cls, name: str, subject: str, body: str) -> bool:
+    def save_email_template(cls, name: str, subject: str, body: str, sender_email: str = "", sender_name: str = "") -> bool:
         """
-        Enregistre ou met à jour un template d'email dans la BDD.
+        Enregistre ou met à jour un template d'email dans la BDD
+        (avec son adresse et son nom d'affichage d'expédition).
+        Une adresse / un nom vide retombe sur les valeurs par défaut du club.
         """
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
+            sender = (sender_email or "").strip() or DEFAULT_SENDER_EMAIL
+            sname = (sender_name or "").strip() or DEFAULT_SENDER_NAME
             cursor.execute("""
-                INSERT INTO email_templates (name, subject, body)
-                VALUES (?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET subject = excluded.subject, body = excluded.body
-            """, (name.strip(), subject.strip(), body.strip()))
+                INSERT INTO email_templates (name, subject, body, sender_email, sender_name)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET subject = excluded.subject, body = excluded.body,
+                    sender_email = excluded.sender_email, sender_name = excluded.sender_name
+            """, (name.strip(), subject.strip(), body.strip(), sender, sname))
             conn.commit()
             return True
         except Exception as e:
@@ -1412,6 +1455,50 @@ class SqliteRepository:
             return True
         except Exception as e:
             print(f"❌ [SQLITE] Erreur lors de l'enregistrement du texte WhatsApp : {e}")
+            return False
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_app_setting(cls, key: str, default: str = None) -> str:
+        """
+        Récupère une valeur générique de réglage applicatif (clé/valeur) depuis la BDD.
+        Retourne `default` si la clé est absente ou vide.
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            if row is None:
+                return default
+            value = row["value"]
+            return value if value and str(value).strip() else default
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de la lecture du réglage '{key}' : {e}")
+            return default
+        finally:
+            conn.close()
+
+    @classmethod
+    def save_app_setting(cls, key: str, value: str) -> bool:
+        """
+        Enregistre ou met à jour une valeur générique de réglage applicatif (clé/valeur) dans la BDD.
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO app_settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (key, value))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de l'enregistrement du réglage '{key}' : {e}")
             return False
         finally:
             conn.close()

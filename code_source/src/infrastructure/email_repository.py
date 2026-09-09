@@ -36,11 +36,13 @@ class EmailRepository:
             print(f"⚠️ Impossible d'écrire dans le journal d'audit des e-mails : {e}")
 
     @classmethod
-    def send_email(cls, to_email: str, subject: str, body: str, attachment_path: str = "", html_body: str = None, inline_images: list = None) -> bool:
+    def send_email(cls, to_email: str, subject: str, body: str, attachment_path: str = "", html_body: str = None, inline_images: list = None, from_email: str = None, from_name: str = None) -> bool:
         """
         Envoie un e-mail avec pièce jointe en sélectionnant dynamiquement le meilleur canal configuré (Gmail API ou SMTP).
         Si html_body est fourni, une version HTML (multipart/alternative) est jointe au texte brut,
         avec les images inline éventuelles (liste de tuples (chemin, Content-ID)).
+        `from_email` permet de choisir l'adresse d'expédition (doit être un alias vérifié du compte émetteur).
+        `from_name` permet d'afficher un nom lisible dans la colonne « De » des messageries.
         """
         # Récupérer les identifiants depuis le SecretStore
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
@@ -55,11 +57,23 @@ class EmailRepository:
 
         use_oauth2 = bool(gmail_user and gmail_client_id and gmail_refresh)
 
+        # Adresse d'expédition : adresse choisie dans l'IHM si fournie, sinon le compte configuré
+        effective_from = (from_email or "").strip() or (gmail_user if use_oauth2 else smtp_from)
+
         # Construction du message MIME
+        from email.utils import formataddr
         msg = MIMEMultipart()
         msg["Subject"] = subject
         msg["To"] = to_email
-        msg["From"] = gmail_user if use_oauth2 else smtp_from
+        # En-tête « De » : nom d'affichage lisible + adresse (format RFC 2822, accents encodés proprement)
+        sender_name = (from_name or "").strip()
+        if sender_name:
+            try:
+                msg["From"] = formataddr((sender_name, effective_from))
+            except Exception:
+                msg["From"] = effective_from
+        else:
+            msg["From"] = effective_from
 
         if html_body:
             # Version riche : texte brut + HTML, avec logos intégrés en pièces jointes inline
@@ -154,7 +168,9 @@ class EmailRepository:
                         pass
                 
                 server.login(smtp_user, smtp_password)
-                # Diviser les e-mails en liste pour assurer l'envoi SMTP multipart
+                # Diviser les e-mails en liste pour assurer l'envoi SMTP multipart.
+                # L'enveloppe SMTP reste le compte authentifié (contrainte des serveurs),
+                # l'adresse d'expédition choisie figure dans l'en-tête « From » du message.
                 recipients = [em.strip() for em in to_email.split(",") if em.strip()]
                 server.sendmail(smtp_from, recipients, msg.as_string())
                 server.quit()

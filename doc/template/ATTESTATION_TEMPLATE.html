@@ -131,7 +131,56 @@
             color: #0f172a;
             font-size: 16px;
         }
-
+/* Échéancier de paiement */
+        .schedule-section {
+            background-color: #f8fafc;
+            border-left: 5px solid #ea580c;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 14px;
+        }
+        .schedule-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            color: #ea580c;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .schedule-table th, .schedule-table td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .schedule-table th {
+            color: #64748b;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        .schedule-table tr:last-child td {
+            border-bottom: none;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-paid {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+        .status-pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
         /* Mention légale */
         .legal-notice {
             font-size: 13px;
@@ -261,7 +310,36 @@
                 <strong>Règlement HelloAsso (Carte Bancaire)</strong>
             </div>
         </div>
-
+       <!-- Échéancier de paiement -->
+        <div class="schedule-section">
+            <h3>Échéancier de paiement</h3>
+            <table class="schedule-table">
+                <thead>
+                    <tr>
+                        <th>Échéance</th>
+                        <th>Montant</th>
+                        <th>Statut / Date prévue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Échéance 1 / 3</strong></td>
+                        <td>82,00 €</td>
+                        <td><span class="status-badge status-paid">Payé</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Échéance 2 / 3</strong></td>
+                        <td>82,00 €</td>
+                        <td><span class="status-badge status-pending">Prévu le 23/09/2026</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Échéance 3 / 3</strong></td>
+                        <td>82,00 €</td>
+                        <td><span class="status-badge status-pending">Prévu le 23/10/2026</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
         <!-- Mention légale -->
         <div class="legal-notice">
             Association régie par la loi du 1er juillet 1901 - SIRET : 32904854000028

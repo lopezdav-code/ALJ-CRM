@@ -104,35 +104,6 @@ class OAuth2CallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Code d'autorisation manquant dans la requete.")
 
-def update_env_file(updates):
-    """Met à jour le fichier .env local avec les nouvelles variables."""
-    env_path = os.path.join(CODE_ROOT, ".env")
-    existing_lines = []
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            existing_lines = f.readlines()
-            
-    updated_keys = set()
-    new_lines = []
-    
-    for line in existing_lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            k, v = stripped.split("=", 1)
-            k = k.strip()
-            if k in updates:
-                new_lines.append(f"{k}={updates[k]}\n")
-                updated_keys.add(k)
-                continue
-        new_lines.append(line)
-        
-    for k, v in updates.items():
-        if k not in updated_keys:
-            new_lines.append(f"{k}={v}\n")
-            
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
-
 def run_helper():
     global client_id, client_secret, auth_code
     
@@ -253,20 +224,26 @@ def run_helper():
         
     print(f"✅ Adresse Gmail détectée : {gmail_email}")
     
-    # 8. Mettre à jour le fichier .env
+    # 8. Enregistrer les identifiants via le SecretStore (trousseau Windows + fichier .env + os.environ).
+    # CRUCIAL : le trousseau Windows est prioritaire sur le .env dans SecretStore.get_secret().
+    # Une écriture du seul fichier .env laisserait l'ANCIEN refresh token (révoqué par Google lors
+    # d'une nouvelle autorisation) dans le trousseau, provoquant l'erreur OAuth2 'invalid_grant'
+    # lors des envois d'e-mails et des synchronisations Google Drive.
+    from infrastructure.secret_store import SecretStore
     updates = {
         "GMAIL_CLIENT_ID": client_id,
         "GMAIL_CLIENT_SECRET": client_secret,
         "GMAIL_REFRESH_TOKEN": refresh_token,
         "GMAIL_USER_EMAIL": gmail_email
     }
-    
+
     try:
-        update_env_file(updates)
+        for key, value in updates.items():
+            SecretStore.set_secret(key, value)
         print("\n==========================================================")
         print(" 🎉 FÉLICITATIONS ! CONFIGURATION GMAIL OAUTH2 TERMINÉE ! ")
         print("==========================================================")
-        print("Les variables suivantes ont été automatiquement injectées dans votre fichier .env :")
+        print("Les variables suivantes ont été automatiquement enregistrées (trousseau Windows + .env) :")
         print(f"- GMAIL_CLIENT_ID     : {client_id[:25]}...")
         print("- GMAIL_CLIENT_SECRET : **********")
         print(f"- GMAIL_REFRESH_TOKEN : {refresh_token[:25]}...")
@@ -275,7 +252,7 @@ def run_helper():
         print("Vous pouvez dès à présent relancer l'application et utiliser le Mode Email !")
         print("==========================================================\n")
     except Exception as env_err:
-        print(f"❌ Échec de la mise à jour du fichier .env : {env_err}")
+        print(f"❌ Échec de l'enregistrement des identifiants : {env_err}")
 
 if __name__ == "__main__":
     run_helper()

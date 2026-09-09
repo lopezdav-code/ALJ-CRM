@@ -510,11 +510,26 @@ class DocumentsPage(QWidget):
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
+        # La génération d'attestations PDF s'appuie sur QtWebEngine (Chromium) qui n'est pas
+        # thread-safe : délégation au thread principal via une connexion bloquante.
+        self.worker.pdf_generation_requested.connect(self.on_pdf_generation_requested, Qt.BlockingQueuedConnection)
         self.worker.start()
 
     def on_progress(self, message: str, percent: int):
         self.progress_bar.setValue(percent)
         self.log_area.append(message)
+
+    def on_pdf_generation_requested(self, payload):
+        """Slot exécuté sur le thread principal (connexion bloquante) : QtWebEngine (Chromium)
+        n'est pas thread-safe, toute génération d'attestation PDF doit passer par ici."""
+        from presentation.pdf_render_service import get_pdf_render_service
+        result = get_pdf_render_service().render_attestations(
+            payload.get("participants"),
+            output_format=payload.get("output_format", "pdf"),
+            test_mode=payload.get("test_mode", False)
+        )
+        if self.worker is not None:
+            self.worker.pdf_result = result
 
     def on_finished(self, generated: int, skipped: int, errors: int):
         self.generate_btn.setEnabled(True)

@@ -7,7 +7,6 @@ from domain.models import Member
 from paths import ROOT_DIR
 from infrastructure.google_drive_client import GoogleDriveClient
 from infrastructure.email_repository import EmailRepository
-from attestation_generator import generate_all_attestations
 
 class SyncHelloAssoWorker(QThread):
     """
@@ -119,12 +118,16 @@ class GenerateAttestationsWorker(QThread):
     """
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(int, int, int) # (générés, ignorés, erreurs)
+    # Demande de génération déléguée au thread principal (QtWebEngine/Chromium n'est pas
+    # thread-safe). L'IHM doit connecter ce signal avec Qt.BlockingQueuedConnection.
+    pdf_generation_requested = Signal(dict)
 
     def __init__(self, output_format: str = "pdf", test_mode: bool = False, members: list = None, parent=None):
         super().__init__(parent)
         self.output_format = output_format
         self.test_mode = test_mode
         self.members = members
+        self.pdf_result = {"success": False, "error": ""}
 
     def run(self):
         try:
@@ -138,14 +141,18 @@ class GenerateAttestationsWorker(QThread):
                 raw_data = SqliteRepository.load_direct_data()
             
             self.progress.emit("Lancement de la fusion Word et conversion PDF en arrière-plan...", 50)
-            # Appeler la routine robuste d'origine qui s'exécute maintenant asynchronement sans bloquer l'IHM
-            # (Note : generate_all_attestations utilise win32com.client Word COM)
-            # Pour éviter d'afficher des boîtes de dialogue COM bloquantes, Word s'exécute de façon invisible.
-            generate_all_attestations(
-                test_mode=self.test_mode,
-                output_format=self.output_format,
-                participants_list=raw_data
-            )
+            # IMPORTANT : le rendu PDF s'appuie sur QtWebEngine (Chromium) qui n'est pas
+            # thread-safe. On délègue la génération au thread principal via une connexion
+            # bloquante, sinon l'application plante nativement dès la 2ème génération.
+            self.pdf_result = {"success": False, "error": ""}
+            self.pdf_generation_requested.emit({
+                "participants": raw_data,
+                "output_format": self.output_format,
+                "test_mode": self.test_mode
+            })
+            # Connexion bloquante : on reprend ici une fois la génération terminée sur le thread principal
+            if not self.pdf_result.get("success"):
+                raise RuntimeError(self.pdf_result.get("error") or "Échec de la génération des attestations.")
             
             self.progress.emit("Génération des attestations terminée !", 100)
             # Renvoyer des statistiques fictives ou calculées
@@ -163,8 +170,11 @@ class SendEmailCampaignWorker(QThread):
     """
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(int, int)  # (succès, échecs)
+    # Demande de génération d'attestation déléguée au thread principal (QtWebEngine/Chromium
+    # n'est pas thread-safe). L'IHM doit connecter ce signal avec Qt.BlockingQueuedConnection.
+    pdf_generation_requested = Signal(dict)
 
-    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, add_signature: bool = False, parent=None):
+    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, add_signature: bool = False, sender_email: str = None, sender_name: str = None, parent=None):
         super().__init__(parent)
         self.subject = subject
         self.body = body
@@ -176,6 +186,9 @@ class SendEmailCampaignWorker(QThread):
         self.use_payer_email = use_payer_email
         self.whatsapp_template = whatsapp_template
         self.add_signature = add_signature
+        self.sender_email = (sender_email or "").strip() or None
+        self.sender_name = (sender_name or "").strip() or None
+        self.pdf_result = {"success": False, "error": ""}
 
     def run(self):
         success_count = 0
@@ -232,12 +245,18 @@ class SendEmailCampaignWorker(QThread):
                 if not os.path.exists(pdf_path):
                     self.progress.emit(f"⚙️ Génération de l'attestation manquante pour {m.user_last_name} {m.user_first_name}...", percent)
                     try:
-                        # Générer uniquement pour ce membre au format PDF
-                        generate_all_attestations(
-                            test_mode=False,
-                            output_format="pdf",
-                            participants_list=[m.to_dict()]
-                        )
+                        # Générer uniquement pour ce membre au format PDF.
+                        # IMPORTANT : QtWebEngine (Chromium) n'est pas thread-safe, la génération
+                        # est déléguée au thread principal via une connexion bloquante
+                        # (sinon crash natif de l'application).
+                        self.pdf_result = {"success": False, "error": ""}
+                        self.pdf_generation_requested.emit({
+                            "participants": [m.to_dict()],
+                            "output_format": "pdf"
+                        })
+                        # Connexion bloquante : on reprend ici une fois la génération terminée
+                        if not self.pdf_result.get("success"):
+                            print(f"❌ [EMAIL_WORKER] Impossible de générer l'attestation : {self.pdf_result.get('error')}")
                     except Exception as gen_err:
                         print(f"❌ [EMAIL_WORKER] Impossible de générer l'attestation : {gen_err}")
                 
@@ -362,13 +381,16 @@ class SendEmailCampaignWorker(QThread):
                     inline_imgs = get_inline_images()
 
                 # Appel du repository d'email découplé et robuste en joignant les pièces jointes !
+                # L'adresse et le nom d'expédition choisis dans l'IHM (template de mail) sont transmis ici.
                 EmailRepository.send_email(
                     to_email=email_dest,
                     subject=self.subject,
                     body=plain_body,
                     attachment_path=attachments,
                     html_body=html_body,
-                    inline_images=inline_imgs
+                    inline_images=inline_imgs,
+                    from_email=self.sender_email,
+                    from_name=self.sender_name
                 )
                 
                 # Enregistrer la date d'envoi d'e-mail directement dans SQLite

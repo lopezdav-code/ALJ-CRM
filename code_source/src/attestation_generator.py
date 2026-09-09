@@ -44,7 +44,7 @@ def get_safe_filename(last_name, first_name, order_id=None):
         
     return f"Attestation_{safe_ln}_{safe_fn}.docx"
 
-def generate_all_attestations(test_mode=False, output_format="pdf", participants_list=None):
+def generate_all_attestations(test_mode=False, output_format="pdf", participants_list=None, web_page=None):
     """
     Génère les attestations de paiement pour tous les adhérents du fichier Excel.
     
@@ -52,6 +52,8 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
     - test_mode : si True, limite la génération aux 10 premiers adhérents.
     - output_format : "pdf" (PDF uniquement), "docx" (Word uniquement), "both" (les deux).
     - participants_list : si fourni, utilise cette liste spécifique de dictionnaires d'adhérents.
+    - web_page : QWebEnginePage optionnelle à réutiliser (fournie par le PdfRenderService
+      du thread principal ; QtWebEngine n'est pas thread-safe et doit rester sur le thread GUI).
     """
     print("\n--- DÉBUT DE LA GÉNÉRATION DES ATTESTATIONS ---")
     print(f"Format demandé : {output_format.upper()}")
@@ -110,8 +112,9 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
         return
         
     # 5. Initialisation du moteur de rendu PDF Chromium si applicable
-    web_page = None
-    if output_format in ("pdf", "both"):
+    # (une page fournie par l'appelant — thread principal — est réutilisée telle quelle)
+    web_page_owned = False
+    if output_format in ("pdf", "both") and web_page is None:
         try:
             print("Démarrage du moteur de rendu PDF Chromium (PySide6) en arrière-plan...")
             from PySide6.QtWidgets import QApplication
@@ -120,6 +123,7 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
             # S'assurer qu'une QApplication existe (obligatoire pour Qt)
             app = QApplication.instance() or QApplication([])
             web_page = QWebEnginePage()
+            web_page_owned = True
         except Exception as e:
             print(f"[ERREUR] Impossible de charger le moteur PDF PySide6 : {e}")
             print("⚠️ Repli sur la génération Word (.docx) uniquement.")
@@ -267,9 +271,10 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                     base_url = QUrl.fromLocalFile(os.path.join(root_dir, "logo.png"))
                     
                     loop = QEventLoop()
-                    web_page.loadFinished.connect(lambda ok: loop.quit())
+                    load_conn = web_page.loadFinished.connect(lambda ok: loop.quit())
                     web_page.setHtml(html_content, base_url)
                     loop.exec()
+                    web_page.loadFinished.disconnect(load_conn)
                     
                     pdf_loop = QEventLoop()
                     pdf_success = False
@@ -311,8 +316,9 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                 error_count += 1
                 
     finally:
-        # Libération des ressources de rendu
-        if web_page:
+        # Libération des ressources de rendu (uniquement si la page a été créée localement ;
+        # une page fournie par le service de rendu du thread principal reste réutilisable)
+        if web_page is not None and web_page_owned:
             try:
                 web_page.deleteLater()
             except Exception:
