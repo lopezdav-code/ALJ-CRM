@@ -41,7 +41,7 @@ class TestPresentationLot4(unittest.TestCase):
 
         model = MemberTableModel([m1, m2])
         self.assertEqual(model.rowCount(), 2)
-        self.assertEqual(model.columnCount(), 9)
+        self.assertEqual(model.columnCount(), 10)  # 9 colonnes historiques + colonne "Alerte" ⚠️
 
         # Vérifier le tri (colonne 2 = user_last_name)
         # Ordre croissant : Apple doit passer devant Zebra

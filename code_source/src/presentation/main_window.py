@@ -435,12 +435,18 @@ class MainWindow(QMainWindow):
             SecretStore.set_secret("LAST_GOOGLE_DRIVE_SYNC", now_str) # Car HelloAsso sync téléverse aussi vers Drive !
 
             import json
-            # Vérifier s'il y a des données de nouveaux adhérents
+            # Vérifier s'il y a des données de nouveaux adhérents + conflits d'âge
             new_members = []
+            age_conflicts = []
             if result_message.startswith("SUCCESS_DATA:"):
                 try:
                     data_str = result_message.split("SUCCESS_DATA:", 1)[1]
-                    new_members = json.loads(data_str)
+                    payload = json.loads(data_str)
+                    if isinstance(payload, dict):
+                        new_members = payload.get("new_members", [])
+                        age_conflicts = payload.get("age_conflicts", [])
+                    elif isinstance(payload, list):
+                        new_members = payload
                 except Exception:
                     pass
             
@@ -456,14 +462,24 @@ class MainWindow(QMainWindow):
                     f"  <th>Nom</th>"
                     f"  <th>Prénom</th>"
                     f"  <th>Date d'inscription</th>"
+                    f"  <th>Alerte</th>"
                     f"</tr>"
                 )
                 for m in new_members:
+                    warning_txt = str(m.get('warning') or '').strip()
+                    if warning_txt:
+                        alerte_cell = (
+                            f"<td align='center' bgcolor='#FEF3C7' style='color: #B45309;' title=\"{warning_txt}\">"
+                            f"⚠️ {warning_txt}</td>"
+                        )
+                    else:
+                        alerte_cell = "<td align='center'>—</td>"
                     html_msg += (
                         f"<tr>"
                         f"  <td><b>{m.get('last_name', '')}</b></td>"
                         f"  <td>{m.get('first_name', '')}</td>"
                         f"  <td align='center'>{m.get('order_date', '')}</td>"
+                        f"  {alerte_cell}"
                         f"</tr>"
                     )
                 html_msg += "</table>"
@@ -472,13 +488,43 @@ class MainWindow(QMainWindow):
                     "<h3><b>✔️ Synchronisation Réussie !</b></h3>"
                     "<p>La base d'adhérents est déjà entièrement à jour.</p>"
                     "<p><b>📊 0 nouvelle ligne ajoutée.</b></p>"
+            )
+            
+            # Bloc d'avertissement en cas de conflit d'âge sur les nouvelles inscriptions
+            # (adulte dans un groupe enfants/collège/lycée ou année de naissance hors bornes)
+            if age_conflicts:
+                html_msg += (
+                    f"<h3 style='color: #B45309; margin-top: 15px;'><b>⚠️ Conflits d'âge détectés ({len(age_conflicts)})</b></h3>"
+                    f"<p>Ces nouvelles inscriptions ne respectent pas les bornes de date de naissance du groupe "
+                    f"(par exemple : un adulte au 01/09 de la saison inscrit dans un groupe enfants / collège / lycée). "
+                    f"Merci de vérifier ces dossiers dans l'onglet <b>Adhérents</b>.</p>"
+                    f"<table border='1' cellpadding='6' cellspacing='0' style='border-collapse: collapse; border: 1px solid #D97706; font-family: Segoe UI; font-size: 11px;'>"
+                    f"<tr bgcolor='#D97706' style='color: white; font-weight: bold;'>"
+                    f"  <th>Nom</th>"
+                    f"  <th>Prénom</th>"
+                    f"  <th>Tarif</th>"
+                    f"  <th>Problème détecté</th>"
+                    f"</tr>"
                 )
+                for c in age_conflicts:
+                    problems = "<br>".join(f"• {msg}" for msg in c.get("messages", []))
+                    html_msg += (
+                        f"<tr bgcolor='#FEF3C7'>"
+                        f"  <td><b>{c.get('last_name', '')}</b></td>"
+                        f"  <td>{c.get('first_name', '')}</td>"
+                        f"  <td>{c.get('tarif_name', '')}</td>"
+                        f"  <td style='color: #B45309;'>{problems}</td>"
+                        f"</tr>"
+                    )
+                html_msg += "</table>"
                 
             # Créer un QMessageBox personnalisé pour intégrer le bouton d'ouverture web Google Drive
             box = QMessageBox(self)
             box.setWindowTitle("Synchronisation ALJ Escalade")
             box.setText(html_msg)
             box.setTextFormat(Qt.TextFormat.RichText)
+            if age_conflicts:
+                box.setIcon(QMessageBox.Icon.Warning)
             
             ok_btn = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
             

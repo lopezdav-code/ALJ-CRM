@@ -1,4 +1,5 @@
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QColor
 from typing import List, Any
 from domain.models import Member
 
@@ -15,12 +16,20 @@ class MemberTableModel(QAbstractTableModel):
         ("Date d'inscription", "order_date"),
         ("Diplômes/Autonomie", "diplome"),  # Nouvelle colonne de pictogrammes d'autonomie (Nouveau !)
         ("Statut", "status"),
-        ("Déjà adhérent", "already_member")
+        ("Déjà adhérent", "already_member"),
+        ("Alerte", "warning")  # ⚠️ Conflit d'âge / bornes de naissance du groupe
     ]
+
+    # Fond ambre clair pour signaler visuellement une anomalie d'âge
+    WARNING_BACKGROUND = QColor("#FEF3C7")
+    WARNING_FOREGROUND = QColor("#B45309")
 
     def __init__(self, members: List[Member] = None, parent=None):
         super().__init__(parent)
         self.members: List[Member] = members or []
+        self._planning_data = None       # Cache du planning (bornes de naissance par groupe)
+        self._tarif_to_item = {}         # tarif HelloAsso -> créneau du planning
+        self._warning_cache = {}         # (tarif, date de naissance) -> liste de messages
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self.members)
@@ -32,6 +41,36 @@ class MemberTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.COLUMNS[section][0]
         return None
+
+    def _ensure_planning(self):
+        """Charge (une fois) le planning depuis SQLite pour connaître les bornes de naissance."""
+        if self._planning_data is None:
+            try:
+                from infrastructure.sqlite_repository import SqliteRepository
+                self._planning_data = SqliteRepository.load_planning_data(log_debug=False) or []
+            except Exception as e:
+                print(f"⚠️ [TABLE_ADHERENTS] Impossible de charger le planning pour le contrôle d'âge : {e}")
+                self._planning_data = []
+            self._tarif_to_item = {}
+            for item in self._planning_data:
+                for t in item.get("helloasso_tarifs", []) or []:
+                    self._tarif_to_item.setdefault(str(t).strip().lower(), item)
+
+    def get_member_warnings(self, member: Member) -> list:
+        """Retourne les messages d'incohérence d'âge d'un adhérent (liste vide = conforme)."""
+        cache_key = (str(member.tarif_name or "").strip(), str(member.birth_date or "").strip())
+        if cache_key not in self._warning_cache:
+            self._ensure_planning()
+            try:
+                from domain.age_rules import check_age_conflict, find_planning_item_for_tarif
+                planning_item = self._tarif_to_item.get(cache_key[0].lower())
+                self._warning_cache[cache_key] = check_age_conflict(
+                    member.birth_date, member.tarif_name, planning_item
+                )
+            except Exception as e:
+                print(f"⚠️ [TABLE_ADHERENTS] Erreur du contrôle d'âge : {e}")
+                self._warning_cache[cache_key] = []
+        return self._warning_cache[cache_key]
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
         if not index.isValid() or not (0 <= index.row() < len(self.members)):
@@ -82,10 +121,39 @@ class MemberTableModel(QAbstractTableModel):
                     return "  ".join(icons)
                 return ""
                 
+            if col_name == "warning":
+                # Alerte ⚠️ en cas d'incohérence d'âge (adulte dans un groupe enfants /
+                # collège / lycée, ou année de naissance hors bornes du groupe)
+                warnings = self.get_member_warnings(member)
+                if warnings:
+                    return "⚠️"
+                return ""
+
             return getattr(member, col_name, "")
-            
+
+        elif role == Qt.ToolTipRole:
+            if col_name == "tarif_name":
+                return ("Double-cliquez sur cette cellule pour changer de groupe (tarif)\n"
+                        "parmi les tarifs disponibles de la saison active.")
+            if col_name == "warning":
+                warnings = self.get_member_warnings(member)
+                if warnings:
+                    return "Contrôle d'âge :\n" + "\n".join(f"• {w}" for w in warnings)
+                return "Aucun problème d'âge détecté pour ce tarif."
+            return None
+
+        elif role == Qt.BackgroundRole:
+            if col_name == "warning" and self.get_member_warnings(member):
+                return self.WARNING_BACKGROUND
+            return None
+
+        elif role == Qt.ForegroundRole:
+            if col_name == "warning" and self.get_member_warnings(member):
+                return self.WARNING_FOREGROUND
+            return None
+
         elif role == Qt.TextAlignmentRole:
-            if col_name in ("licence_ffme", "amount", "order_date", "already_member", "diplome"):
+            if col_name in ("licence_ffme", "amount", "order_date", "already_member", "diplome", "warning"):
                 return Qt.AlignmentFlag.AlignCenter
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
@@ -164,7 +232,9 @@ class MemberTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
     def update_data(self, new_members: List[Member]):
-        """Met à jour les données de la table."""
+        """Met à jour les données de la table (et rafraîchit le cache du contrôle d'âge)."""
         self.beginResetModel()
         self.members = new_members
+        self._warning_cache = {}
+        self._planning_data = None  # Forcer le rechargement du planning (bornes potentiellement modifiées)
         self.endResetModel()

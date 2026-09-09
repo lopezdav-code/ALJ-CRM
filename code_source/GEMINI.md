@@ -163,7 +163,12 @@ Depuis la version 2.0.0, la base `database.db` (racine du projet) est en **sché
 - **`orders`** : commandes HelloAsso (clé naturelle `order_ref`) — payeur (`payer_*`), moyen de paiement, code promo.
 - **`purchases`** : une ligne par inscription-saison (tarif, montant, statut original + normalisé).
 - **`purchase_options`** : une ligne par assurance souscrite (fini les 12 colonnes `opt_*`).
-- **`seasons`, `planning`, `geocache`, `email_templates`** : inchangés.
+- **`seasons`, `planning`, `geocache`, `email_templates`** : inchangés, sauf `planning` qui porte
+  désormais les bornes de date de naissance du groupe (`naissance_min` / `naissance_max`, ISO
+  `AAAA-MM-JJ`) pour le contrôle d'âge des inscriptions (`domain/age_rules.py`) : un adulte
+  (18 ans révolus au 01/09 de la saison) ne peut pas souscrire à un groupe enfants/collège/lycée,
+  et l'année de naissance doit correspondre aux bornes (déduites si besoin des libellés tarif
+  HelloAsso, ex : « jeunes nés en 2011, 2012, 2013, 2014 »).
 
 Règles de conception (respecter impérativement) :
 

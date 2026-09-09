@@ -5,11 +5,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
     QFrame, QTableWidget, QTableWidgetItem, QMessageBox, QDialog,
     QLineEdit, QComboBox, QFormLayout, QAbstractItemView, QHeaderView,
-    QListWidget, QListWidgetItem, QGroupBox
+    QListWidget, QListWidgetItem, QGroupBox, QDateEdit
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QPixmap, QColor
 from paths import ROOT_DIR
+from domain.age_rules import extract_birth_years
 
 class GroupsPage(QWidget):
     """
@@ -103,9 +104,9 @@ class GroupsPage(QWidget):
         table_layout.setContentsMargins(10, 10, 10, 10)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "Nom du groupe", "Type de groupe", "Créneaux associés", "Tarifs HelloAsso connectés", "WhatsApp 📱"
+            "Nom du groupe", "Type de groupe", "Créneaux associés", "Tarifs HelloAsso connectés", "WhatsApp 📱", "🎂 Bornes de naissance"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -326,6 +327,8 @@ class GroupsPage(QWidget):
                     "whatsapp_link": item.get("whatsapp_link") or "",
                     "categorie_age": item.get("categorie_age") or "",
                     "helloasso_tarifs": item.get("helloasso_tarifs", []), # Nouveau !
+                    "naissance_min": item.get("naissance_min") or "",
+                    "naissance_max": item.get("naissance_max") or "",
                     "slots": []
                 }
                 
@@ -348,6 +351,8 @@ class GroupsPage(QWidget):
                     "categorie_age": group.get("categorie_age") or "",
                     "whatsapp_link": group.get("whatsapp_link") or "",
                     "helloasso_tarifs": group.get("helloasso_tarifs", []),
+                    "naissance_min": group.get("naissance_min") or "",
+                    "naissance_max": group.get("naissance_max") or "",
                     "jour": slot.get("jour", "Lundi"),
                     "horaires": slot.get("horaires") or "",
                     "encadrants": slot.get("encadrants", [])
@@ -397,6 +402,37 @@ class GroupsPage(QWidget):
                 wa_item.setForeground(Qt.red)
             self.table.setItem(row_idx, 4, wa_item)
 
+            # Bornes de date de naissance du groupe (contrôle d'âge des inscriptions)
+            dob_min = str(group.get("naissance_min") or "").strip()
+            dob_max = str(group.get("naissance_max") or "").strip()
+            dob_item = QTableWidgetItem()
+            if dob_min or dob_max:
+                try:
+                    from datetime import date as _date
+                    def _fmt(iso):
+                        d = _date.fromisoformat(iso)
+                        return d.strftime("%d/%m/%Y")
+                    dob_min_txt = _fmt(dob_min) if dob_min else "…"
+                    dob_max_txt = _fmt(dob_max) if dob_max else "…"
+                    dob_item.setText(f"{dob_min_txt} → {dob_max_txt}")
+                    dob_item.setForeground(Qt.darkGreen)
+                except ValueError:
+                    dob_item.setText(f"{dob_min or '…'} → {dob_max or '…'}")
+                dob_item.setToolTip(
+                    "Bornes de date de naissance admises pour ce groupe.\n"
+                    "Une inscription hors bornes (ex : adulte dans un groupe enfants/collège/lycée) "
+                    "est signalée par un ⚠️ dans le tableau des adhérents et lors de la synchro HelloAsso."
+                )
+            else:
+                dob_item.setText("Non configuré ⚠️")
+                dob_item.setToolTip(
+                    "Aucune borne de date de naissance configurée.\n"
+                    "Le contrôle d'âge se replie alors sur les années présentes dans le libellé du tarif HelloAsso.\n"
+                    "Utilisez '✏️ Modifier groupe' puis le bouton '🪄 Déduire des tarifs' pour les définir."
+                )
+                dob_item.setForeground(QColor("#D97706"))
+            self.table.setItem(row_idx, 5, dob_item)
+
         self.table.setSortingEnabled(True)
         self.table.resizeColumnsToContents()
         self.filter_table()
@@ -443,6 +479,8 @@ class GroupsPage(QWidget):
                 "whatsapp_link": new_data["whatsapp_link"],
                 "categorie_age": "",
                 "helloasso_tarifs": new_data["helloasso_tarifs"],
+                "naissance_min": new_data.get("naissance_min") or "",
+                "naissance_max": new_data.get("naissance_max") or "",
                 "slots": new_data["slots"]
             }
             self.refresh_table()
@@ -478,6 +516,8 @@ class GroupsPage(QWidget):
                 "whatsapp_link": updated_data["whatsapp_link"],
                 "categorie_age": selected_group.get("categorie_age") or "",
                 "helloasso_tarifs": updated_data["helloasso_tarifs"],
+                "naissance_min": updated_data.get("naissance_min") or "",
+                "naissance_max": updated_data.get("naissance_max") or "",
                 "slots": updated_data["slots"]
             }
             
@@ -689,6 +729,75 @@ class GroupEditDialog(QDialog):
             self.whatsapp_input.setText(self.group_item.get("whatsapp_link") or "")
         form_layout.addRow("Lien WhatsApp :", self.whatsapp_input)
 
+        # Bornes de date de naissance (contrôle d'âge des inscriptions)
+        # La valeur minimale du QDateEdit (1900-01-01) sert de sentinelle « Non définie ».
+        dob_hbox = QHBoxLayout()
+        dob_hbox.setSpacing(8)
+
+        self.dob_min_edit = QDateEdit()
+        self.dob_min_edit.setCalendarPopup(True)
+        self.dob_min_edit.setDisplayFormat("dd/MM/yyyy")
+        self.dob_min_edit.setMinimumDate(QDate(1900, 1, 1))
+        self.dob_min_edit.setSpecialValueText("Non définie")
+        self.dob_min_edit.setDate(QDate(1900, 1, 1))
+        dob_hbox.addWidget(self.dob_min_edit)
+
+        sep_lbl = QLabel("→")
+        sep_lbl.setStyleSheet("color: #64748B; font-weight: bold;")
+        dob_hbox.addWidget(sep_lbl)
+
+        self.dob_max_edit = QDateEdit()
+        self.dob_max_edit.setCalendarPopup(True)
+        self.dob_max_edit.setDisplayFormat("dd/MM/yyyy")
+        self.dob_max_edit.setMinimumDate(QDate(1900, 1, 1))
+        self.dob_max_edit.setSpecialValueText("Non définie")
+        self.dob_max_edit.setDate(QDate(1900, 1, 1))
+        dob_hbox.addWidget(self.dob_max_edit)
+        dob_hbox.addStretch()
+
+        dob_form = QVBoxLayout()
+        dob_form.setSpacing(4)
+        dob_form.addLayout(dob_hbox)
+
+        dob_btn_row = QHBoxLayout()
+        dob_btn_row.setSpacing(8)
+
+        self.dob_derive_btn = QPushButton("🪄 Déduire des tarifs")
+        self.dob_derive_btn.setCursor(Qt.PointingHandCursor)
+        self.dob_derive_btn.setToolTip(
+            "Déduit automatiquement les bornes de naissance depuis les années citées "
+            "dans les tarifs HelloAsso cochés (ex : « jeunes nés en 2011, 2012, 2013, 2014 »)."
+        )
+        self.dob_derive_btn.setStyleSheet("QPushButton { background-color: #0EA5E9; color: white; padding: 4px 10px; font-weight: bold; font-size: 11px; }")
+        self.dob_derive_btn.clicked.connect(self.derive_birth_bounds)
+        dob_btn_row.addWidget(self.dob_derive_btn)
+
+        self.dob_clear_btn = QPushButton("🧹 Effacer")
+        self.dob_clear_btn.setCursor(Qt.PointingHandCursor)
+        self.dob_clear_btn.setToolTip("Réinitialise les bornes de naissance (contrôle d'âge par déduction du tarif uniquement).")
+        self.dob_clear_btn.setStyleSheet("QPushButton { background-color: #F1F5F9; color: #334155; border: 1px solid #CBD5E1; padding: 4px 10px; font-size: 11px; }")
+        self.dob_clear_btn.clicked.connect(self.clear_birth_bounds)
+        dob_btn_row.addWidget(self.dob_clear_btn)
+
+        dob_btn_row.addStretch()
+        dob_form.addLayout(dob_btn_row)
+
+        dob_hint = QLabel(
+            "Bornes de date de naissance admises pour ce groupe (contrôle d'âge : "
+            "un adulte au 01/09 ne peut pas souscrire à un groupe enfants/collège/lycée)."
+        )
+        dob_hint.setWordWrap(True)
+        dob_hint.setStyleSheet("font-size: 10px; color: #64748B; font-style: italic;")
+        dob_form.addWidget(dob_hint)
+
+        dob_wrapper = QGroupBox("🎂 Bornes de date de naissance (contrôle d'âge)")
+        dob_wrapper.setLayout(dob_form)
+        form_layout.addRow(dob_wrapper)
+
+        # Préremplir depuis le groupe existant
+        self._set_bound_date(self.dob_min_edit, (self.group_item or {}).get("naissance_min"))
+        self._set_bound_date(self.dob_max_edit, (self.group_item or {}).get("naissance_max"))
+
         left_panel.addLayout(form_layout)
 
         # Panneau des tarifs HelloAsso associables
@@ -787,6 +896,60 @@ class GroupEditDialog(QDialog):
 
         layout.addLayout(button_layout)
 
+    @staticmethod
+    def _set_bound_date(edit, iso_val):
+        """Positionne un QDateEdit de borne depuis une date ISO ('AAAA-MM-JJ')."""
+        qd = QDate()
+        try:
+            from datetime import date as _date
+            iso_val = str(iso_val or "").strip()
+            if iso_val:
+                d = _date.fromisoformat(iso_val)
+                qd = QDate(d.year, d.month, d.day)
+        except (ValueError, TypeError):
+            qd = QDate()
+        edit.setDate(qd if qd.isValid() else QDate(1900, 1, 1))
+
+    @staticmethod
+    def _get_bound_iso(edit):
+        """Retourne la borne au format ISO ('AAAA-MM-JJ') ou '' si non définie (sentinelle)."""
+        qd = edit.date()
+        if not qd.isValid() or qd == QDate(1900, 1, 1):
+            return ""
+        return qd.toString("yyyy-MM-dd")
+
+    def derive_birth_bounds(self):
+        """Déduit les bornes de naissance depuis les années citées dans les tarifs HelloAsso cochés.
+
+        Ex : « Compétition U15 U17 - jeunes nés en 2011, 2012, 2013, 2014 »
+        -> naissance_min = 01/01/2011, naissance_max = 31/12/2014.
+        """
+        selected_tarifs = []
+        for r in range(self.tarif_list_widget.count()):
+            item = self.tarif_list_widget.item(r)
+            if item.checkState() == Qt.Checked:
+                selected_tarifs.append(item.text())
+
+        all_years = set()
+        for t in selected_tarifs:
+            all_years.update(extract_birth_years(t))
+
+        if not all_years:
+            QMessageBox.information(
+                self, "Aucune année trouvée",
+                "Aucune année de naissance n'a été détectée dans les tarifs HelloAsso cochés.\n\n"
+                "Exemple de libellé reconnu : « jeunes nés en 2011, 2012, 2013, 2014 »."
+            )
+            return
+
+        self._set_bound_date(self.dob_min_edit, f"{min(all_years)}-01-01")
+        self._set_bound_date(self.dob_max_edit, f"{max(all_years)}-12-31")
+
+    def clear_birth_bounds(self):
+        """Efface les bornes de naissance du groupe."""
+        self._set_bound_date(self.dob_min_edit, "")
+        self._set_bound_date(self.dob_max_edit, "")
+
     def refresh_slots_table(self):
         """Actualise le tableau interne affichant les différents créneaux du groupe."""
         self.slots_table.setRowCount(len(self.slots))
@@ -863,6 +1026,8 @@ class GroupEditDialog(QDialog):
             "type": self.type_combo.currentText(),
             "whatsapp_link": self.whatsapp_input.text().strip(),
             "helloasso_tarifs": linked_tarifs,
+            "naissance_min": self._get_bound_iso(self.dob_min_edit),
+            "naissance_max": self._get_bound_iso(self.dob_max_edit),
             "slots": current_slots
         }
 

@@ -1,10 +1,10 @@
 import os
 import datetime
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTableView, QHeaderView, QSplitter, QComboBox,
     QDateEdit, QCheckBox, QPushButton, QDialog, QScrollArea,
-    QFrame, QDialogButtonBox
+    QFrame, QDialogButtonBox, QRadioButton
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
 
@@ -21,6 +21,120 @@ WAITING_LIST_TARIF = "Liste d'attente cours"
 # Statut désélectionné par défaut dans la pop-up des statuts (onglet Communications)
 # pour ne jamais envoyer d'e-mail aux personnes ayant annulé leur inscription.
 CANCELLED_STATUS = "Annulé"
+
+class TarifEditDialog(QDialog):
+    """
+    Pop-up de changement de groupe (tarif HelloAsso) d'un adhérent :
+    liste à boutons radio des tarifs disponibles pour la saison active.
+    Le tarif actuel de l'adhérent est présélectionné.
+    """
+    def __init__(self, member, tarifs: list, parent=None):
+        super().__init__(parent)
+        self.member = member
+        self.tarifs = tarifs or []
+        self.selected_tarif = None
+        self.radio_buttons = []
+        self.setWindowTitle("Changer de groupe (Tarif)")
+        self.setMinimumWidth(440)
+        self.setMinimumHeight(480)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        # Rappel de l'adhérent et de son tarif actuel
+        current = str(self.member.tarif_name or "").strip()
+        info_lbl = QLabel(
+            f"<b>{str(self.member.user_last_name or '').upper()} {str(self.member.user_first_name or '')}</b><br>"
+            f"Tarif actuel : <b>{current or 'Aucun'}</b>"
+        )
+        info_lbl.setStyleSheet("font-size: 12px; color: #1E293B;")
+        layout.addWidget(info_lbl)
+
+        desc_lbl = QLabel("Sélectionnez le nouveau groupe (tarif) pour la saison active :")
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("font-size: 11px; color: #64748B;")
+        layout.addWidget(desc_lbl)
+
+        # Zone défilante avec un bouton radio par tarif disponible
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(4, 4, 4, 4)
+        container_layout.setSpacing(5)
+
+        for tarif in self.tarifs:
+            rb = QRadioButton(tarif)
+            rb.setCursor(Qt.PointingHandCursor)
+            rb.setStyleSheet("""
+                QRadioButton {
+                    color: #1E293B;
+                    font-size: 12px;
+                    spacing: 6px;
+                }
+                QRadioButton::indicator {
+                    width: 14px;
+                    height: 14px;
+                }
+            """)
+            if current and tarif.strip().lower() == current.lower():
+                rb.setChecked(True)
+            container_layout.addWidget(rb)
+            self.radio_buttons.append(rb)
+
+        if not self.radio_buttons:
+            empty_lbl = QLabel("Aucun tarif disponible pour la saison active.")
+            empty_lbl.setStyleSheet("color: #64748B; font-style: italic; font-size: 11px;")
+            container_layout.addWidget(empty_lbl)
+
+        container_layout.addStretch(1)
+        scroll.setWidget(container)
+        layout.addWidget(scroll, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Valider")
+        buttons.button(QDialogButtonBox.Cancel).setText("Annuler")
+        buttons.setStyleSheet("""
+            QPushButton {
+                background-color: #2563EB;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1D4ED8;
+            }
+        """)
+        buttons.accepted.connect(self.accept_selection)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept_selection(self):
+        """Valide la sélection radio (refuse si aucun tarif choisi ou inchangé)."""
+        for rb in self.radio_buttons:
+            if rb.isChecked():
+                self.selected_tarif = rb.text().strip()
+                break
+        if not self.selected_tarif:
+            QMessageBox.warning(self, "Aucune sélection", "Veuillez sélectionner un tarif dans la liste.")
+            return
+        if self.selected_tarif.lower() == str(self.member.tarif_name or "").strip().lower():
+            # Aucun changement réel : fermer sans enregistrer
+            self.reject()
+            return
+        self.accept()
+
+    def get_selected_tarif(self) -> str:
+        """Retourne le tarif sélectionné (ou None)."""
+        return self.selected_tarif
+
 
 class SubCategoryDialog(QDialog):
     """
@@ -394,6 +508,7 @@ class MembersPage(QWidget):
         self.table_view.setSelectionBehavior(QTableView.SelectRows)
         self.table_view.setSelectionMode(QTableView.SingleSelection)
         self.table_view.setSortingEnabled(True)
+        self.table_view.setEditTriggers(QTableView.NoEditTriggers)  # Édition du tarif via pop-up uniquement
         self.table_view.setStyleSheet("""
             QTableView {
                 background-color: #FFFFFF;
@@ -427,6 +542,9 @@ class MembersPage(QWidget):
         
         # Connecter la sélection de la table
         self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+
+        # Double-clic sur la colonne Tarif : pop-up de changement de groupe (Nouveau !)
+        self.table_view.doubleClicked.connect(self.on_table_double_clicked)
 
         table_layout.addWidget(self.table_view)
         
@@ -676,6 +794,50 @@ class MembersPage(QWidget):
         
         self.detail_panel.set_member(member)
         self.detail_panel.setVisible(True)
+
+    def on_table_double_clicked(self, proxy_index):
+        """Double-clic sur la colonne Tarif : ouvre la pop-up de changement de groupe."""
+        source_idx = self.proxy_model.mapToSource(proxy_index)
+        if not source_idx.isValid():
+            return
+
+        tarif_col = next(
+            (i for i, c in enumerate(MemberTableModel.COLUMNS) if c[1] == "tarif_name"), None
+        )
+        if tarif_col is None or source_idx.column() != tarif_col:
+            return
+
+        if source_idx.row() >= len(self.base_model.members):
+            return
+        member = self.base_model.members[source_idx.row()]
+        self.open_tarif_editor(member)
+
+    def open_tarif_editor(self, member):
+        """Ouvre la pop-up des tarifs de la saison active et enregistre le changement de groupe."""
+        from domain.constants import get_active_season
+
+        tarifs = SqliteRepository.get_season_tarifs(get_active_season())
+        dialog = TarifEditDialog(member, tarifs, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        new_tarif = dialog.get_selected_tarif()
+        ok, err = SqliteRepository.update_member_tarif(
+            member.order_ref, member.user_last_name, member.user_first_name, new_tarif
+        )
+        if not ok:
+            QMessageBox.critical(
+                self, "Échec du changement de groupe",
+                f"Impossible de changer le tarif :\n\n{err}"
+            )
+            return
+
+        QMessageBox.information(
+            self, "Changement enregistré",
+            f"Le groupe de {member.user_first_name} {str(member.user_last_name).upper()} est désormais :\n\n{new_tarif}"
+        )
+        # Recharger la base pour actualiser le tableau (contrôle d'âge, filtres, exports...)
+        self.load_members_from_repository(force_reload=True)
 
     def hide_detail_panel(self):
         self.table_view.clearSelection()

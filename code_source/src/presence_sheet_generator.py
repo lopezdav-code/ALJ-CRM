@@ -6,6 +6,7 @@ from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from openpyxl.utils import range_boundaries, get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.pagebreak import Break
 from paths import ROOT_DIR
 
 # Pictogramme compact remplaçant le mot "Autonomes" dans la colonne "Autorisation" (votre demande !)
@@ -97,6 +98,34 @@ def find_group_qrcode(*candidate_names):
         path = os.path.join(qrcodes_dir, f"QRCode_WhatsApp_{safe}.png")
         if os.path.exists(path):
             return path
+    return None
+
+def ensure_group_qrcode(whatsapp_link, group_name):
+    """Génère le QRCode WhatsApp du groupe (API qrserver.com) s'il n'existe pas déjà
+    dans exports/qrcodes. Retourne le chemin du fichier .png, ou None si indisponible."""
+    if not whatsapp_link or not group_name:
+        return None
+    safe = "".join([c for c in str(group_name) if c.isalnum() or c in (" ", "-", "_")]).strip()
+    if not safe:
+        return None
+    qrcodes_dir = os.path.join(ROOT_DIR, "exports", "qrcodes")
+    os.makedirs(qrcodes_dir, exist_ok=True)
+    qr_path = os.path.join(qrcodes_dir, f"QRCode_WhatsApp_{safe}.png")
+    if os.path.exists(qr_path):
+        return qr_path
+    try:
+        import urllib.parse
+        import requests
+        api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(whatsapp_link)}"
+        res = requests.get(api_url, timeout=10)
+        if res.status_code == 200:
+            with open(qr_path, "wb") as f:
+                f.write(res.content)
+            print(f"[PRESENCE] QRCode WhatsApp généré automatiquement : {os.path.basename(qr_path)}")
+            return qr_path
+        print(f"[ATTENTION PRESENCE] Échec de l'API QRCode (HTTP {res.status_code}) pour le groupe : {group_name}")
+    except Exception as qr_err:
+        print(f"[ATTENTION PRESENCE] Impossible de générer le QRCode du groupe {group_name} : {qr_err}")
     return None
 
 def clean_filename(name):
@@ -294,10 +323,11 @@ def find_planning_match_dynamically(tarif_name, planning_data):
         
     return None
 
-def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False):
+def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False):
     """
     Génère des feuilles de présence au format Excel pour les groupes spécifiés.
-    Génère un fichier par groupe de tarif (colonne tarif_name) ou un seul fichier fusionné (Nouveau !).
+    Génère un fichier par groupe de tarif (colonne tarif_name), un seul fichier fusionné,
+    ou tous les tableaux empilés dans une même feuille Excel (Nouveau !).
     """
     root_dir = ROOT_DIR
     template_path = os.path.join(root_dir, "doc", "template", "Template Export liste adhérents à imprimer.xlsx")
@@ -356,6 +386,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
     align_left = Alignment(horizontal="left", vertical="center")
 
     generated_files = []
+    
+    # Mode "tous les tableaux dans la même feuille Excel" (Nouveau !) : un seul classeur,
+    # les fiches empilées verticalement les unes sous les autres avec l'espace QRCode réservé.
+    wb_single = None         # Classeur partagé par tous les groupes (mode same_sheet)
+    row_offset = 0           # Décalage vertical de la ligne de titre du tableau en cours
+    QR_RESERVE_ROWS = 7      # Lignes réservées sous chaque tableau pour l'image QRCode (~90 px de haut)
+    global_max_col = 0       # Largeur maximale atteinte (toutes colonnes actives confondues)
+    global_print_bottom = 0  # Dernière ligne de contenu (QRCode inclus) pour la zone d'impression globale
     
     # 1. Préparer les groupes à boucler et leurs participants
     if merge_groups and len(selected_groups) > 1:
@@ -437,9 +475,19 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         # Trier par prénom adhérent (user_firstName), insensible à la casse
         group_participants.sort(key=lambda x: str(x.get("first_name") or "").strip().lower())
         
-        # 2. Charger une nouvelle copie du template
-        wb = openpyxl.load_workbook(template_path)
-        ws = wb.active
+        # 2. Charger une copie du template : une par groupe, ou un classeur unique partagé
+        #    en mode "tous les tableaux dans la même feuille" (Nouveau !)
+        if same_sheet and wb_single is not None:
+            wb = wb_single
+            ws = wb.active
+            # Saut de page : chaque fiche démarre en haut d'une nouvelle page à l'impression
+            ws.row_breaks.append(Break(id=row_offset))
+        else:
+            wb = openpyxl.load_workbook(template_path)
+            ws = wb.active
+            row_offset = 0
+            if same_sheet:
+                wb_single = wb
         
         # 3. Tenter d'associer le tarif avec le planning via la configuration de BDD (IHM)
         if merge_groups:
@@ -577,26 +625,36 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         # 4. Préparer l'en-tête : titre, horaire, puis suppression des anciens éléments
         ws.sheet_view.showGridLines = False
         
-        # Nettoyage complet des lignes 1 à 3 (ancien logo, nom de groupe, créneau, encadrants, horaire)
-        for r in range(1, 4):
+        # Nettoyage complet des 4 lignes d'en-tête du bloc (ancien logo, nom de groupe, créneau, horaire)
+        for r in range(row_offset + 1, row_offset + 5):
             for c_idx in range(1, 101):
                 cell_to_clean = ws.cell(row=r, column=c_idx)
                 cell_to_clean.value = None
                 cell_to_clean.border = Border()
                 cell_to_clean.fill = PatternFill(fill_type=None)
 
-        # 4b. Titre de la fiche : nom du groupe (ligne 1) et horaire (ligne 2)
-        title_cell = ws.cell(row=1, column=1, value=group_name)
+        # 4b. En-tête de la fiche : nom du groupe, horaire puis total d'élèves (3 premières lignes du bloc)
+        title_cell = ws.cell(row=row_offset + 1, column=1, value=group_name)
         title_cell.font = Font(name="Segoe UI", size=14, bold=True, color="1E3A8A")
         title_cell.alignment = align_left
-        ws.row_dimensions[1].height = 24
+        ws.row_dimensions[row_offset + 1].height = 24
 
-        horaire_cell = ws.cell(row=2, column=1, value=f"🕐 Horaire : {horaire}")
+        horaire_cell = ws.cell(row=row_offset + 2, column=1, value=f"🕐 Horaire : {horaire}")
         horaire_cell.font = Font(name="Segoe UI", size=10, bold=True, color="374151")
         horaire_cell.alignment = align_left
-        ws.row_dimensions[2].height = 16
-        # Ligne 3 : espaceur fin avant le tableau
-        ws.row_dimensions[3].height = 6
+        ws.row_dimensions[row_offset + 2].height = 16
+
+        # Total d'élèves inscrits au tableau (votre demande !)
+        total_cell = ws.cell(row=row_offset + 3, column=1, value=f"👥 Total élèves : {count_members}")
+        total_cell.font = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
+        total_cell.alignment = align_left
+        ws.row_dimensions[row_offset + 3].height = 15
+
+        # 4e ligne : espaceur fin avant le tableau
+        ws.row_dimensions[row_offset + 4].height = 6
+
+        # Ligne d'en-têtes du tableau (Prénom / Nom / Badge / Bloc / Passeport / dates)
+        hdr_row = row_offset + 5
 
         # 5. Remplir la ligne 4 avec les dates de séances calculées et les nouvelles colonnes Badge Rouge / Passeport Orange
         session_dates = []
@@ -612,13 +670,17 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                     
         # Définir l'en-tête pour les trois colonnes d'audits de badges et d'autonomie FFME
         # (masquables via l'option "Masquer les colonnes Badge/Bloc/Passeport" pour gagner de la place)
+        # Prénom / Nom sont écrits explicitement sur chaque tableau (indispensable pour les
+        # tableaux empilés dans la même feuille, hors du template d'origine)
+        ws.cell(row=hdr_row, column=1, value="Prénom")
+        ws.cell(row=hdr_row, column=2, value="Nom")
         if hide_badge_cols:
             start_date_col = 4 if auth_only else 3
             auth_col = 3
         else:
-            ws.cell(row=4, column=3, value="Badge rouge")
-            ws.cell(row=4, column=4, value="Bloc")
-            ws.cell(row=4, column=5, value="Passeport Orange")
+            ws.cell(row=hdr_row, column=3, value="Badge rouge")
+            ws.cell(row=hdr_row, column=4, value="Bloc")
+            ws.cell(row=hdr_row, column=5, value="Passeport Orange")
             ws.column_dimensions['C'].width = 12
             ws.column_dimensions['D'].width = 8
             ws.column_dimensions['E'].width = 15
@@ -627,35 +689,41 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
 
         if auth_only:
             # Saisie de l'en-tête "Autorisation" (colonne F, ou C si badges masqués)
-            ws.cell(row=4, column=auth_col, value="Autorisation")
+            ws.cell(row=hdr_row, column=auth_col, value="Autorisation")
             ws.column_dimensions[get_column_letter(auth_col)].width = 13
 
         if session_dates:
             col_idx = start_date_col # Les dates de séances commencent maintenant à la colonne F (Col 6) ou G (Col 7)
             for s_date in session_dates:
-                # Écrire la date au format JJ/MM sur la ligne 4 !
-                cell = ws.cell(row=4, column=col_idx, value=s_date.strftime("%d/%m"))
+                # Écrire la date au format JJ/MM sur la ligne d'en-têtes du tableau !
+                cell = ws.cell(row=hdr_row, column=col_idx, value=s_date.strftime("%d/%m"))
                 cell.font = font_date_header
                 cell.fill = fill_header_date
                 cell.alignment = align_center
                 cell.border = border_cell_header # Jolie bordure comme Prénom/Nom !
                 ws.column_dimensions[get_column_letter(col_idx)].width = 5
                 col_idx += 1
-            # Vider le reste des en-têtes de colonnes de dates de la ligne 4
+            # Vider le reste des en-têtes de colonnes de dates de la ligne d'en-têtes
             for col in range(col_idx, 100):
-                ws.cell(row=4, column=col, value=None)
+                c_empty = ws.cell(row=hdr_row, column=col)
+                c_empty.value = None
+                c_empty.fill = PatternFill(fill_type=None)
+                c_empty.border = Border()
         else:
-            ws.cell(row=4, column=start_date_col, value="Date")
-            ws.cell(row=4, column=start_date_col).font = font_date_header
-            ws.cell(row=4, column=start_date_col).fill = fill_header_date
-            ws.cell(row=4, column=start_date_col).alignment = align_center
-            ws.cell(row=4, column=start_date_col).border = border_cell_header
+            ws.cell(row=hdr_row, column=start_date_col, value="Date")
+            ws.cell(row=hdr_row, column=start_date_col).font = font_date_header
+            ws.cell(row=hdr_row, column=start_date_col).fill = fill_header_date
+            ws.cell(row=hdr_row, column=start_date_col).alignment = align_center
+            ws.cell(row=hdr_row, column=start_date_col).border = border_cell_header
             ws.column_dimensions[get_column_letter(start_date_col)].width = 5
             for col in range(start_date_col + 1, 100):
-                ws.cell(row=4, column=col, value=None)
+                c_empty = ws.cell(row=hdr_row, column=col)
+                c_empty.value = None
+                c_empty.fill = PatternFill(fill_type=None)
+                c_empty.border = Border()
         
         # 6. Remplir la liste des élèves (Prénom en col A, Nom en col B, Badge en col C, Bloc en col D, Passeport en col E, Autorisation en col F optionnelle)
-        row_idx = 5
+        row_idx = hdr_row + 1
         max_active_col = start_date_col + len(session_dates) - 1 if session_dates else start_date_col
         
         for p in group_participants:
@@ -724,7 +792,9 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 c_cell.fill = no_fill
                 c_cell.border = no_border
 
-        # 6b. QRCode WhatsApp du groupe (si disponible), placé SOUS le tableau en colonne A
+        # 6b. QRCode WhatsApp du groupe, placé SOUS le tableau en colonne A.
+        # Si le PNG n'existe pas encore dans exports/qrcodes, il est généré automatiquement
+        # à partir du lien WhatsApp du créneau de planning correspondant (votre demande !).
         qr_candidates = [
             match_info.get("groupe_planning") if match_info else None,
             lookup_name,
@@ -733,6 +803,23 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         if merge_groups:
             qr_candidates.extend(selected_groups)
         qr_path = find_group_qrcode(*qr_candidates)
+        if not qr_path:
+            # Retrouver le créneau du planning porteur du lien WhatsApp :
+            # les créneaux appariés au tarif, sinon le groupe du match dynamique
+            planning_items = list(matches) if matches else []
+            if match_info and match_info.get("groupe_planning"):
+                target = str(match_info["groupe_planning"]).strip().lower()
+                for item in planning_data:
+                    if str(item.get("groupe") or "").strip().lower() == target and item not in planning_items:
+                        planning_items.append(item)
+            for item in planning_items:
+                wa_link = str(item.get("whatsapp_link") or "").strip()
+                wa_group = str(item.get("groupe") or "").strip()
+                qr_path = ensure_group_qrcode(wa_link, wa_group)
+                if qr_path:
+                    break
+            if not qr_path:
+                print(f"[ATTENTION PRESENCE] Aucun QRCode disponible pour '{group_name}' (lien WhatsApp absent du planning).")
         # table_bottom_row vaut row_idx - 1 : le QR est placé 2 lignes sous le tableau
         qr_anchor_row = row_idx + 1
         if qr_path:
@@ -746,14 +833,14 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             except Exception as qr_err:
                 print(f"[ATTENTION PRESENCE] Impossible d'ajouter le QRCode : {qr_err}")
                 
-        # Style pour la ligne 4 (Prénom / Nom / Badge / Bloc / Passeport en-têtes de colonnes)
+        # Style pour la ligne d'en-têtes du tableau (Prénom / Nom / Badge / Bloc / Passeport)
         header_cols = [1, 2]
         if not hide_badge_cols:
             header_cols += [3, 4, 5]
         if auth_only:
             header_cols.append(auth_col)
         for c_idx in header_cols:
-            cell_hdr = ws.cell(row=4, column=c_idx)
+            cell_hdr = ws.cell(row=hdr_row, column=c_idx)
             cell_hdr.font = font_date_header
             cell_hdr.alignment = align_left if c_idx < 3 else align_center
             cell_hdr.border = border_cell_header
@@ -765,8 +852,8 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 # Si le mois change entre deux séances consécutives
                 if session_dates[i].month != session_dates[i+1].month:
                     col_sep = start_date_col + i
-                    # On applique une bordure droite moyenne verticale de la ligne 4 (dates) jusqu'à la dernière ligne d'élève active
-                    for r_border in range(4, row_idx):
+                    # On applique une bordure droite moyenne verticale de la ligne d'en-têtes jusqu'à la dernière ligne d'élève active
+                    for r_border in range(hdr_row, row_idx):
                         cell_border = ws.cell(row=r_border, column=col_sep)
                         
                         # Créer une nouvelle bordure fusionnant les styles existants mais renforçant la droite
@@ -779,7 +866,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
 
         # 7b. Trait épais de séparation avant la première colonne de dates
         # (même style que les séparateurs de changement de mois)
-        for r_border in range(4, row_idx):
+        for r_border in range(hdr_row, row_idx):
             cell_border = ws.cell(row=r_border, column=start_date_col)
             cell_border.border = Border(
                 left=medium_black,
@@ -788,8 +875,8 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 bottom=cell_border.border.bottom
             )
 
-        # 8. Ajouter une bordure extérieure épaisse pour tout le tableau (ligne 4 à row_idx - 1)
-        table_top_row = 4
+        # 8. Ajouter une bordure extérieure épaisse pour tout le tableau
+        table_top_row = hdr_row
         table_bottom_row = row_idx - 1
         table_left_col = 1
         table_right_col = max_active_col
@@ -814,53 +901,94 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                     
                 cell.border = Border(left=b_left, right=b_right, top=b_top, bottom=b_bottom)
 
-        # 9. Mise en page calculée pour une impression A3 Paysage (votre demande !)
+        # Espace réservé au QRCode sous le tableau : suivi global pour la zone d'impression
+        # et décalage du bloc de la prochaine fiche (mode "tous les tableaux dans la même feuille")
+        print_bottom_row = qr_anchor_row + 6 if qr_path else table_bottom_row
+        global_max_col = max(global_max_col, max_active_col)
+        global_print_bottom = max(global_print_bottom, print_bottom_row)
+
+        if not same_sheet:
+            # 9. Mise en page calculée pour une impression A3 Paysage (votre demande !)
+            ws.page_setup.orientation = 'landscape'  # Paysage
+            ws.page_setup.paperSize = 8  # PAPERSIZE_A3 (8 dans Excel Page Setup)
+            
+            # Calcul de la largeur totale du tableau (1 unité de largeur Excel ≈ 2,05 mm)
+            total_width_units = 0
+            for col in range(1, max_active_col + 1):
+                dim = ws.column_dimensions[get_column_letter(col)]
+                total_width_units += dim.width if dim.width else 8.43
+            # Largeur utile d'un A3 paysage : 420 mm - marges gauche/droite (0,3" x 2)
+            printable_width_mm = 420 - (0.3 + 0.3) * 25.4
+            estimated_scale = int(printable_width_mm / (total_width_units * 2.05) * 100)
+            
+            if estimated_scale >= 55:
+                # Le tableau tient en largeur : ajustement automatique sur une page de large
+                # et répartition des lignes sur autant de pages que nécessaire.
+                ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+                ws.page_setup.fitToWidth = 1
+                ws.page_setup.fitToHeight = 0
+            else:
+                # Tableau trop large pour rester lisible : échelle plafonnée à 55 %,
+                # les colonnes excédentaires passent sur les pages suivantes.
+                ws.page_setup.scale = 55
+                
+            # Sauts de page : répéter la ligne des en-têtes de colonnes (ligne 5) en haut
+            # de chaque page (page 2, 3, ...) et Prénom/Nom si débordement horizontal.
+            ws.print_title_rows = '5:5'
+            ws.print_title_cols = 'A:B'
+            # La zone d'impression inclut les lignes 1-3 (titre + horaire + total) et le QRCode sous le tableau
+            ws.print_area = f"A1:{get_column_letter(max_active_col)}{print_bottom_row}"
+            ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
+            
+            # 10. Sauvegarder le fichier Excel de manière sécurisée
+            safe_name = clean_filename(group_name)
+            save_filename = f"Feuille_Presence_{safe_name}.xlsx"
+            save_path = os.path.join(output_dir, save_filename)
+            
+            try:
+                wb.save(save_path)
+                wb.close()
+            except PermissionError:
+                wb.close()
+                print(f"[ERREUR PRESENCE] Le fichier '{save_filename}' est verrouillé car il est actuellement ouvert dans Microsoft Excel.")
+                return False, f"Le fichier '{save_filename}' est actuellement ouvert dans Microsoft Excel. Veuillez le fermer et relancer la génération."
+                
+            generated_files.append(save_filename)
+            print(f"[PRESENCE] Feuille générée avec succès ({count_members} inscrits, {len(session_dates)} séances) : {save_filename}")
+        else:
+            # Réserver l'espace du QRCode (~5 lignes) + marge avant le tableau de l'activité suivante
+            row_offset = qr_anchor_row + QR_RESERVE_ROWS + 2
+            print(f"[PRESENCE] Tableau empilé ({count_members} inscrits, {len(session_dates)} séances) : {group_name}")
+        
+    if same_sheet and wb_single is not None:
+        # 11. Mode "tous les tableaux dans la même feuille" : mise en page globale et sauvegarde unique (Nouveau !)
+        ws = wb_single.active
         ws.page_setup.orientation = 'landscape'  # Paysage
         ws.page_setup.paperSize = 8  # PAPERSIZE_A3 (8 dans Excel Page Setup)
-        
-        # Calcul de la largeur totale du tableau (1 unité de largeur Excel ≈ 2,05 mm)
-        total_width_units = 0
-        for col in range(1, max_active_col + 1):
-            dim = ws.column_dimensions[get_column_letter(col)]
-            total_width_units += dim.width if dim.width else 8.43
-        # Largeur utile d'un A3 paysage : 420 mm - marges gauche/droite (0,3" x 2)
-        printable_width_mm = 420 - (0.3 + 0.3) * 25.4
-        estimated_scale = int(printable_width_mm / (total_width_units * 2.05) * 100)
-        
-        if estimated_scale >= 55:
-            # Le tableau tient en largeur : ajustement automatique sur une page de large
-            # et répartition des lignes sur autant de pages que nécessaire.
-            ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
-            ws.page_setup.fitToWidth = 1
-            ws.page_setup.fitToHeight = 0
-        else:
-            # Tableau trop large pour rester lisible : échelle plafonnée à 55 %,
-            # les colonnes excédentaires passent sur les pages suivantes.
-            ws.page_setup.scale = 55
-            
-        # Sauts de page : répéter la ligne des en-têtes de colonnes (ligne 4) en haut
-        # de chaque page (page 2, 3, ...) et Prénom/Nom si débordement horizontal.
-        ws.print_title_rows = '4:4'
+        # Tous les tableaux tiennent sur une page de large ; les fiches s'enchaînent
+        # verticalement, chacune démarrant sur une nouvelle page grâce aux sauts insérés.
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        # Pas de ligne de titre répétée (chaque fiche empilée a sa propre ligne d'en-têtes) ;
+        # on répète uniquement les colonnes Prénom/Nom en cas de débordement horizontal.
         ws.print_title_cols = 'A:B'
-        # La zone d'impression inclut les lignes 1-2 (titre + horaire) et le QRCode sous le tableau
-        print_bottom_row = qr_anchor_row + 6 if qr_path else table_bottom_row
-        ws.print_area = f"A1:{get_column_letter(max_active_col)}{print_bottom_row}"
+        # La zone d'impression couvre tous les tableaux empilés, QRCode du dernier tableau inclus
+        ws.print_area = f"A1:{get_column_letter(global_max_col)}{global_print_bottom}"
         ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.2, footer=0.2)
         
-        # 10. Sauvegarder le fichier Excel de manière sécurisée
-        safe_name = clean_filename(group_name)
-        save_filename = f"Feuille_Presence_{safe_name}.xlsx"
+        save_filename = "Feuilles_Presence_Toutes_Activites.xlsx"
         save_path = os.path.join(output_dir, save_filename)
         
         try:
-            wb.save(save_path)
-            wb.close()
+            wb_single.save(save_path)
+            wb_single.close()
         except PermissionError:
-            wb.close()
+            wb_single.close()
             print(f"[ERREUR PRESENCE] Le fichier '{save_filename}' est verrouillé car il est actuellement ouvert dans Microsoft Excel.")
             return False, f"Le fichier '{save_filename}' est actuellement ouvert dans Microsoft Excel. Veuillez le fermer et relancer la génération."
             
         generated_files.append(save_filename)
-        print(f"[PRESENCE] Feuille générée avec succès ({count_members} inscrits, {len(session_dates)} séances) : {save_filename}")
+        print(f"[PRESENCE] {len(loop_groups)} fiches empilées dans la même feuille Excel : {save_filename}")
         
     return True, generated_files

@@ -342,6 +342,7 @@ class ExportsPage(QWidget):
         merge_groups = False
         auth_only = False
         hide_badge_cols = False
+        same_sheet = False
         cours_pdf = False
         
         if export_type == "presence":
@@ -365,6 +366,7 @@ class ExportsPage(QWidget):
                 merge_groups = dialog.merge_groups
                 auth_only = dialog.auth_only  # Nouveau !
                 hide_badge_cols = dialog.hide_badge_cols  # Nouveau !
+                same_sheet = dialog.same_sheet  # Nouveau !
             except Exception as e:
                 QMessageBox.critical(self, "Erreur d'initialisation", f"Impossible d'analyser les groupes pour l'export : {e}")
                 return
@@ -387,7 +389,8 @@ class ExportsPage(QWidget):
             merge_groups=merge_groups,
             auth_only=auth_only,
             cours_pdf=cours_pdf,  # Nouveau !
-            hide_badge_cols=hide_badge_cols  # Nouveau !
+            hide_badge_cols=hide_badge_cols,  # Nouveau !
+            same_sheet=same_sheet  # Nouveau !
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
@@ -542,6 +545,7 @@ class GroupSelectionDialog(QDialog):
         self.merge_groups = False  # Nouveau !
         self.auth_only = False     # Nouveau !
         self.hide_badge_cols = False  # Nouveau !
+        self.same_sheet = False    # Nouveau !
         self.init_ui()
 
     def init_ui(self):
@@ -730,6 +734,9 @@ class GroupSelectionDialog(QDialog):
 
         self.hide_badge_checkbox = QCheckBox("🖨️ Masquer les colonnes Badge rouge / Bloc / Passeport Orange (gagne de l'espace)")
         options_layout.addWidget(self.hide_badge_checkbox)
+
+        self.same_sheet_checkbox = QCheckBox("📋 Générer tous les tableaux dans la même feuille Excel (empilés un sous l'autre, espace QRCode réservé)")
+        options_layout.addWidget(self.same_sheet_checkbox)
         
         layout.addLayout(options_layout)
 
@@ -793,6 +800,7 @@ class GroupSelectionDialog(QDialog):
         self.merge_groups = self.merge_checkbox.isChecked()
         self.auth_only = self.auth_checkbox.isChecked()  # Nouveau !
         self.hide_badge_cols = self.hide_badge_checkbox.isChecked()
+        self.same_sheet = self.same_sheet_checkbox.isChecked()  # Nouveau !
         self.start_date_str = self.start_date_edit.date().toString("dd/MM/yyyy")
         self.end_date_str = self.end_date_edit.date().toString("dd/MM/yyyy")
         self.accept()

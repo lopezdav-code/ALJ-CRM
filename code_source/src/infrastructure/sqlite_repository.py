@@ -114,7 +114,9 @@ class SqliteRepository:
             jour TEXT,
             horaires TEXT,
             encadrants TEXT,
-            helloasso_tarifs TEXT DEFAULT '[]'
+            helloasso_tarifs TEXT DEFAULT '[]',
+            naissance_min TEXT DEFAULT '',
+            naissance_max TEXT DEFAULT ''
         );
         """)
         
@@ -125,6 +127,18 @@ class SqliteRepository:
             print("🔧 [SQLITE] Ajout de la colonne 'helloasso_tarifs' à la table planning...")
             cursor.execute("ALTER TABLE planning ADD COLUMN helloasso_tarifs TEXT DEFAULT '[]'")
             conn.commit()
+
+        # S'assurer de la présence des bornes de date de naissance par groupe (migration auto)
+        # Utilisées pour le contrôle d'âge : un adulte (18 ans révolus au 01/09) ne peut pas
+        # souscrire à un groupe enfants / collège / lycée, et l'année de naissance doit
+        # correspondre aux années du tarif HelloAsso (ex : « jeunes nés en 2011, 2012... »).
+        for _dob_col in ("naissance_min", "naissance_max"):
+            try:
+                cursor.execute(f"SELECT {_dob_col} FROM planning LIMIT 1")
+            except sqlite3.OperationalError:
+                print(f"🔧 [SQLITE] Ajout de la colonne '{_dob_col}' à la table planning...")
+                cursor.execute(f"ALTER TABLE planning ADD COLUMN {_dob_col} TEXT DEFAULT ''")
+                conn.commit()
         
         # Création de la table de templates d'email (Nouveau !)
         cursor.execute("""
@@ -496,6 +510,82 @@ class SqliteRepository:
             return False, str(e)
         finally:
             conn.close()
+    @classmethod
+    def get_season_tarifs(cls, season_name: str = "2026-2027") -> list:
+        """Retourne la liste triée des tarifs HelloAsso distincts d'une saison (groupes disponibles)."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT p.tarif_name
+                FROM purchases p
+                JOIN orders o ON o.id = p.order_id
+                JOIN seasons s ON s.id = o.season_id
+                WHERE s.name = ? AND p.tarif_name IS NOT NULL AND TRIM(p.tarif_name) != ''
+                ORDER BY p.tarif_name ASC
+            """, (season_name,))
+            return [r["tarif_name"].strip() for r in cursor.fetchall()]
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors du chargement des tarifs de la saison {season_name} : {e}")
+            return []
+        finally:
+            conn.close()
+
+    @classmethod
+    def update_member_tarif(cls, order_ref: str, last_name: str, first_name: str, new_tarif: str):
+        """Change le tarif (groupe) d'un adhérent : met à jour purchases.tarif_name.
+
+        Retourne (succès, message_erreur).
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            from domain.utils import normalize_name
+            new_tarif_clean = str(new_tarif or "").strip()
+            if not new_tarif_clean:
+                return False, "Le nouveau tarif ne peut pas être vide."
+
+            cursor.execute("""
+                SELECT p.user_id FROM purchases p
+                JOIN orders o ON o.id = p.order_id
+                WHERE o.order_ref = ?
+            """, (str(order_ref or "").strip(),))
+            rows = cursor.fetchall()
+            user_id = None
+            t_last = normalize_name(last_name)
+            t_first = normalize_name(first_name)
+            for r in rows:
+                u = cursor.execute("SELECT last_name, first_name FROM users WHERE id=?", (r["user_id"],)).fetchone()
+                if u and normalize_name(u["last_name"]) == t_last and normalize_name(u["first_name"]) == t_first:
+                    user_id = r["user_id"]
+                    break
+            if user_id is None and rows:
+                # Fallback famille : premier utilisateur de la commande
+                user_id = rows[0]["user_id"]
+            if user_id is None:
+                return False, f"Aucun adhérent correspondant trouvé pour {last_name} {first_name}."
+
+            now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+            cursor.execute("""
+                UPDATE purchases
+                SET tarif_name = ?, is_modified = 'Oui', updated_at = ?
+                WHERE user_id = ? AND order_id IN (SELECT id FROM orders WHERE order_ref = ?)
+            """, (new_tarif_clean, now_iso, user_id, str(order_ref or "").strip()))
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return False, "Aucune inscription trouvée pour cet adhérent et cette commande."
+            conn.commit()
+            print(f"[SQLITE] Tarif de {last_name} {first_name} changé en '{new_tarif_clean}' (commande {order_ref}).")
+            return True, ""
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors du changement de tarif : {e}")
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
+
     @classmethod
     def update_email_sent_date(cls, order_ref: str, last_name: str, first_name: str, date_str: str) -> bool:
         """Phase 5 - Met a jour la date d'envoi d'e-mail sur les achats v2 de la commande."""
@@ -1073,8 +1163,8 @@ class SqliteRepository:
                 tarifs_json = json.dumps(tarifs, ensure_ascii=False)
 
                 cursor.execute("""
-                    INSERT OR REPLACE INTO planning (id, groupe, type, categorie_age, whatsapp_link, jour, horaires, encadrants, helloasso_tarifs)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO planning (id, groupe, type, categorie_age, whatsapp_link, jour, horaires, encadrants, helloasso_tarifs, naissance_min, naissance_max)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     item.get("id"),
                     item.get("groupe"),
@@ -1084,7 +1174,9 @@ class SqliteRepository:
                     item.get("jour", "Lundi"),
                     item.get("horaires", ""),
                     enc_json,
-                    tarifs_json
+                    tarifs_json,
+                    str(item.get("naissance_min") or ""),
+                    str(item.get("naissance_max") or "")
                 ))
                 inserted += 1
             conn.commit()
@@ -1109,8 +1201,11 @@ class SqliteRepository:
                 conn.close()
 
     @classmethod
-    def load_planning_data(cls) -> list:
-        """Charge l'ensemble du planning de créneaux depuis SQLite."""
+    def load_planning_data(cls, log_debug: bool = True) -> list:
+        """Charge l'ensemble du planning de créneaux depuis SQLite.
+
+        log_debug=False évite l'écriture du journal de debug (appels fréquents IHM).
+        """
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
@@ -1146,18 +1241,19 @@ class SqliteRepository:
                 planning_list.append(row_dict)
 
             # Debug logging
-            debug_log_path = os.path.join(ROOT_DIR, "planning_sync_debug.log")
-            try:
-                with open(debug_log_path, "a", encoding="utf-8") as lf:
-                    lf.write(f"[{datetime.datetime.now()}] --- CHARGEMENT DU PLANNING ---\n")
-                    lf.write(f"  • CWD : {os.getcwd()}\n")
-                    lf.write(f"  • Chemin de la BDD : {cls._db_path}\n")
-                    lf.write(f"  • Nb créneaux chargés : {len(planning_list)}\n")
-                    for s in planning_list:
-                        lf.write(f"    - ID: {s.get('id')} | Groupe: {s.get('groupe')} | Jour: {s.get('jour')} | Horaires: {s.get('horaires')}\n")
-                    lf.write("\n")
-            except Exception as le:
-                print(f"⚠️ Erreur d'écriture du log debug : {le}")
+            if log_debug:
+                debug_log_path = os.path.join(ROOT_DIR, "planning_sync_debug.log")
+                try:
+                    with open(debug_log_path, "a", encoding="utf-8") as lf:
+                        lf.write(f"[{datetime.datetime.now()}] --- CHARGEMENT DU PLANNING ---\n")
+                        lf.write(f"  • CWD : {os.getcwd()}\n")
+                        lf.write(f"  • Chemin de la BDD : {cls._db_path}\n")
+                        lf.write(f"  • Nb créneaux chargés : {len(planning_list)}\n")
+                        for s in planning_list:
+                            lf.write(f"    - ID: {s.get('id')} | Groupe: {s.get('groupe')} | Jour: {s.get('jour')} | Horaires: {s.get('horaires')}\n")
+                        lf.write("\n")
+                except Exception as le:
+                    print(f"⚠️ Erreur d'écriture du log debug : {le}")
 
             return planning_list
         except Exception as e:
@@ -1178,8 +1274,8 @@ class SqliteRepository:
                 enc_json = json.dumps(item.get("encadrants", []), ensure_ascii=False)
                 tarifs_json = json.dumps(item.get("helloasso_tarifs", []), ensure_ascii=False)
                 cursor.execute("""
-                    INSERT OR REPLACE INTO planning (id, groupe, type, categorie_age, whatsapp_link, jour, horaires, encadrants, helloasso_tarifs)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO planning (id, groupe, type, categorie_age, whatsapp_link, jour, horaires, encadrants, helloasso_tarifs, naissance_min, naissance_max)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     item.get("id"),
                     item.get("groupe"),
@@ -1189,7 +1285,9 @@ class SqliteRepository:
                     item.get("jour", "Lundi"),
                     item.get("horaires", ""),
                     enc_json,
-                    tarifs_json
+                    tarifs_json,
+                    str(item.get("naissance_min") or ""),
+                    str(item.get("naissance_max") or "")
                 ))
             conn.commit()
             print("💾 [SQLITE] Planning enregistré avec succès dans SQLite.")

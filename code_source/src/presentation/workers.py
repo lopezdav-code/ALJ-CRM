@@ -55,18 +55,55 @@ class SyncHelloAssoWorker(QThread):
                         return f"{dt.day:02d} {FRENCH_MONTHS[dt.month]}"
                     return str(val)
 
+                # Contrôle d'âge des nouvelles inscriptions : un adulte (18 ans révolus au 01/09
+                # de la saison) ne peut pas souscrire à un groupe enfants/collège/lycée, et
+                # l'année de naissance doit correspondre aux bornes du groupe (tarif HelloAsso).
+                age_conflicts = []
+                planning_data = []
+                age_rules_ok = True
+                try:
+                    from infrastructure.sqlite_repository import SqliteRepository
+                    from domain.age_rules import check_age_conflict, find_planning_item_for_tarif
+                    planning_data = SqliteRepository.load_planning_data(log_debug=False)
+                except Exception as ac_err:
+                    print(f"⚠️ [SYNC_WORKER] Contrôle d'âge impossible : {ac_err}")
+                    age_rules_ok = False
+
                 new_members_list = []
                 for p in new_participants:
                     raw_date = p.get("order_date") or ""
                     date_str = format_date_to_french_day_month(raw_date)
-                        
+                    last_name = str(p.get("user_lastName") or "").upper().strip()
+                    first_name = str(p.get("user_firstName") or "").capitalize().strip()
+                    tarif = str(p.get("tarif_name") or "").strip()
+
+                    warning_msg = ""
+                    if age_rules_ok:
+                        birth_raw = str(p.get("champ_Date de naissance de l'adhérent") or "").strip()
+                        planning_item = find_planning_item_for_tarif(tarif, planning_data)
+                        messages = check_age_conflict(birth_raw, tarif, planning_item)
+                        if messages:
+                            warning_msg = " | ".join(messages)
+                            age_conflicts.append({
+                                "last_name": last_name,
+                                "first_name": first_name,
+                                "tarif_name": tarif,
+                                "birth_date": birth_raw,
+                                "messages": messages
+                            })
+                            print(f"⚠️ [SYNC_WORKER] Conflit d'âge : {last_name} {first_name} ({tarif}) : {warning_msg}")
+
                     new_members_list.append({
-                        "last_name": str(p.get("user_lastName") or "").upper().strip(),
-                        "first_name": str(p.get("user_firstName") or "").capitalize().strip(),
-                        "order_date": date_str
+                        "last_name": last_name,
+                        "first_name": first_name,
+                        "order_date": date_str,
+                        "warning": warning_msg
                     })
                 
-                new_members_json = json.dumps(new_members_list, ensure_ascii=False)
+                new_members_json = json.dumps(
+                    {"new_members": new_members_list, "age_conflicts": age_conflicts},
+                    ensure_ascii=False
+                )
                 self.progress.emit("Synchronisation HelloAsso terminée avec succès !", 100)
                 self.finished.emit(True, f"SUCCESS_DATA:{new_members_json}")
             else:
@@ -363,7 +400,7 @@ class ExportWorker(QThread):
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, str, str) # (succès, message_résultat, chemin_fichier)
 
-    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, parent=None):
+    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, same_sheet: bool = False, parent=None):
         super().__init__(parent)
         self.export_type = export_type
         self.selected_groups = selected_groups
@@ -373,6 +410,7 @@ class ExportWorker(QThread):
         self.auth_only = auth_only
         self.cours_pdf = cours_pdf
         self.hide_badge_cols = hide_badge_cols
+        self.same_sheet = same_sheet
 
     def convert_excel_to_pdf(self, excel_path: str, pdf_path: str) -> bool:
         """
@@ -479,12 +517,16 @@ class ExportWorker(QThread):
                     end_date_str=self.end_date_str,
                     merge_groups=self.merge_groups,
                     auth_only=self.auth_only,
-                    hide_badge_cols=self.hide_badge_cols
+                    hide_badge_cols=self.hide_badge_cols,
+                    same_sheet=self.same_sheet
                 )
                 if success:
                     dest_dir = os.path.join(ROOT_DIR, "exports", "fiches_presence")
                     self.progress.emit("Fiches de présence générées avec succès !", 100)
-                    self.finished.emit(True, f"{len(result)} feuilles Excel créées dans le dossier 'exports/fiches_presence'.", dest_dir)
+                    if self.same_sheet:
+                        self.finished.emit(True, f"{len(groups_to_gen)} tableau(x) de présence empilé(s) dans un seul fichier Excel créé dans le dossier 'exports/fiches_presence'.", dest_dir)
+                    else:
+                        self.finished.emit(True, f"{len(result)} feuilles Excel créées dans le dossier 'exports/fiches_presence'.", dest_dir)
                 else:
                     self.finished.emit(False, f"Erreur de génération : {result}", "")
                     
