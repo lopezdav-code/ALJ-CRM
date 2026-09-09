@@ -289,8 +289,76 @@ class CommunicationsPage(QWidget):
         uncheck_all_btn.clicked.connect(self.deselect_visible)
         selection_btns.addWidget(uncheck_all_btn)
 
+        # Tout désélectionner : décoche TOUS les destinataires, y compris ceux
+        # masqués par les filtres actifs (recherche, tarifs, statuts...) (Nouveau !)
+        deselect_everyone_btn = QPushButton("🚫 Tout désélectionner")
+        deselect_everyone_btn.setCursor(Qt.PointingHandCursor)
+        deselect_everyone_btn.setToolTip("Décoche tous les destinataires, y compris ceux masqués par les filtres.")
+        deselect_everyone_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #EF4444;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #B91C1C;
+            }
+            QPushButton:hover {
+                background-color: #FEF2F2;
+                border-color: #DC2626;
+            }
+        """)
+        deselect_everyone_btn.clicked.connect(self.deselect_all_members)
+        selection_btns.addWidget(deselect_everyone_btn)
+
         selection_btns.addStretch()
         left_layout.addLayout(selection_btns)
+
+        # Encart repliable « Personnes sélectionnées » (Nouveau !) : liste toujours à jour
+        # des destinataires cochés, y compris ceux masqués par les filtres (recherche, tarifs...),
+        # pour éviter qu'une personne reçoive un e-mail sans être visible dans la liste.
+        self.selected_panel_btn = QPushButton("✅ Personnes sélectionnées (0) ▸")
+        self.selected_panel_btn.setCursor(Qt.PointingHandCursor)
+        self.selected_panel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: 500;
+                color: #059669;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #ECFDF5;
+                border-color: #A7F3D0;
+            }
+        """)
+        self.selected_panel_btn.clicked.connect(self.toggle_selected_panel)
+        left_layout.addWidget(self.selected_panel_btn)
+
+        self.selected_panel = QListWidget()
+        self.selected_panel.setVisible(False)
+        self._selected_panel_open = False
+        self.selected_panel.setFixedHeight(170)
+        self.selected_panel.setToolTip("Destinataires cochés, même s'ils sont masqués par les filtres.")
+        self.selected_panel.setStyleSheet("""
+            QListWidget {
+                background-color: #F8FAFC;
+                border: 1px solid #A7F3D0;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 11px;
+                color: #1E293B;
+            }
+            QListWidget::item {
+                padding: 2px 6px;
+                border-bottom: 1px solid #D1FAE5;
+            }
+        """)
+        left_layout.addWidget(self.selected_panel)
 
         # List Widget contenant les checkboxes d'adhérents (avec style de checkbox VERT !)
         icon_url = generate_check_icon()
@@ -992,6 +1060,18 @@ class CommunicationsPage(QWidget):
         """Filtrage textuel à la volée."""
         self.on_filters_changed()
 
+    def focus_on_member(self, member):
+        """Préfiltre la liste des destinataires sur l'adhérent choisi dans l'onglet
+        Adhérents (bouton ✉️ de la fiche) : la recherche est remplie avec son nom."""
+        # S'assurer que la liste des destinataires est chargée (accès direct)
+        if not self.members_list:
+            self.load_members()
+        last_name = str(getattr(member, "user_last_name", "") or "").strip()
+        # La recherche compare le texte saisi à chaque champ (nom OU prénom) :
+        # on filtre donc sur le nom de famille uniquement pour retrouver la personne.
+        self.search_input.setText(last_name)
+        self.on_filters_changed()
+
     def on_filters_changed(self):
         """Filtre l'affichage de la liste des destinataires en combinant la recherche,
         les tarifs (pop-up), les statuts (pop-up), l'état d'envoi et la date d'inscription."""
@@ -1070,15 +1150,59 @@ class CommunicationsPage(QWidget):
         self.list_widget.blockSignals(False)
         self.update_selection_count()
 
-    def update_selection_count(self):
-        """Calcule et affiche le nombre de destinataires sélectionnés."""
-        checked_count = 0
+    def deselect_all_members(self):
+        """Décoche TOUS les destinataires, y compris ceux masqués par les filtres actifs."""
+        self.list_widget.blockSignals(True)
         for i in range(self.list_widget.count()):
-            if self.list_widget.item(i).checkState() == Qt.Checked:
+            self.list_widget.item(i).setCheckState(Qt.Unchecked)
+        self.list_widget.blockSignals(False)
+        self.update_selection_count()
+
+    def update_selection_count(self):
+        """Calcule et affiche le nombre de destinataires sélectionnés, alerte sur les
+        cochés masqués par les filtres, et resynchronise l'encart « Personnes sélectionnées »."""
+        checked_count = 0
+        hidden_checked = 0
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.Checked:
                 checked_count += 1
-        
-        self.dest_title.setText(f"🎯 Sélection des Destinataires ({checked_count})")
+                if item.isHidden():
+                    hidden_checked += 1
+
+        suffix = f"  —  ⚠️ {hidden_checked} masqué(s) par le filtre" if hidden_checked else ""
+        self.dest_title.setText(f"🎯 Sélection des Destinataires ({checked_count}){suffix}")
         self.send_btn.setEnabled(checked_count > 0)
+        self.refresh_selected_panel()
+
+    # ------------------------------------------------------------------
+    # Encart « Personnes sélectionnées » (Nouveau !)
+    # ------------------------------------------------------------------
+    def _count_checked(self) -> int:
+        """Nombre de destinataires cochés dans la liste principale."""
+        return sum(
+            1 for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.Checked
+        )
+
+    def toggle_selected_panel(self):
+        """Affiche / masque l'encart listant les destinataires cochés."""
+        self._selected_panel_open = not self._selected_panel_open
+        self.selected_panel.setVisible(self._selected_panel_open)
+        self.refresh_selected_panel()
+
+    def refresh_selected_panel(self):
+        """Resynchronise l'encart avec les destinataires cochés — y compris ceux
+        masqués par les filtres (recherche, tarifs, statuts...) — pour ne pas les oublier."""
+        count = self._count_checked()
+        arrow = "▾" if getattr(self, "_selected_panel_open", False) else "▸"
+        self.selected_panel_btn.setText(f"✅ Personnes sélectionnées ({count}) {arrow}")
+
+        self.selected_panel.clear()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.Checked:
+                self.selected_panel.addItem(QListWidgetItem(item.text()))
 
     def start_email_campaign(self):
         """Démarre l'envoi de masse asynchrone pour les seuls adhérents sélectionnés."""

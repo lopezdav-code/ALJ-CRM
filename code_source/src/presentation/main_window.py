@@ -273,6 +273,10 @@ class MainWindow(QMainWindow):
 
         right_panel_layout.addWidget(self.stacked_widget)
 
+        # Raccourci « enveloppe » : bouton ✉️ de la fiche adhérent vers Communication filtrée (Nouveau !)
+        self.members_page = self.stacked_widget.widget(0)
+        self.members_page.email_requested.connect(self.open_communications_for_member)
+
         # Pied de page unifié pour tout le site (Nouveau !)
         footer = QFrame()
         footer.setStyleSheet("""
@@ -321,6 +325,24 @@ class MainWindow(QMainWindow):
             page.load_members_from_repository(force_reload=force_reload)
         elif index == 10 and hasattr(page, "load_logs"):
             page.load_logs()
+
+    def open_communications_for_member(self, member):
+        """Bouton ✉️ de la fiche adhérent : bascule sur la page Communication avec la
+        recherche préremplie sur ce membre (même saison que l'onglet Adhérents)."""
+        members_page = self.stacked_widget.widget(0)
+        communications_page = self.stacked_widget.widget(2)
+
+        # Aligner la saison de Communication sur celle de l'onglet Adhérents
+        if hasattr(members_page, "season_filter") and hasattr(communications_page, "season_filter"):
+            if communications_page.season_filter.currentIndex() != members_page.season_filter.currentIndex():
+                communications_page.season_filter.setCurrentIndex(members_page.season_filter.currentIndex())
+
+        if hasattr(communications_page, "focus_on_member"):
+            communications_page.focus_on_member(member)
+
+        # Basculer l'affichage sur la page Communication (+ bouton de navigation coché)
+        self.nav_buttons[2].setChecked(True)
+        self.on_nav_changed(2)
 
     def start_drive_sync_workflow(self):
         """Déclenche le téléchargement du tableur de référence depuis Google Drive en tâche de fond."""
@@ -423,6 +445,19 @@ class MainWindow(QMainWindow):
     def on_sync_progress(self, message: str, percent: int):
         print(f"🔄 [SYNC] {percent}% - {message}")
 
+    @staticmethod
+    def _apply_sync_dialog_size(box: QMessageBox, has_tables: bool):
+        """Élargit la fenêtre de résultat de la synchronisation quand elle affiche des
+        tableaux (nouveaux membres / conflits d'âge) : sans cela, le QMessageBox se
+        réduit à son minimum et les colonnes se tassent sur quelques caractères.
+        La poignée de redimensionnement est activée pour laisser la main à l'utilisateur."""
+        if not has_tables:
+            return
+        from PySide6.QtGui import QGuiApplication
+        screen_geo = QGuiApplication.primaryScreen().availableGeometry()
+        box.setMinimumWidth(min(980, int(screen_geo.width() * 0.80)))
+        box.setSizeGripEnabled(True)
+
     def on_sync_finished(self, success: bool, result_message: str):
         self.sync_btn.setEnabled(True)
         self.sync_btn.setText("Synchroniser et merger avec HelloAsso")
@@ -523,6 +558,9 @@ class MainWindow(QMainWindow):
             box.setWindowTitle("Synchronisation ALJ Escalade")
             box.setText(html_msg)
             box.setTextFormat(Qt.TextFormat.RichText)
+            # Fenêtre élargie quand des tableaux sont affichés : les colonnes
+            # « Date d'inscription » et « Alerte » restent lisibles sans se tasser.
+            self._apply_sync_dialog_size(box, bool(new_members or age_conflicts))
             if age_conflicts:
                 box.setIcon(QMessageBox.Icon.Warning)
             

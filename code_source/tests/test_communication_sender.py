@@ -24,6 +24,7 @@ def decode_from_header(raw_value: str):
     return parseaddr(decoded)
 
 try:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     PYSIDE6_AVAILABLE = True
 except ImportError:
@@ -396,6 +397,108 @@ class TestCommunicationsPageSender(TempDbTestCase):
 
         mock_warn.assert_called_once()
         self.assertIsNone(SqliteRepository.get_app_setting("default_sender_email"))
+
+    def test_selected_panel_lists_hidden_checked_members(self):
+        """L'encart liste les destinataires cochés même s'ils sont masqués par le filtre,
+        et le titre alerte sur les cochés invisibles."""
+        from presentation.pages.communications import CommunicationsPage
+        from infrastructure.sqlite_repository import SqliteRepository as Repo
+
+        base_member = {
+            "order_ref": "99999",
+            "order_date": "2026-08-16T14:30:00",
+            "status": "Validated",
+            "tarif_name": "Adultes autonomes",
+            "amount": 150.0,
+            "user_lastName": "DUPONT",
+            "user_firstName": "Jean",
+            "payer_lastName": "DUPONT",
+            "payer_firstName": "Jean",
+            "payer_email": "jean.dupont@test.com",
+        }
+        lopez = dict(base_member, order_ref="77777", user_lastName="LOPEZ", user_firstName="Clémence",
+                     payer_email="clemence.lopez@test.com")
+        Repo.setup_database()
+        Repo.upsert_members([base_member, lopez])
+
+        page = CommunicationsPage()
+        page.load_members()
+        self.assertEqual(page.list_widget.count(), 2)
+
+        # Cocher les deux destinataires puis masquer Clémence via le filtre de recherche
+        for i in range(page.list_widget.count()):
+            page.list_widget.item(i).setCheckState(Qt.Checked)
+        self.assertEqual(page.selected_panel.count(), 2)
+        self.assertFalse(page._selected_panel_open)
+
+        page.search_input.setText("DUPONT")
+
+        # Clémence est masquée dans la liste principale mais reste listée dans l'encart
+        visible_main = [i for i in range(page.list_widget.count()) if not page.list_widget.item(i).isHidden()]
+        self.assertEqual(len(visible_main), 1)
+        self.assertEqual(page.selected_panel.count(), 2)
+        panel_texts = [page.selected_panel.item(i).text() for i in range(page.selected_panel.count())]
+        self.assertTrue(any("LOPEZ" in t.upper() for t in panel_texts))
+        self.assertIn("1 masqué(s)", page.dest_title.text())
+
+        # L'encart se replie / se déplie
+        page.toggle_selected_panel()
+        self.assertTrue(page._selected_panel_open)
+        self.assertFalse(page.selected_panel.isHidden())
+        self.assertIn("▾", page.selected_panel_btn.text())
+        page.toggle_selected_panel()
+        self.assertFalse(page._selected_panel_open)
+        self.assertTrue(page.selected_panel.isHidden())
+        self.assertIn("▸", page.selected_panel_btn.text())
+
+        # Décocher le filtre (tout redevient visible) : l'alerte disparaît
+        page.search_input.setText("")
+        self.assertNotIn("masqué", page.dest_title.text())
+
+    def test_deselect_everyone_clears_hidden_checked_members(self):
+        """« Tout désélectionner » décoche aussi les personnes masquées par les filtres,
+        contrairement à « Décocher le filtre » qui ne touche que les visibles."""
+        from presentation.pages.communications import CommunicationsPage
+        from infrastructure.sqlite_repository import SqliteRepository as Repo
+
+        base_member = {
+            "order_ref": "99999",
+            "order_date": "2026-08-16T14:30:00",
+            "status": "Validated",
+            "tarif_name": "Adultes autonomes",
+            "amount": 150.0,
+            "user_lastName": "DUPONT",
+            "user_firstName": "Jean",
+            "payer_lastName": "DUPONT",
+            "payer_firstName": "Jean",
+            "payer_email": "jean.dupont@test.com",
+        }
+        lopez = dict(base_member, order_ref="77777", user_lastName="LOPEZ", user_firstName="Clémence",
+                     payer_email="clemence.lopez@test.com")
+        Repo.setup_database()
+        Repo.upsert_members([base_member, lopez])
+
+        page = CommunicationsPage()
+        page.load_members()
+        for i in range(page.list_widget.count()):
+            page.list_widget.item(i).setCheckState(Qt.Checked)
+
+        # Masquer Clémence via la recherche, puis « Décocher le filtre » : elle reste cochée
+        page.search_input.setText("DUPONT")
+        page.deselect_visible()
+        still_checked = [
+            page.list_widget.item(i).data(Qt.UserRole).user_last_name
+            for i in range(page.list_widget.count())
+            if page.list_widget.item(i).checkState() == Qt.Checked
+        ]
+        self.assertEqual(still_checked, ["LOPEZ"])
+
+        # « Tout désélectionner » : plus personne de coché, encart vide, envoi désactivé
+        page.deselect_all_members()
+        self.assertEqual(page._count_checked(), 0)
+        self.assertEqual(page.selected_panel.count(), 0)
+        self.assertIn("(0)", page.dest_title.text())
+        self.assertFalse(page.send_btn.isEnabled())
 
     def test_new_template_uses_current_sender(self):
         """La création d'un nouveau modèle enregistre l'adresse d'expédition courante."""

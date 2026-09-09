@@ -100,5 +100,41 @@ class TestPresentationLot5(unittest.TestCase):
             mock_exists.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
             mock_startfile.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
 
+
+class TestSyncDialogSize(unittest.TestCase):
+    """Fenêtre de résultat de la synchronisation HelloAsso : élargie quand des tableaux sont affichés."""
+
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
+    def test_dialog_enlarged_with_tables(self):
+        """Avec des tableaux (nouveaux membres / conflits d'âge), la fenêtre est élargie et redimensionnable."""
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtWidgets import QMessageBox
+        from presentation.main_window import MainWindow
+
+        box = QMessageBox()
+        MainWindow._apply_sync_dialog_size(box, True)
+
+        screen_w = QGuiApplication.primaryScreen().availableGeometry().width()
+        expected_width = min(980, int(screen_w * 0.80))
+        self.assertEqual(box.minimumWidth(), expected_width)
+        self.assertGreaterEqual(box.minimumWidth(), 400)
+        self.assertTrue(box.isSizeGripEnabled())
+
+    @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
+    def test_dialog_untouched_without_tables(self):
+        """Sans tableau (0 nouveau membre, aucun conflit), la fenêtre garde sa taille compacte."""
+        from PySide6.QtWidgets import QMessageBox
+        from presentation.main_window import MainWindow
+
+        box = QMessageBox()
+        MainWindow._apply_sync_dialog_size(box, False)
+        self.assertLess(box.minimumWidth(), 500)
+        self.assertFalse(box.isSizeGripEnabled())
+
 if __name__ == "__main__":
     unittest.main()

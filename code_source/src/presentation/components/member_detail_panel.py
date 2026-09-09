@@ -13,6 +13,7 @@ class MemberDetailPanel(QFrame):
     """
     closed = Signal()
     member_updated = Signal() # Émis après une sauvegarde réussie pour actualiser le tableau parent !
+    email_requested = Signal(object) # Émis via le bouton ✉️ : ouvrir la Communication filtrée sur cet adhérent
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,6 +65,29 @@ class MemberDetailPanel(QFrame):
         """)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
         header_layout.addWidget(self.edit_btn)
+
+        # Bouton enveloppe : bascule vers la page Communication filtrée sur cet adhérent (Nouveau !)
+        self.email_btn = QPushButton("✉️ E-mail")
+        self.email_btn.setCursor(Qt.PointingHandCursor)
+        self.email_btn.setToolTip("Ouvrir la page Communication avec la recherche filtrée sur cet adhérent")
+        self.email_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F1F5F9;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #475569;
+            }
+            QPushButton:hover {
+                background-color: #EFF6FF;
+                border-color: #BFDBFE;
+                color: #2563EB;
+            }
+        """)
+        self.email_btn.clicked.connect(self._on_email_requested)
+        header_layout.addWidget(self.email_btn)
 
         close_btn = QPushButton("✖")
         close_btn.setCursor(Qt.PointingHandCursor)
@@ -245,6 +269,12 @@ class MemberDetailPanel(QFrame):
         self.current_member = member
         self.is_editing = False
         self.render_member_details()
+
+    def _on_email_requested(self):
+        """Bouton ✉️ : demande à la fenêtre principale d'ouvrir la page Communication
+        avec la recherche filtrée sur l'adhérent courant."""
+        if self.current_member is not None:
+            self.email_requested.emit(self.current_member)
 
     def render_member_details(self):
         """Dessine dynamiquement le détail en consultation ou édition."""

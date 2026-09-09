@@ -4,9 +4,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTableView, QHeaderView, QSplitter, QComboBox,
     QDateEdit, QCheckBox, QPushButton, QDialog, QScrollArea,
-    QFrame, QDialogButtonBox, QRadioButton
+    QFrame, QDialogButtonBox, QRadioButton, QMessageBox
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate, Signal
 
 from paths import ROOT_DIR
 from domain.models import Member
@@ -342,6 +342,10 @@ class MembersPage(QWidget):
     """
     Page de gestion des Adhérents avec table hautes performances, filtres croisés et fiche détaillée.
     """
+    # Émis depuis la fiche adhérent (bouton ✉️) : demande à la fenêtre principale
+    # d'ouvrir la page Communication avec la recherche filtrée sur ce membre.
+    email_requested = Signal(object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.members_list = []
@@ -559,6 +563,7 @@ class MembersPage(QWidget):
         self.detail_panel = MemberDetailPanel()
         self.detail_panel.closed.connect(self.hide_detail_panel)
         self.detail_panel.member_updated.connect(self.on_member_updated) # Nouveau !
+        self.detail_panel.email_requested.connect(self.on_email_requested) # Bouton ✉️ (Nouveau !)
         self.detail_panel.setVisible(False)
         self.splitter.addWidget(self.detail_panel)
 
@@ -842,6 +847,10 @@ class MembersPage(QWidget):
     def hide_detail_panel(self):
         self.table_view.clearSelection()
         self.detail_panel.setVisible(False)
+
+    def on_email_requested(self, member):
+        """Bouton ✉️ de la fiche adhérent : remonte la demande à la fenêtre principale."""
+        self.email_requested.emit(member)
 
     def on_member_updated(self):
         """Déclenché après qu'un adhérent a été édité et sauvegardé avec succès dans l'Excel."""
