@@ -160,6 +160,13 @@
     <div id="members-list"></div>
   </section>
 
+  <!-- ================= Contacts d'urgence ================= -->
+  <section class="page" id="page-urgency">
+    <input type="search" id="urgency-search" placeholder="🔍 Nom de l'adhérent (élève)…" style="width:100%;padding:11px 13px;border:1px solid #CBD5E1;border-radius:10px;font-size:14px;background:#fff">
+    <div style="color:#64748B;font-size:12px;margin:6px 2px 10px" id="urgency-count">Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts (téléphone adhérent + contacts d'urgence cliquables).</div>
+    <div id="urgency-list"></div>
+  </section>
+
   <!-- ================= Filtres ================= -->
   <section class="page" id="page-filters">
     <div class="filters-card">
@@ -186,6 +193,7 @@
 
 <nav>
   <button data-page="members" class="active">👥<br>Adhérents</button>
+  <button data-page="urgency">🚨<br>Urgences</button>
   <button data-page="filters">🔎<br>Filtres</button>
 </nav>
 
@@ -601,6 +609,7 @@ async function loadData(bytes, metaInfo) {
   renderFilters();
   saveFilters();
   applyFilters();
+  renderUrgency();
   showPage("members");
 }
 
@@ -690,6 +699,60 @@ async function refreshFromDrive() {
   }
 }
 
+/* ===================== Onglet Urgences ===================== */
+function renderUrgency() {
+  const q = normKey($("#urgency-search").value);
+  const listEl = $("#urgency-list");
+  if (q.length < 2) {
+    $("#urgency-count").textContent = "Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts (téléphone adhérent + contacts d'urgence cliquables).";
+    listEl.innerHTML = "";
+    return;
+  }
+  const rows = DATA.filterCache.members.filter(m => {
+    const last = normKey(m.last_name), first = normKey(m.first_name);
+    return last.includes(q) || first.includes(q)
+      || normKey(first + " " + last).includes(q)
+      || normKey(last + " " + first).includes(q);
+  });
+  $("#urgency-count").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} trouvé${rows.length > 1 ? "s" : ""} (saison ${esc(currentSeason)})`;
+  listEl.innerHTML = rows.map(urgencyCard).join("") ||
+    `<div class="empty">Aucun adhérent ne correspond à cette recherche.</div>`;
+}
+
+function telHref(phone) {
+  return String(phone || "").replace(/[^\d+]/g, "");
+}
+
+function urgencyRow(label, name, phone) {
+  const parts = [];
+  if (name) parts.push(esc(name));
+  if (phone) parts.push(esc(phone));
+  if (!parts.length) return "";
+  const href = telHref(phone);
+  return `<div style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:0">
+    <b style="flex:0 0 auto;color:#B91C1C">${label}</b>
+    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${parts.join(" · ")}</span>
+    ${href ? `<a href="tel:${esc(href)}" style="margin-left:auto;flex:0 0 auto;text-decoration:none;color:#2563EB;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600">📞 Appeler</a>` : ""}
+  </div>`;
+}
+
+function urgencyCard(m) {
+  const rows = [];
+  if (m.phone) rows.push(urgencyRow("👤 Adhérent", "", m.phone));
+  if (m.emergency1_name || m.emergency1_phone) rows.push(urgencyRow("🚨 Urgence 1", m.emergency1_name, m.emergency1_phone));
+  if (m.emergency2_name || m.emergency2_phone) rows.push(urgencyRow("🚨 Urgence 2", m.emergency2_name, m.emergency2_phone));
+  return `<div class="card" style="cursor:default">
+    <div class="card-top" style="display:flex;justify-content:space-between;gap:8px">
+      <div><div class="m-name">${esc(m.first_name)} ${esc(m.last_name)}</div>
+      <div class="m-tarif">${esc(m.tarif_name || "—")}</div></div>
+      ${statusBadge(m.status_norm)}
+    </div>
+    <div style="margin-top:9px;border-top:1px dashed #E2E8F0;padding-top:9px;display:flex;flex-direction:column;gap:7px">
+      ${rows.length ? rows.join("") : `<div style="color:#94A3B8;font-size:12px">Aucun contact enregistré pour cet adhérent.</div>`}
+    </div>
+  </div>`;
+}
+
 /* ===================== Init & événements ===================== */
 function wireEvents() {
   document.querySelectorAll("nav button").forEach(b =>
@@ -708,6 +771,7 @@ function wireEvents() {
     refreshFromDrive();
   });
   $("#search").addEventListener("input", () => { saveFilters(); applyFilters(); });
+  $("#urgency-search").addEventListener("input", renderUrgency);
   $("#season-select").addEventListener("change", e => {
     currentSeason = e.target.value; filters.season = currentSeason;
     computeFilterCache(); renderFilters(); applyFilters();
