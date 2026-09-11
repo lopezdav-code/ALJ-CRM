@@ -135,11 +135,15 @@
       <p style="font-size:13px;color:#475569"><b>Configuration (une seule fois) :</b></p>
       <ol style="font-size:12.5px;color:#64748B;line-height:1.6;padding-left:18px">
         <li><b>ID client OAuth</b> : Google Cloud Console → API &amp; Services → Identifiants →
-            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée),
-            avec URI autorisée : <code id="origin-hint"></code></li>
+            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée).</li>
+        <li>Dans cet ID client, ajoutez en <b>URI de redirection autorisée</b> l'adresse exacte
+            de cette page : <code id="redirect-hint"></code><br>
+            (et pour un usage local : <code>http://localhost:8000/annuaire/</code>)</li>
         <li><b>ID du fichier database.db</b> sur le Drive : visible dans l'application de bureau
             (onglet Paramètres → secret <code>GOOGLE_DRIVE_DB_ID</code>)</li>
-        <li>Collez les deux valeurs ci-dessous puis appuyez sur « Se connecter »</li>
+        <li>Collez les deux valeurs ci-dessous puis appuyez sur « Se connecter » :
+            le navigateur est <b>redirigé vers la page d'authentification Google</b>, puis revient
+            automatiquement ici avec la base.</li>
       </ol>
       <label>Identifiant client OAuth (Google)</label>
       <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
@@ -515,38 +519,54 @@ function applyFilters() {
     `<div class="empty">Aucun adhérent ne correspond aux filtres.</div>`;
 }
 
-/* ===================== Google Drive (connexion + téléchargement) ===================== */
-function loadScriptOnce(src) {
-  return new Promise((res, rej) => {
-    const existing = document.querySelector("script[data-gsi]");
-    if (window.google && window.google.accounts) return res();
-    if (existing) {
-      existing.addEventListener("load", () => res());
-      existing.addEventListener("error", () => rej(new Error("Impossible de charger " + src)));
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = src; s.dataset.gsi = "1"; s.async = true;
-    s.onload = res; s.onerror = () => rej(new Error("Impossible de charger " + src));
-    document.head.appendChild(s);
-  });
+/* ===================== Google Drive (auth par redirection plein écran) ===================== */
+const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+let accessToken = null;
+let tokenExpiresAt = 0;
+
+function redirectUri() {
+  return location.origin + location.pathname;  // hash exclu
 }
 
-function getDriveToken() {
-  return new Promise((res, rej) => {
-    if (!window.google || !google.accounts || !google.accounts.oauth2)
-      return rej(new Error("Google Identity Services indisponible"));
-    const tc = google.accounts.oauth2.initTokenClient({
-      client_id: cfg.clientId,
-      scope: DRIVE_SCOPE,
-      callback: resp => {
-        if (resp.error) rej(new Error(resp.error_description || resp.error));
-        else res(resp.access_token);
-      },
-      error_callback: err => rej(new Error(err.message || err.type || "Connexion Google échouée")),
-    });
-    tc.requestAccessToken({ prompt: "" });
-  });
+function startGoogleAuth() {
+  // Redirection vers la page d'authentification Google ; le retour se fait sur
+  // cette même page avec le token dans le fragment (#access_token=...)
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    b => b.toString(16).padStart(2, "0")).join("");
+  sessionStorage.setItem("alj_oauth_state", state);
+  const url = OAUTH_AUTH_URL
+    + "?client_id=" + encodeURIComponent(cfg.clientId)
+    + "&redirect_uri=" + encodeURIComponent(redirectUri())
+    + "&response_type=token"
+    + "&scope=" + encodeURIComponent(DRIVE_SCOPE)
+    + "&state=" + state
+    + "&prompt=select_account";
+  location.assign(url);
+}
+
+function readTokenFromHash() {
+  if (!location.hash || location.hash.length < 2) return null;
+  const params = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname + location.search);  // nettoie l'URL
+  if (params.get("error")) throw new Error("Connexion Google refusée : " + params.get("error"));
+  const token = params.get("access_token");
+  const state = params.get("state");
+  const expected = sessionStorage.getItem("alj_oauth_state");
+  sessionStorage.removeItem("alj_oauth_state");
+  if (!token) throw new Error("Réponse Google invalide (token absent)");
+  if (!state || state !== expected) throw new Error("Réponse Google invalide (state) — réessayez");
+  const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
+  tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
+  return token;
+}
+
+function sessionToken() {
+  // Token mémorisé dans l'onglet (évite de repasser par Google à chaque 🔄)
+  try {
+    const o = JSON.parse(sessionStorage.getItem("alj_oauth_token") || "null");
+    if (o && o.token && o.exp > Date.now()) return o.token;
+  } catch (e) {}
+  return null;
 }
 
 async function downloadDb(token) {
@@ -617,11 +637,17 @@ async function loadFromCache() {
 async function refreshFromDrive() {
   if (!cfg || !cfg.clientId || !cfg.fileId) { showPage("setup"); return; }
   const btn = $("#refresh-btn"); btn.classList.add("spin");
-  $("#sync-info").textContent = "Connexion à Google Drive…";
   try {
-    await loadScriptOnce("https://accounts.google.com/gsi/client");
-    const token = await getDriveToken();
-    const { bytes, meta } = await downloadDb(token);
+    // 1. Réutiliser le token de session, sinon redirection vers la connexion Google
+    if (!accessToken) accessToken = sessionToken();
+    if (!accessToken) {
+      $("#sync-info").textContent = "Redirection vers la page d'authentification Google…";
+      $("#refresh-btn").classList.remove("spin");
+      startGoogleAuth();
+      return;
+    }
+    $("#sync-info").textContent = "Téléchargement de database.db depuis Google Drive…";
+    const { bytes, meta } = await downloadDb(accessToken);
     const info = { bytes, fileId: cfg.fileId, driveModified: meta.modifiedTime, savedAt: new Date().toISOString() };
     await idbSet(CACHE_KEY, info);
     await initSql();
@@ -630,6 +656,16 @@ async function refreshFromDrive() {
     toast("✅ Base chargée depuis Google Drive (" + DATA.filterCache.members.length + " lignes, " + fmtDate(meta.modifiedTime) + ")");
   } catch (e) {
     console.error(e);
+    accessToken = null;
+    sessionStorage.removeItem("alj_oauth_token");
+    // Token expéré/invalide : une seule nouvelle tentative d'authentification
+    // (redirection Google), pour éviter toute boucle infinie.
+    if (!window._authRetried) {
+      window._authRetried = true;
+      $("#refresh-btn").classList.remove("spin");
+      startGoogleAuth();
+      return;
+    }
     $("#sync-info").textContent = "⚠️ Connexion Google échouée";
     toast("❌ " + (e.message || e));
   } finally {
@@ -670,21 +706,37 @@ function setAllCreneaux(on) {
 }
 
 (async function boot() {
-  $("#origin-hint").textContent = location.origin;
+  $("#redirect-hint").textContent = redirectUri();
   wireEvents();
   $("#search").value = filters.search || "";
   try { await initSql(); } catch (e) {
     $("#sync-info").textContent = "⚠️ sql.js indisponible (hors ligne ?)";
     toast("❌ Impossible de charger sql.js (connexion internet requise au premier lancement)");
   }
+
+  // Retour de Google après la redirection : token dans le fragment (#access_token=…)
+  try {
+    const hashToken = readTokenFromHash();
+    if (hashToken) {
+      accessToken = hashToken;
+      sessionStorage.setItem("alj_oauth_token",
+        JSON.stringify({ token: hashToken, exp: tokenExpiresAt }));
+      await refreshFromDrive();
+      return;
+    }
+  } catch (e) {
+    $("#sync-info").textContent = "⚠️ Authentification Google interrompue";
+    toast("❌ " + (e.message || e));
+  }
+
   const ok = await loadFromCache();
   if (!cfg || !cfg.clientId || !cfg.fileId) {
     $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
     $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
     showPage("setup");
   } else if (!ok) {
-    // Pas de cache : proposer la première connexion (bouton 🔄, geste utilisateur requis)
-    $("#sync-info").textContent = "Prêt — appuyez sur 🔄 pour charger la base";
+    // Pas de cache : proposer la première connexion (redirection vers Google)
+    $("#sync-info").textContent = "Prêt — appuyez sur 🔄 pour vous connecter à Google";
   }
 })();
 </script>
