@@ -135,7 +135,9 @@
       <p style="font-size:13px;color:#475569"><b>Configuration (une seule fois) :</b></p>
       <ol style="font-size:12.5px;color:#64748B;line-height:1.6;padding-left:18px">
         <li><b>ID client OAuth</b> : Google Cloud Console → API &amp; Services → Identifiants →
-            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée).</li>
+            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée),
+            puis <b>publier l'application</b> (Écran de consentement OAuth → Audience → Publier l'application)
+            pour que tous les comptes Google puissent se connecter sans être listés en « test ».</li>
         <li>Dans cet ID client, ajoutez en <b>URI de redirection autorisée</b> l'adresse exacte
             de cette page : <code id="redirect-hint"></code><br>
             (et pour un usage local : <code>http://localhost:8000/annuaire/</code>)</li>
