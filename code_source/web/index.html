@@ -653,21 +653,37 @@ async function refreshFromDrive() {
     await initSql();
     await loadData(bytes, info);
     $("#sync-info").textContent = "☁️ Base Drive du " + fmtDate(meta.modifiedTime);
+    sessionStorage.removeItem("alj_auth_retry_done");  // succès : réautorise une reconnexion future
     toast("✅ Base chargée depuis Google Drive (" + DATA.filterCache.members.length + " lignes, " + fmtDate(meta.modifiedTime) + ")");
   } catch (e) {
     console.error(e);
     accessToken = null;
     sessionStorage.removeItem("alj_oauth_token");
-    // Token expéré/invalide : une seule nouvelle tentative d'authentification
-    // (redirection Google), pour éviter toute boucle infinie.
-    if (!window._authRetried) {
-      window._authRetried = true;
+    // Distinguer les erreurs : 401 = reconnexion, 403/404 = config à corriger
+    // (jamais de redirection automatique dans ces cas-là, sinon boucle infinie)
+    const msg = String(e.message || e);
+    const m = msg.match(/\[(\d{3})\]/);
+    const status = m ? parseInt(m[1], 10) : 0;
+    let friendly = msg;
+    if (status === 404) {
+      friendly = "Fichier Drive introuvable : vérifiez l'ID du fichier database.db (⚙️ Configuration).";
+    } else if (status === 403) {
+      friendly = "Accès refusé : le compte Google connecté n'a pas accès à database.db. "
+        + "Connectez le compte propriétaire du fichier (ou partagez-le avec le compte utilisé).";
+    } else if (status === 401) {
+      friendly = "Session Google expirée — reconnexion…";
+    }
+    $("#sync-info").textContent = "⚠️ " + friendly;
+    toast("❌ " + friendly, 9000);
+    if (status === 401 && !sessionStorage.getItem("alj_auth_retry_done")) {
+      // Une seule reconnexion automatique (garde persistante même après redirection)
+      sessionStorage.setItem("alj_auth_retry_done", "1");
       $("#refresh-btn").classList.remove("spin");
       startGoogleAuth();
       return;
     }
-    $("#sync-info").textContent = "⚠️ Connexion Google échouée";
-    toast("❌ " + (e.message || e));
+    if (status === 404) showPage("setup");
+    return;
   } finally {
     $("#refresh-btn").classList.remove("spin");
   }
