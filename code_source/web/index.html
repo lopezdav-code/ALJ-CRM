@@ -131,8 +131,9 @@
         Cette page affiche l'annuaire des adhérents en <b>lecture seule</b>. Elle télécharge la base
         <code>database.db</code> depuis <b>votre Google Drive</b> (connexion Google), puis la garde en
         <b>cache du navigateur</b> (IndexedDB). Le bouton 🔄 recharge une version à jour ; sans connexion,
-        la dernière base en cache reste utilisable.</p>
-      <p style="font-size:13px;color:#475569"><b>Configuration (une seule fois) :</b></p>
+        la dernière base en cache reste utilisable. Les identifiants du club sont <b>pré-chargés</b> :
+        appuyez sur 🔄 pour vous connecter. Modifiez-les ci-dessous seulement si nécessaire.</p>
+      <p style="font-size:13px;color:#475569"><b>Si vous devez reconfigurer (une seule fois) :</b></p>
       <ol style="font-size:12.5px;color:#64748B;line-height:1.6;padding-left:18px">
         <li><b>ID client OAuth</b> : Google Cloud Console → API &amp; Services → Identifiants →
             créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée),
@@ -212,7 +213,16 @@ const DB_NAME = "alj_annuaire", DB_STORE = "kv";
 const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
-let cfg = JSON.parse(localStorage.getItem(CFG_KEY) || "null");
+// Valeurs pré-chargées pour le club (modifiables via ⚙️) :
+// l'ID client OAuth est public par conception ; l'accès au fichier database.db
+// reste contrôlé par les autorisations de partage Drive du fichier.
+const DEFAULT_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
+const DEFAULT_FILE_ID = "1ctJi08b33sr5l5WZjflExGbALo3Au8U7";
+
+let cfg = Object.assign(
+  { clientId: DEFAULT_CLIENT_ID, fileId: DEFAULT_FILE_ID },
+  JSON.parse(localStorage.getItem(CFG_KEY) || "{}")
+);
 let filters = Object.assign(
   { status: "", season: "2026-2027", groups: {}, others: {} },
   JSON.parse(localStorage.getItem(FILTER_KEY) || "{}")
@@ -818,8 +828,10 @@ function setAllCreneaux(on) {
     $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
     showPage("setup");
   } else if (!ok) {
-    // Pas de cache : proposer la première connexion (redirection vers Google)
-    $("#sync-info").textContent = "Prêt — appuyez sur 🔄 pour vous connecter à Google";
+    // Pas de cache et configuration valide (valeurs pré-chargées) :
+    // connexion automatique via la page d'authentification Google.
+    $("#sync-info").textContent = "Connexion à Google Drive…";
+    startGoogleAuth();
   }
 })();
 </script>
