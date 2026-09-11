@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QPixmap, QColor
-from paths import ROOT_DIR
+from paths import ROOT_DIR, CODE_ROOT
 from domain.age_rules import extract_birth_years
 
 class GroupsPage(QWidget):
@@ -265,7 +265,7 @@ class GroupsPage(QWidget):
         self.img_lbl.setAlignment(Qt.AlignCenter)
 
         # Tenter de charger l'infographie
-        img_path = os.path.join(ROOT_DIR, "doc", "Planning-2026-2027-ALJ-1-2048x1448.png")
+        img_path = os.path.join(CODE_ROOT, "doc", "Planning-2026-2027-ALJ-1-2048x1448.png")
         if os.path.exists(img_path):
             pixmap = QPixmap(img_path)
             # Redimensionner pour tenir à droite

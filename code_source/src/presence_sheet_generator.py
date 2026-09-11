@@ -7,10 +7,31 @@ from openpyxl.utils import range_boundaries, get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.pagebreak import Break
-from paths import ROOT_DIR
+from paths import ROOT_DIR, find_doc_template
 
 # Pictogramme compact remplaçant le mot "Autonomes" dans la colonne "Autorisation" (votre demande !)
 PICTO_AUTONOME = "🧗"
+
+# Groupes virtuels d'export : fusionnent plusieurs tarifs HelloAsso en UN SEUL tableau
+# de présence. Dans le sélecteur d'export, l'entrée du groupe virtuel remplace les
+# tarifs membres qu'elle couvre (sinon les mêmes adhérents seraient imprimés 2 fois).
+VIRTUAL_GROUP_TARIFS = {
+    "Adultes & Jeunes Adultes autonomes": (
+        "Adultes autonomes",
+        "Jeunes Adultes autonomes - nés entre 2001 et 2008",
+    ),
+    "Loisir - Adultes débutants": (
+        "Cours Adultes débutants",
+        "Cours jeunes Adultes débutants nés entre 2001 et 2008",
+    ),
+}
+
+# Tarif servant à retrouver le créneau du planning (horaires, encadrants) pour chaque
+# groupe virtuel, via la colonne helloasso_tarifs de la BDD.
+VIRTUAL_GROUP_LOOKUP = {
+    "Adultes & Jeunes Adultes autonomes": "Adultes autonomes",
+    "Loisir - Adultes débutants": "Cours Adultes débutants",
+}
 
 def style_range(ws, cell_range, outer_side, inner_side=None):
     """Applique un contour extérieur et des bordures intérieures optionnelles à une plage de cellules."""
@@ -323,14 +344,17 @@ def find_planning_match_dynamically(tarif_name, planning_data):
         
     return None
 
-def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False):
+def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False, group_tarifs_map=None):
     """
     Génère des feuilles de présence au format Excel pour les groupes spécifiés.
-    Génère un fichier par groupe de tarif (colonne tarif_name), un seul fichier fusionné,
+    Les groupes sont des créneaux du planning : `group_tarifs_map` (optionnel) associe
+    chaque nom de créneau à ses tarifs HelloAsso. À défaut, les groupes virtuels
+    (VIRTUAL_GROUP_TARIFS) puis l'égalité exacte de tarif sont utilisés.
+    Génère un fichier par groupe, un seul fichier fusionné,
     ou tous les tableaux empilés dans une même feuille Excel (Nouveau !).
     """
     root_dir = ROOT_DIR
-    template_path = os.path.join(root_dir, "doc", "template", "Template Export liste adhérents à imprimer.xlsx")
+    template_path = find_doc_template("Template Export liste adhérents à imprimer.xlsx")
     output_dir = os.path.join(root_dir, "exports", "fiches_presence")
     
     os.makedirs(output_dir, exist_ok=True)
@@ -396,48 +420,45 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
     global_print_bottom = 0  # Dernière ligne de contenu (QRCode inclus) pour la zone d'impression globale
     
     # 1. Préparer les groupes à boucler et leurs participants
-    if merge_groups and len(selected_groups) > 1:
+    def _participants_for_group(group_name):
+        """Participants d'un groupe : tarifs mappés du créneau (BDD planning) si fournis,
+        sinon liste de tarifs d'un groupe virtuel, sinon égalité exacte sur le tarif."""
+        mapped_tarifs = (group_tarifs_map or {}).get(group_name)
+        virtual_tarifs = VIRTUAL_GROUP_TARIFS.get(group_name)
+        target_tarifs = mapped_tarifs or virtual_tarifs
+        return [
+            p for p in participants_data
+            if (str(p.get("tarif_name") or "").strip() in target_tarifs if target_tarifs
+                else str(p.get("tarif_name") or "").strip() == group_name)
+            and "annul" not in str(p.get("status") or "").lower()
+        ]
+
+    # Si un groupe virtuel est coché, ses tarifs membres ne génèrent pas de tableau séparé
+    covered_tarifs = set()
+    for g in selected_groups:
+        if g in VIRTUAL_GROUP_TARIFS:
+            covered_tarifs.update(VIRTUAL_GROUP_TARIFS[g])
+    loop_source = [g for g in selected_groups if g not in covered_tarifs]
+
+    if merge_groups and len(loop_source) > 1:
         # Créer un nom combiné descriptif (ex: "Adultes autonomes & Jeunes Adultes")
-        combined_group_name = " & ".join(selected_groups)
+        combined_group_name = " & ".join(loop_source)
         if len(combined_group_name) > 80:
             combined_group_name = "Groupes Fusionnés"
-            
+
         merged_participants = []
-        for g in selected_groups:
-            if g == "Adultes & Jeunes Adultes autonomes":
-                sub_parts = [
-                    p for p in participants_data 
-                    if str(p.get("tarif_name") or "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
-                    and "annul" not in str(p.get("status") or "").lower()
-                ]
-            else:
-                sub_parts = [
-                    p for p in participants_data 
-                    if str(p.get("tarif_name") or "").strip() == g
-                    and "annul" not in str(p.get("status") or "").lower()
-                ]
-            for p in sub_parts:
+        for g in loop_source:
+            for p in _participants_for_group(g):
                 if p not in merged_participants:
                     merged_participants.append(p)
-                    
+
         participants_by_group = {combined_group_name: merged_participants}
         loop_groups = [combined_group_name]
     else:
         participants_by_group = {}
-        for group_name in selected_groups:
-            if group_name == "Adultes & Jeunes Adultes autonomes":
-                participants_by_group[group_name] = [
-                    p for p in participants_data 
-                    if str(p.get("tarif_name") or "").strip() in ("Adultes autonomes", "Jeunes Adultes autonomes - nés entre 2001 et 2008")
-                    and "annul" not in str(p.get("status") or "").lower()
-                ]
-            else:
-                participants_by_group[group_name] = [
-                    p for p in participants_data 
-                    if str(p.get("tarif_name") or "").strip() == group_name
-                    and "annul" not in str(p.get("status") or "").lower()
-                ]
-        loop_groups = selected_groups
+        for group_name in loop_source:
+            participants_by_group[group_name] = _participants_for_group(group_name)
+        loop_groups = loop_source
 
     # Si auth_only : repérer les jeunes mineurs avec au moins une autorisation parentale
     # (Autonomes / Famille), répartis dans l'ensemble des groupes, afin de les AJOUTER
@@ -492,21 +513,29 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         # 3. Tenter d'associer le tarif avec le planning via la configuration de BDD (IHM)
         if merge_groups:
             # Essayer de trouver un cours autonome dans le planning ou par défaut prendre le premier sous-groupe
-            lookup_name = selected_groups[0]
-            for g in selected_groups:
-                if "autonome" in g.lower():
-                    lookup_name = "Adultes autonomes" if g == "Adultes & Jeunes Adultes autonomes" else g
+            lookup_name = None
+            for g in loop_source:
+                if g in VIRTUAL_GROUP_LOOKUP:
+                    lookup_name = VIRTUAL_GROUP_LOOKUP[g]
                     break
+                if "autonome" in g.lower():
+                    lookup_name = g
+                    break
+            if lookup_name is None:
+                lookup_name = loop_source[0] if loop_source else group_name
         else:
-            lookup_name = "Adultes autonomes" if group_name == "Adultes & Jeunes Adultes autonomes" else group_name
+            lookup_name = VIRTUAL_GROUP_LOOKUP.get(group_name, group_name)
             
         match_info = None
         
-        # 3.1 Vérifier d'abord si des créneaux possèdent ce tarif HelloAsso configuré via l'IHM
+        # 3.1 Vérifier d'abord si des créneaux correspondent (par nom de groupe ou par
+        #     tarif HelloAsso configuré via l'IHM)
         matches = []
         for item in planning_data:
+            lookup_clean = lookup_name.strip().lower()
             linked_tarifs = item.get("helloasso_tarifs", [])
-            if any(str(t).strip().lower() == lookup_name.strip().lower() for t in linked_tarifs):
+            groupe_name = str(item.get("groupe") or "").strip().lower()
+            if any(str(t).strip().lower() == lookup_clean for t in linked_tarifs) or groupe_name == lookup_clean:
                 matches.append(item)
                 
         if matches:
@@ -515,7 +544,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             distinct_jours = []
             for m in matches:
                 for enc in m.get("encadrants", []):
-                    if enc not in all_coaches:
+                    if not any(str(enc).strip().lower() == str(x).strip().lower() for x in all_coaches):
                         all_coaches.append(enc)
                 day_name = m.get("jour") or ""
                 time_slot = m.get("horaires") or ""
@@ -564,7 +593,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                     distinct_jours = []
                     for m in matches:
                         for enc in m.get("encadrants", []):
-                            if enc not in all_coaches:
+                            if not any(str(enc).strip().lower() == str(x).strip().lower() for x in all_coaches):
                                 all_coaches.append(enc)
                         day_name = m.get("jour") or ""
                         time_slot = m.get("horaires") or ""
@@ -625,15 +654,15 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         # 4. Préparer l'en-tête : titre, horaire, puis suppression des anciens éléments
         ws.sheet_view.showGridLines = False
         
-        # Nettoyage complet des 4 lignes d'en-tête du bloc (ancien logo, nom de groupe, créneau, horaire)
-        for r in range(row_offset + 1, row_offset + 5):
+        # Nettoyage complet des 5 lignes d'en-tête du bloc (nom de groupe, créneau, horaire, encadrants, espaceur)
+        for r in range(row_offset + 1, row_offset + 6):
             for c_idx in range(1, 101):
                 cell_to_clean = ws.cell(row=r, column=c_idx)
                 cell_to_clean.value = None
                 cell_to_clean.border = Border()
                 cell_to_clean.fill = PatternFill(fill_type=None)
 
-        # 4b. En-tête de la fiche : nom du groupe, horaire puis total d'élèves (3 premières lignes du bloc)
+        # 4b. En-tête de la fiche : nom du groupe, horaire, encadrants puis total d'élèves
         title_cell = ws.cell(row=row_offset + 1, column=1, value=group_name)
         title_cell.font = Font(name="Segoe UI", size=14, bold=True, color="1E3A8A")
         title_cell.alignment = align_left
@@ -644,17 +673,24 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         horaire_cell.alignment = align_left
         ws.row_dimensions[row_offset + 2].height = 16
 
-        # Total d'élèves inscrits au tableau (votre demande !)
-        total_cell = ws.cell(row=row_offset + 3, column=1, value=f"👥 Total élèves : {count_members}")
-        total_cell.font = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
-        total_cell.alignment = align_left
+        # Liste des encadrants du créneau (issus de la table planning de la BDD)
+        encadrants_str = " / ".join(str(e).strip() for e in encadrants_list if str(e).strip()) if encadrants_list else "Non renseigné"
+        encadrants_cell = ws.cell(row=row_offset + 3, column=1, value=f"🧑‍🏫 Encadrants : {encadrants_str}")
+        encadrants_cell.font = Font(name="Segoe UI", size=10, bold=True, color="374151")
+        encadrants_cell.alignment = align_left
         ws.row_dimensions[row_offset + 3].height = 15
 
-        # 4e ligne : espaceur fin avant le tableau
-        ws.row_dimensions[row_offset + 4].height = 6
+        # Total d'élèves inscrits au tableau (votre demande !)
+        total_cell = ws.cell(row=row_offset + 4, column=1, value=f"👥 Total élèves : {count_members}")
+        total_cell.font = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
+        total_cell.alignment = align_left
+        ws.row_dimensions[row_offset + 4].height = 15
+
+        # 5e ligne : espaceur fin avant le tableau
+        ws.row_dimensions[row_offset + 5].height = 6
 
         # Ligne d'en-têtes du tableau (Prénom / Nom / Badge / Bloc / Passeport / dates)
-        hdr_row = row_offset + 5
+        hdr_row = row_offset + 6
 
         # 5. Remplir la ligne 4 avec les dates de séances calculées et les nouvelles colonnes Badge Rouge / Passeport Orange
         session_dates = []

@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ALJ Escalade — Annuaire Adhérents (lecture seule)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<style>
+  :root {
+    --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
+    --line: #E2E8F0; --blue: #2563EB; --blue-dark: #1D4ED8;
+    --header-h: 58px; --nav-h: 62px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; font-size: 15px; }
+  button { font-family: inherit; }
+
+  header {
+    position: fixed; inset: 0 0 auto 0; height: var(--header-h); z-index: 30;
+    display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: linear-gradient(135deg, #1E293B, #0F172A); color: #F8FAFC;
+    box-shadow: 0 2px 8px rgba(15,23,42,.25);
+  }
+  header .title { flex: 1; min-width: 0; }
+  header .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .title small { display: block; color: #94A3B8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .icon-btn {
+    flex: 0 0 auto; width: 40px; height: 40px; border: none; border-radius: 10px;
+    background: rgba(255,255,255,.12); color: #F8FAFC; font-size: 18px; cursor: pointer;
+  }
+  .icon-btn:active { background: rgba(255,255,255,.3); }
+  .icon-btn.spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  main { max-width: 640px; margin: 0 auto; padding: calc(var(--header-h) + 10px) 12px calc(var(--nav-h) + 18px); }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Cartes adhérents */
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    cursor: pointer;
+  }
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .m-name { font-weight: 700; font-size: 15px; }
+  .m-tarif { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge { font-size: 10px; font-weight: 700; color: #fff; border-radius: 999px; padding: 3px 9px; white-space: nowrap; margin-top: 2px; flex: 0 0 auto; }
+  .m-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+  .m-links a {
+    text-decoration: none; color: var(--blue); background: #EFF6FF; border: 1px solid #BFDBFE;
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600;
+  }
+  .m-detail { display: none; margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 9px; }
+  .card.open .m-detail { display: block; }
+  .m-detail .row { display: flex; gap: 6px; font-size: 12.5px; color: #475569; margin-bottom: 4px; }
+  .m-detail .row b { flex: 0 0 auto; }
+
+  /* Filtres */
+  .filters-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .filters-card h3 { margin: 0 0 10px; font-size: 13px; }
+  .filters-card .hint { margin: 0 0 4px; font-size: 11.5px; color: var(--muted); }
+  select, input[type="text"], input[type="search"] {
+    width: 100%; padding: 10px 12px; border: 1px solid #CBD5E1; border-radius: 10px;
+    font-size: 14px; color: var(--ink); background: #fff; outline: none;
+  }
+  .search input { margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 7px 11px; border: 1px solid #CBD5E1; border-radius: 999px; background: #F8FAFC; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .section-h {
+    margin: 13px 0 5px; padding: 7px 12px; border-radius: 8px;
+    background: #DBEAFE; color: #1E3A8A; font-weight: 700; font-size: 12.5px;
+  }
+  .subsection-h { margin: 7px 0 2px 10px; color: #1D4ED8; font-weight: 700; font-style: italic; font-size: 12px; }
+  .opt { display: flex; align-items: center; gap: 9px; padding: 8px 10px 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+  .opt:active { background: #F1F5F9; }
+  .opt input { width: 19px; height: 19px; accent-color: var(--blue); flex: 0 0 auto; }
+  .opt .n { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .indent1 { padding-left: 18px; }
+  .indent2 { padding-left: 32px; }
+  .mini-row { display: flex; gap: 8px; margin-top: 10px; }
+  .mini { flex: 1; padding: 9px 10px; border: 1px solid #CBD5E1; border-radius: 9px; background: #F8FAFC; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .mini:active { background: #E2E8F0; }
+
+  /* Configuration */
+  .setup-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .setup-box h2 { margin: 0 0 8px; font-size: 16px; }
+  .setup-box p, .setup-box li { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+  .setup-box code { background: #F1F5F9; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; word-break: break-all; }
+  .setup-box label { display: block; font-size: 12px; font-weight: 700; margin: 13px 0 4px; }
+  .primary { width: 100%; margin-top: 16px; padding: 12px; border: none; border-radius: 10px; background: var(--blue); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .primary:active { background: var(--blue-dark); }
+
+  nav {
+    position: fixed; inset: auto 0 0 0; height: var(--nav-h); display: flex; z-index: 30;
+    background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button { flex: 1; border: none; background: none; display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--muted); padding-top: 8px; cursor: pointer; }
+  nav button .ico { font-size: 19px; }
+  nav button.active { color: var(--blue); }
+
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + 14px);
+    background: #0F172A; color: #F8FAFC; padding: 10px 16px; border-radius: 10px;
+    font-size: 12.5px; max-width: 90vw; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 60;
+  }
+  #toast.show { opacity: 1; }
+  .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">
+    <b>🧗 ALJ Escalade — Annuaire</b>
+    <small style="color:#94A3B8;font-size:11px">Lecture seule · <span id="sync-info">Aucune donnée chargée</span></small>
+  </div>
+  <button class="icon-btn" id="refresh-btn" title="Rafraîchir depuis Google Drive">🔄</button>
+  <button class="icon-btn" id="config-btn" title="Configuration">⚙️</button>
+</header>
+
+<main>
+  <!-- ================= Configuration (première utilisation) ================= -->
+  <section class="page" id="page-setup">
+    <div class="setup-box">
+      <h2 style="margin:0 0 8px;font-size:17px">⚙️ Configuration</h2>
+      <p style="font-size:13px;color:#475569;line-height:1.55">
+        Cette page affiche l'annuaire des adhérents en <b>lecture seule</b>. Elle télécharge la base
+        <code>database.db</code> depuis <b>votre Google Drive</b> (connexion Google), puis la garde en
+        <b>cache du navigateur</b> (IndexedDB). Le bouton 🔄 recharge une version à jour ; sans connexion,
+        la dernière base en cache reste utilisable.</p>
+      <p style="font-size:13px;color:#475569"><b>Configuration (une seule fois) :</b></p>
+      <ol style="font-size:12.5px;color:#64748B;line-height:1.6;padding-left:18px">
+        <li><b>ID client OAuth</b> : Google Cloud Console → API &amp; Services → Identifiants →
+            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée),
+            avec URI autorisée : <code id="origin-hint"></code></li>
+        <li><b>ID du fichier database.db</b> sur le Drive : visible dans l'application de bureau
+            (onglet Paramètres → secret <code>GOOGLE_DRIVE_DB_ID</code>)</li>
+        <li>Collez les deux valeurs ci-dessous puis appuyez sur « Se connecter »</li>
+      </ol>
+      <label>Identifiant client OAuth (Google)</label>
+      <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
+      <label>ID du fichier database.db sur Google Drive</label>
+      <input type="text" id="cfg-file-id" placeholder="1AbC…xYz" autocomplete="off">
+      <button class="primary" id="cfg-save">💾 Enregistrer &amp; se connecter</button>
+    </div>
+  </section>
+
+  <!-- ================= Liste adhérents ================= -->
+  <section class="page" id="page-members">
+    <input type="search" id="search" placeholder="🔍 Nom, prénom ou tarif…" style="width:100%;padding:11px 13px;border:1px solid #CBD5E1;border-radius:10px;font-size:14px;background:#fff">
+    <div style="color:#64748B;font-size:12px;margin:6px 2px 10px" id="count-line">—</div>
+    <div id="members-list"></div>
+  </section>
+
+  <!-- ================= Filtres ================= -->
+  <section class="page" id="page-filters">
+    <div class="filters-card">
+      <h3>📅 Saison</h3>
+      <select id="season-select"></select>
+    </div>
+    <div class="filters-card">
+      <h3>📌 Statut</h3>
+      <div class="chips" id="status-chips"></div>
+    </div>
+    <div class="filters-card">
+      <h3>🧗 Créneaux affichés</h3>
+      <p class="hint">Cochez les créneaux à inclure. Un créneau regroupe un ou plusieurs tarifs HelloAsso.
+         Appuyez longuement… non, simple clic sur une ligne pour cocher. Le détail (téléphone, urgences)
+         s'affiche en touchant une fiche.</p>
+      <div id="creneau-list"></div>
+      <div class="mini-row">
+        <button class="mini" id="cren-all">Tout cocher</button>
+        <button class="mini" id="cren-none">Tout décocher</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-page="members" class="active">👥<br>Adhérents</button>
+  <button data-page="filters">🔎<br>Filtres</button>
+</nav>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================== Configuration (localStorage) ===================== */
+const CFG_KEY = "alj_annuaire_config";
+const CACHE_KEY = "database";
+const FILTER_KEY = "alj_annuaire_filters";
+const DB_NAME = "alj_annuaire", DB_STORE = "kv";
+const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
+let cfg = JSON.parse(localStorage.getItem(CFG_KEY) || "null");
+let filters = Object.assign(
+  { status: "", season: "2026-2027", groups: {}, others: {} },
+  JSON.parse(localStorage.getItem(FILTER_KEY) || "{}")
+);
+
+const $ = s => document.querySelector(s);
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function toast(msg, ms = 3500) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms);
+}
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso) : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function showPage(name) {
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.getElementById("page-" + name).classList.add("active");
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === name));
+}
+
+/* ===================== Cache IndexedDB (navigateur) ===================== */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const t = db.transaction(DB_STORE).objectStore(DB_STORE).get(key);
+    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).put(val, key);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+
+/* ===================== Parsing SQLite (sql.js, lecture pure) ===================== */
+let SQL = null;
+let DATA = { members: [], creneaux: [], seasons: [], meta: null, filterCache: null };
+
+async function initSql() {
+  if (!SQL) SQL = await initSqlJs({ locateFile: f => SQLJS_BASE + f });
+  return SQL;
+}
+function queryRows(db, sql, params) {
+  const stmt = db.prepare(sql);
+  if (params) stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+const STATUS_MAP = {
+  "processed": "Traité", "validated": "Validé", "validé": "Validé", "valide": "Validé",
+  "terminé": "Terminé", "termine": "Terminé", "annulé": "Annulé", "annule": "Annulé",
+  "canceled": "Annulé", "en cours": "En cours",
+};
+const STATUS_COLORS = { "Validé": "#10B981", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#F59E0B", "Annulé": "#EF4444" };
+function normalizeStatus(s) {
+  const raw = String(s || "").trim();
+  return STATUS_MAP[raw.toLowerCase()] || raw;
+}
+
+function parseDatabase(bytes) {
+  const db = new SQL.Database(new Uint8Array(bytes));
+
+  const members = queryRows(db, `
+    SELECT last_name, first_name, tarif_name, status, order_date, order_ref, phone,
+           email_primary, email_secondary, birth_date, city, licence_ffme,
+           emergency1_name, emergency1_phone, emergency2_name, emergency2_phone, season_name
+    FROM v_adherents_legacy
+    ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE
+  `).map(m => Object.assign(m, { status_norm: normalizeStatus(m.status) }));
+
+  const seasons = queryRows(db, "SELECT name FROM seasons ORDER BY name DESC").map(r => r.name).filter(Boolean);
+
+  // Un groupe de créneau peut regrouper plusieurs tarifs HelloAsso
+  const creneaux = [];
+  const byName = {};
+  for (const item of queryRows(db, "SELECT groupe, jour, horaires, helloasso_tarifs FROM planning ORDER BY id")) {
+    const g = String(item.groupe || "").trim();
+    if (!g) continue;
+    let c = byName[g];
+    if (!c) { c = { groupe: g, tarifs: [] }; byName[g] = c; creneaux.push(c); }
+    let tarifs = [];
+    try { tarifs = JSON.parse(item.helloasso_tarifs || "[]"); } catch (e) { tarifs = []; }
+    for (const t of tarifs) {
+      const ts = String(t || "").trim();
+      if (ts && !c.tarifs.includes(ts)) c.tarifs.push(ts);
+    }
+  }
+  creneaux.sort((a, b) => a.groupe.localeCompare(b.groupe, "fr"));
+  db.close();
+  return { members, creneaux, seasons };
+}
+
+/* =============== Hiérarchie des créneaux (portage du bureau) =============== */
+function normKey(s) {
+  return String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+function accentClassPattern(word) {
+  const tr = { "e": "[eèéêë]", "a": "[aàâä]", "i": "[iîï]", "o": "[oôö]", "u": "[uùûü]", "c": "[cç]", "y": "[yÿ]" };
+  return word.split("").map(ch => tr[ch] || ch).join("");
+}
+function shortenGroupLabel(name, keyword, dropPatterns) {
+  const parts = name.split(new RegExp(accentClassPattern(keyword), "i"));
+  let rest = parts.length > 1 ? parts.reduce((a, b) => (b.length > a.length ? b : a)) : name;
+  for (const dp of dropPatterns || []) rest = rest.replace(new RegExp(dp, "ig"), "");
+  rest = rest.replace(/\s{2,}/g, " ").replace(/^[\s\u2013\u2014-]+|[\s\u2013\u2014-]+$/g, "");
+  if (rest.startsWith("(") && rest.endsWith(")")) rest = rest.slice(1, -1).trim();
+  return rest || name;
+}
+function isWaiting(raw, label) {
+  return normKey(raw).includes("attente") || normKey(label).includes("attente");
+}
+function buildCreneauItems(creneaux) {
+  const SECTION_ORDER = ["Collège", "Enfants", "Perfectionnement", "Compétition"];
+  const buckets = { "Collège": [], "Enfants": {}, "Perfectionnement": [], "Compétition": [] };
+  const others = [];
+  for (const c of creneaux) {
+    const name = c.groupe, n = normKey(name);
+    if (n.includes("competition")) buckets["Compétition"].push([name, shortenGroupLabel(name, "competition")]);
+    else if (n.includes("college")) buckets["Collège"].push([name, shortenGroupLabel(name, "college")]);
+    else if (n.includes("enfants")) {
+      const m = n.match(/20\d\d\s*-\s*20\d\d/);
+      const sub = m ? m[0].replace(/\s/g, "") : "Autres tranches";
+      const short = shortenGroupLabel(name, "enfants", ["20\\d\\d\\s*-\\s*20\\d\\d"]);
+      (buckets["Enfants"][sub] = buckets["Enfants"][sub] || []).push([name, short]);
+    }
+    else if (n.includes("perfectionnement")) buckets["Perfectionnement"].push([name, shortenGroupLabel(name, "perfectionnement")]);
+    else others.push([name, name]);
+  }
+  const cmp = (a, b) => a[0].localeCompare(b[0], "fr");
+  const items = [];
+  for (const [name, short] of others.sort(cmp)) items.push({ kind: "group", label: short, raw: name });
+  for (const section of SECTION_ORDER) {
+    const entries = buckets[section];
+    const empty = Array.isArray(entries) ? !entries.length : !Object.keys(entries).length;
+    if (empty) continue;
+    items.push({ kind: "section", label: section, raw: section });
+    if (Array.isArray(entries)) {
+      for (const [name, short] of entries.sort(cmp)) items.push({ kind: "group", label: short, raw: name });
+    } else {
+      for (const sub of Object.keys(entries).sort()) {
+        items.push({ kind: "sub", label: sub, raw: sub });
+        for (const [name, short] of entries[sub].sort(cmp)) items.push({ kind: "group", label: short, raw: name });
+      }
+    }
+  }
+  for (const it of items) if (it.kind === "group")
+    it.tarifs = ((creneaux.find(c => c.groupe === it.raw) || {}).tarifs) || [];
+  return items;
+}
+
+/* ===================== État des filtres + rendu ===================== */
+function saveFilters() {
+  filters.season = currentSeason;
+  filters.search = $("#search").value;
+  localStorage.setItem(FILTER_KEY, JSON.stringify(filters));
+}
+
+function statusBadge(st) {
+  const c = { "Validé": "#10B981", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#F59E0B", "Annulé": "#EF4444" }[st] || "#94A3B8";
+  return `<span class="badge" style="background:${c}">${esc(st || "—")}</span>`;
+}
+
+function memberCard(m) {
+  const tel = String(m.phone || "").replace(/[^\d+]/g, "");
+  const mail = String(m.email_primary || "").trim();
+  let detail = "";
+  if (m.birth_date) detail += row("🎂 Naissance", m.birth_date);
+  if (m.city) detail += row("📍 Ville", m.city);
+  if (m.licence_ffme) detail += row("🪪 Licence FFME", m.licence_ffme);
+  if (m.emergency1_name) detail += row("🚨 Urgence", (m.emergency1_name || "") + " " + (m.emergency1_phone || ""));
+  if (m.emergency2_name) detail += row("🚨 Urgence 2", (m.emergency2_name || "") + " " + (m.emergency2_phone || ""));
+  if (m.email_secondary) detail += row("✉️ E-mail 2", m.email_secondary);
+  if (m.order_date) detail += row("🧾 Inscription", m.order_date + (m.order_ref ? " (" + m.order_ref + ")" : ""));
+  return `<div class="card" onclick="this.classList.toggle('open')">
+    <div class="card-top" style="display:flex;justify-content:space-between;gap:8px">
+      <div><div class="m-name">${esc(m.first_name)} ${esc(m.last_name)}</div>
+      <div class="m-tarif">${esc(m.tarif_name || "—")}</div></div>
+      ${statusBadge(m.status_norm)}
+    </div>
+    ${(tel || mail) ? `<div class="m-links">${tel ? `<a href="tel:${esc(tel)}">📞 Appeler</a>` : ""}${mail ? `<a href="mailto:${esc(mail)}">✉️ E-mail</a>` : ""}</div>` : ""}
+    ${detail ? `<div class="m-detail">${detail}</div>` : ""}
+  </div>`;
+  function row(label, val) { return `<div class="row"><b>${label} :</b><span>${esc(val)}</span></div>`; }
+}
+
+function isGroupChecked(it) {
+  if (filters.groups[it.raw] !== undefined) return filters.groups[it.raw];
+  return !isWaiting(it.raw, it.label);  // Défaut : tout coché sauf liste d'attente
+}
+
+function renderFilters() {
+  // Saison
+  const sel = $("#season-select");
+  sel.innerHTML = DATA.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  sel.value = DATA.seasons.includes(currentSeason) ? currentSeason : (DATA.seasons[0] || "2026-2027");
+  currentSeason = sel.value;
+
+  // Statuts présents
+  const chips = $("#status-chips");
+  chips.innerHTML = "";
+  addChip(chips, "Tous", "");
+  for (const st of ["Validé", "Traité", "Terminé", "En cours", "Annulé"]) {
+    const n = DATA.filterCache.members.filter(m => m.status_norm === st).length;
+    if (n > 0) addChip(chips, st, st, ` (${n})`);
+  }
+  updateChips();
+
+  // Hiérarchie des créneaux
+  const wrap = $("#creneau-list");
+  wrap.innerHTML = "";
+  for (const it of DATA.itemsCache) {
+    if (it.kind === "section") {
+      const d = document.createElement("div");
+      d.className = "section-h"; d.textContent = "📁 " + it.label;
+      wrap.appendChild(d);
+    } else if (it.kind === "sub") {
+      const d = document.createElement("div");
+      d.className = "subsection-h"; d.textContent = "📂 " + it.label;
+      wrap.appendChild(d);
+    } else {
+      wrap.appendChild(creneauRow(it.label, it.raw, it.tarifs, it.count, false));
+    }
+  }
+  const otherKeys = Object.keys(DATA.filterCache.others).sort((a, b) => a.localeCompare(b, "fr"));
+  if (otherKeys.length) {
+    const d = document.createElement("div");
+    d.className = "section-h"; d.textContent = "📁 Autres tarifs (hors créneau)";
+    wrap.appendChild(d);
+    for (const t of otherKeys)
+      wrap.appendChild(creneauRow(t, "other:" + t, [t], DATA.filterCache.others[t], true));
+  }
+}
+
+function addChip(parent, label, value, suffix) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip";
+  b.dataset.value = value; b.textContent = label + (suffix || "");
+  b.addEventListener("click", () => {
+    filters.status = value;
+    saveFilters(); updateChips(); applyFilters();
+  });
+  parent.appendChild(b);
+}
+function updateChips() {
+  document.querySelectorAll("#status-chips .chip").forEach(c =>
+    c.classList.toggle("on", (c.dataset.value || "") === (filters.status || "")));
+}
+
+function creneauRow(label, raw, tarifs, count, isOther) {
+  const div = document.createElement("label");
+  div.className = "opt indent1";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = isOther
+    ? (filters.others[raw] !== undefined ? filters.others[raw] : !isWaiting(raw, label))
+    : (filters.groups[raw] !== undefined ? filters.groups[raw] : !isWaiting(raw, label));
+  cb.addEventListener("change", () => {
+    if (isOther) filters.others[raw] = cb.checked;
+    else filters.groups[raw] = cb.checked;
+    saveFilters(); applyFilters();
+  });
+  const span = document.createElement("span");
+  span.textContent = label;
+  const n = document.createElement("span");
+  n.className = "n"; n.textContent = count;
+  div.append(cb, span, n);
+  return div;
+}
+
+function allowedTarifKeys() {
+  const allowed = new Set();
+  for (const it of DATA.itemsCache) {
+    if (it.kind !== "group") continue;
+    const on = filters.groups[it.raw] !== undefined ? filters.groups[it.raw] : !isWaiting(it.raw, it.label);
+    if (on) for (const t of it.tarifs) allowed.add(normKey(t));
+  }
+  for (const [raw, on] of Object.entries(filters.others)) {
+    if (!on) continue;
+    const t = raw.startsWith("other:") ? raw.slice(6) : raw;
+    allowed.add(normKey(t));
+  }
+  return allowed;
+}
+
+function applyFilters() {
+  const q = normKey($("#search").value);
+  const allowed = allowedTarifKeys();
+  const st = filters.status || "";
+  const rows = DATA.filterCache.members.filter(m => {
+    const k = normKey(m.tarif_name);
+    if (k && !allowed.has(k)) return false;
+    if (st && m.status_norm !== st) return false;
+    if (q && !(normKey(m.last_name).includes(q) || normKey(m.first_name).includes(q) || normKey(m.tarif_name).includes(q))) return false;
+    return true;
+  });
+  $("#count-line").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} affiché${rows.length > 1 ? "s" : ""}`;
+  $("#members-list").innerHTML = rows.map(memberCard).join("") ||
+    `<div class="empty">Aucun adhérent ne correspond aux filtres.</div>`;
+}
+
+/* ===================== Google Drive (connexion + téléchargement) ===================== */
+function loadScriptOnce(src) {
+  return new Promise((res, rej) => {
+    const existing = document.querySelector("script[data-gsi]");
+    if (window.google && window.google.accounts) return res();
+    if (existing) {
+      existing.addEventListener("load", () => res());
+      existing.addEventListener("error", () => rej(new Error("Impossible de charger " + src)));
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = src; s.dataset.gsi = "1"; s.async = true;
+    s.onload = res; s.onerror = () => rej(new Error("Impossible de charger " + src));
+    document.head.appendChild(s);
+  });
+}
+
+function getDriveToken() {
+  return new Promise((res, rej) => {
+    if (!window.google || !google.accounts || !google.accounts.oauth2)
+      return rej(new Error("Google Identity Services indisponible"));
+    const tc = google.accounts.oauth2.initTokenClient({
+      client_id: cfg.clientId,
+      scope: DRIVE_SCOPE,
+      callback: resp => {
+        if (resp.error) rej(new Error(resp.error_description || resp.error));
+        else res(resp.access_token);
+      },
+      error_callback: err => rej(new Error(err.message || err.type || "Connexion Google échouée")),
+    });
+    tc.requestAccessToken({ prompt: "" });
+  });
+}
+
+async function downloadDb(token) {
+  const headers = { Authorization: "Bearer " + token };
+  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.fileId)}?fields=name,modifiedTime`, { headers });
+  if (!metaRes.ok) throw new Error("Fichier Drive introuvable (ID invalide ou accès refusé) [" + metaRes.status + "]");
+  const meta = await metaRes.json();
+  const mediaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.fileId)}?alt=media`, { headers });
+  if (!mediaRes.ok) throw new Error("Téléchargement de database.db échoué [" + mediaRes.status + "]");
+  return { bytes: await mediaRes.arrayBuffer(), meta };
+}
+
+/* ===================== Cycle de vie ===================== */
+async function loadData(bytes, metaInfo) {
+  await initSql();
+  const parsed = parseDatabase(bytes);
+  parsed.meta = metaInfo;
+  DATA = parsed;
+  DATA.itemsCache = buildCreneauItems(DATA.creneaux);
+  if (!DATA.seasons.includes(currentSeason)) currentSeason = DATA.seasons.includes("2026-2027") ? "2026-2027" : (DATA.seasons[0] || "2026-2027");
+  filters.season = currentSeason;
+  DATA.filterCache = null;
+  computeFilterCache();
+  // Sélections par défaut (première fois) : tout coché sauf liste d'attente
+  for (const it of DATA.itemsCache)
+    if (it.kind === "group" && filters.groups[it.raw] === undefined)
+      filters.groups[it.raw] = !isWaiting(it.raw, it.label);
+  for (const t of Object.keys(DATA.filterCache.others))
+    if (filters.others["other:" + t] === undefined)
+      filters.others["other:" + t] = !isWaiting(t, t);
+  renderFilters();
+  saveFilters();
+  applyFilters();
+  showPage("members");
+}
+
+function computeFilterCache() {
+  const seasonMembers = DATA.members.filter(m => (m.season_name || "") === currentSeason);
+  const covered = new Set();
+  for (const c of DATA.creneaux) for (const t of c.tarifs) covered.add(normKey(t));
+  const others = {};
+  for (const m of seasonMembers) {
+    const k = normKey(m.tarif_name);
+    if (k && !covered.has(k)) others[m.tarif_name] = (others[m.tarif_name] || 0) + 1;
+  }
+  const tarifIndex = {};
+  for (const m of seasonMembers) {
+    const k = normKey(m.tarif_name);
+    if (k) tarifIndex[k] = (tarifIndex[k] || 0) + 1;
+  }
+  for (const it of DATA.itemsCache) {
+    if (it.kind !== "group") continue;
+    it.count = (it.tarifs || []).reduce((s, t) => s + (tarifIndex[normKey(t)] || 0), 0);
+  }
+  DATA.filterCache = { members: seasonMembers, others };
+}
+
+async function loadFromCache() {
+  const cached = await idbGet(CACHE_KEY);
+  if (!cached || !cached.bytes) return false;
+  await initSql();
+  await loadData(cached.bytes, cached);
+  $("#sync-info").textContent = "💾 Cache du " + fmtDate(cached.savedAt) +
+    (cached.driveModified ? " · Drive : " + fmtDate(cached.driveModified) : "");
+  return true;
+}
+
+async function refreshFromDrive() {
+  if (!cfg || !cfg.clientId || !cfg.fileId) { showPage("setup"); return; }
+  const btn = $("#refresh-btn"); btn.classList.add("spin");
+  $("#sync-info").textContent = "Connexion à Google Drive…";
+  try {
+    await loadScriptOnce("https://accounts.google.com/gsi/client");
+    const token = await getDriveToken();
+    const { bytes, meta } = await downloadDb(token);
+    const info = { bytes, fileId: cfg.fileId, driveModified: meta.modifiedTime, savedAt: new Date().toISOString() };
+    await idbSet(CACHE_KEY, info);
+    await initSql();
+    await loadData(bytes, info);
+    $("#sync-info").textContent = "☁️ Base Drive du " + fmtDate(meta.modifiedTime);
+    toast("✅ Base chargée depuis Google Drive (" + DATA.filterCache.members.length + " lignes, " + fmtDate(meta.modifiedTime) + ")");
+  } catch (e) {
+    console.error(e);
+    $("#sync-info").textContent = "⚠️ Connexion Google échouée";
+    toast("❌ " + (e.message || e));
+  } finally {
+    $("#refresh-btn").classList.remove("spin");
+  }
+}
+
+/* ===================== Init & événements ===================== */
+function wireEvents() {
+  document.querySelectorAll("nav button").forEach(b =>
+    b.addEventListener("click", () => showPage(b.dataset.page)));
+  $("#refresh-btn").addEventListener("click", refreshFromDrive);
+  $("#config-btn").addEventListener("click", () => {
+    $("#cfg-client-id").value = cfg ? cfg.clientId : "";
+    $("#cfg-file-id").value = cfg ? cfg.fileId : "";
+    showPage("setup");
+  });
+  $("#cfg-save").addEventListener("click", () => {
+    cfg = { clientId: $("#cfg-client-id").value.trim(), fileId: $("#cfg-file-id").value.trim() };
+    if (!cfg.clientId || !cfg.fileId) { toast("⚠️ Renseignez les deux identifiants."); return; }
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+    toast("💾 Configuration enregistrée");
+    refreshFromDrive();
+  });
+  $("#search").addEventListener("input", () => { saveFilters(); applyFilters(); });
+  $("#season-select").addEventListener("change", e => {
+    currentSeason = e.target.value; filters.season = currentSeason;
+    computeFilterCache(); renderFilters(); applyFilters();
+  });
+  $("#cren-all").addEventListener("click", () => { setAllCreneaux(true); });
+  $("#cren-none").addEventListener("click", () => setAllCreneaux(false));
+}
+function setAllCreneaux(on) {
+  for (const it of DATA.itemsCache)
+    if (it.kind === "group") filters.groups[it.raw] = on;
+  for (const t of Object.keys(DATA.filterCache.others)) filters.others["other:" + t] = on;
+  saveFilters(); renderFilters(); applyFilters();
+}
+
+(async function boot() {
+  $("#origin-hint").textContent = location.origin;
+  wireEvents();
+  $("#search").value = filters.search || "";
+  try { await initSql(); } catch (e) {
+    $("#sync-info").textContent = "⚠️ sql.js indisponible (hors ligne ?)";
+    toast("❌ Impossible de charger sql.js (connexion internet requise au premier lancement)");
+  }
+  const ok = await loadFromCache();
+  if (!cfg || !cfg.clientId || !cfg.fileId) {
+    $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
+    $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
+    showPage("setup");
+  } else if (!ok) {
+    // Pas de cache : proposer la première connexion (bouton 🔄, geste utilisateur requis)
+    $("#sync-info").textContent = "Prêt — appuyez sur 🔄 pour charger la base";
+  }
+})();
+</script>
+</body>
+</html>

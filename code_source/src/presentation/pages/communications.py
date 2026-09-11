@@ -750,7 +750,37 @@ class CommunicationsPage(QWidget):
         self.use_payer_email_cb.setChecked(False)
         self.use_payer_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
         dest_layout.addWidget(self.use_payer_email_cb)
-        
+
+        # Bouton de dédoublonnage : décoche les destinataires dont toutes les adresses
+        # e-mail (selon les cases cochées) sont déjà couvertes par un autre sélectionné.
+        dedup_row = QHBoxLayout()
+        self.btn_remove_duplicates = QPushButton("🧹 Supprimer les doublons de la sélection")
+        self.btn_remove_duplicates.setCursor(Qt.PointingHandCursor)
+        self.btn_remove_duplicates.setToolTip(
+            "Décoche les destinataires dont toutes les adresses e-mail sélectionnées "
+            "(principal, deuxième, payeur) sont déjà couvertes par un autre destinataire,\n"
+            "pour éviter d'envoyer plusieurs fois le même e-mail à la même adresse."
+        )
+        self.btn_remove_duplicates.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #B45309;
+                border: 1px solid #FDE68A;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #FFFBEB;
+                border-color: #FCD34D;
+            }
+        """)
+        self.btn_remove_duplicates.clicked.connect(self.remove_duplicate_recipients)
+        dedup_row.addWidget(self.btn_remove_duplicates)
+        dedup_row.addStretch()
+        dest_layout.addLayout(dedup_row)
+
         form_layout.addWidget(dest_group)
 
         # Bouton d'aperçu du code HTML + Bouton Envoi
@@ -1157,6 +1187,66 @@ class CommunicationsPage(QWidget):
             self.list_widget.item(i).setCheckState(Qt.Unchecked)
         self.list_widget.blockSignals(False)
         self.update_selection_count()
+
+    def _resolved_emails_for_member(self, member) -> list:
+        """Adresses e-mail valides d'un membre selon les cases « Choix des adresses »
+        cochées (principal / deuxième / payeur), sans doublon et insensibles à la casse."""
+        candidates = []
+        if self.use_primary_email_cb.isChecked() and member.primary_email:
+            candidates.append(str(member.primary_email).strip())
+        if self.use_secondary_email_cb.isChecked() and member.secondary_email:
+            candidates.append(str(member.secondary_email).strip())
+        if self.use_payer_email_cb.isChecked() and member.payer_email:
+            candidates.append(str(member.payer_email).strip())
+        emails = []
+        for em in candidates:
+            if em and "@" in em and em.lower() not in [x.lower() for x in emails]:
+                emails.append(em)
+        return emails
+
+    def remove_duplicate_recipients(self):
+        """Décoche les destinataires dont toutes les adresses e-mail (selon les cases
+        « Choix des adresses de destination ») sont déjà couvertes par un autre
+        destinataire déjà sélectionné, afin d'éviter les envois en double."""
+        seen = set()  # adresses e-mail normalisées (minuscules) déjà couvertes
+        removed = []
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() != Qt.Checked:
+                continue
+            member = item.data(Qt.UserRole)
+            emails = self._resolved_emails_for_member(member)
+            if not emails:
+                # Aucune adresse valide selon les critères : sera ignoré à l'envoi,
+                # on ne le compte donc ni comme doublon ni comme couverture.
+                continue
+            if all(em.lower() in seen for em in emails):
+                item.setCheckState(Qt.Unchecked)
+                removed.append(item.text())
+            else:
+                for em in emails:
+                    seen.add(em.lower())
+        self.list_widget.blockSignals(False)
+
+        if removed:
+            self.update_selection_count()
+            detail = "\n".join(f"• {name}" for name in removed[:15])
+            if len(removed) > 15:
+                detail += f"\n• … et {len(removed) - 15} autre(s)"
+            QMessageBox.information(
+                self,
+                "Doublons supprimés",
+                f"{len(removed)} destinataire(s) décoché(s) car toutes leurs adresses "
+                f"e-mail sélectionnées étaient déjà couvertes par un autre destinataire :\n\n{detail}"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Aucun doublon",
+                "Aucun doublon détecté : chaque destinataire sélectionné apporte "
+                "au moins une adresse e-mail unique."
+            )
 
     def update_selection_count(self):
         """Calcule et affiche le nombre de destinataires sélectionnés, alerte sur les

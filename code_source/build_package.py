@@ -23,14 +23,16 @@ if not os.path.exists(pyinstaller_path):
 
 # 1. Compilation via PyInstaller
 print("⚡ Étape 1 : Compilation de l'exécutable avec PyInstaller...")
+# NB : le fichier .env (identifiants Google) ne doit JAMAIS être embarqué dans
+# l'exécutable distribué. Les secrets vivent dans le keyring Windows de chaque
+# poste (cf. infrastructure/secret_store.py + gmail_auth_helper.py).
 cmd = [
     pyinstaller_path,
     "--onefile",
     "--windowed",
     "--name=ALJ_Escalade_Manager",
-    f"--icon=logo.ico",
+    "--icon=logo.ico",
     "--paths=src",
-    "--add-data=.env;.",
     "src/app.py"
 ]
 

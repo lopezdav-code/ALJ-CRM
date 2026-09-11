@@ -2,11 +2,12 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
     QFrame, QProgressBar, QTextEdit, QDialog, QMessageBox,
-    QListWidget, QListWidgetItem, QDateEdit, QCheckBox
+    QListWidget, QListWidgetItem, QDateEdit, QCheckBox, QApplication
 )
 from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QColor, QFont
 from presentation.workers import ExportWorker
-from paths import ROOT_DIR
+from paths import CODE_ROOT
 
 class ExportsPage(QWidget):
     """
@@ -79,12 +80,17 @@ class ExportsPage(QWidget):
         """)
         buttons_layout.addWidget(self.ffme_stats_lbl)
 
-        # 2. Fiches de présence
+        # 2. Fiches de présence (2 exports distincts, options préconfigurées)
         presence_layout = QHBoxLayout()
-        self.presence_btn = QPushButton("📝 Générer toutes les fiches de présence d'activité")
-        self.style_button(self.presence_btn, "#0EA5E9", "#0284C7")
-        self.presence_btn.clicked.connect(lambda: self.run_export("presence"))
-        presence_layout.addWidget(self.presence_btn)
+        self.presence_autonome_btn = QPushButton("🧗 Fiche présence autonome")
+        self.style_button(self.presence_autonome_btn, "#0EA5E9", "#0284C7")
+        self.presence_autonome_btn.clicked.connect(lambda: self.run_presence_export("autonome"))
+        presence_layout.addWidget(self.presence_autonome_btn)
+
+        self.presence_cours_btn = QPushButton("📚 Fiche présence des cours")
+        self.style_button(self.presence_cours_btn, "#6366F1", "#4F46E5")
+        self.presence_cours_btn.clicked.connect(lambda: self.run_presence_export("cours"))
+        presence_layout.addWidget(self.presence_cours_btn)
         presence_layout.addStretch()
         buttons_layout.addLayout(presence_layout)
 
@@ -97,52 +103,14 @@ class ExportsPage(QWidget):
         urgency_layout.addStretch()
         buttons_layout.addLayout(urgency_layout)
 
-        # 4. Remplissage global Cours.xlsx
-        cours_layout = QHBoxLayout()
-        self.cours_btn = QPushButton("📅 Remplir la grille globale de présence (Cours.xlsx)")
-        self.style_button(self.cours_btn, "#10B981", "#059669")
-        self.cours_btn.clicked.connect(lambda: self.run_export("cours"))
-        cours_layout.addWidget(self.cours_btn)
-
-        # Bouton d'ouverture du dossier de modèle
+        # 4. Ouverture du dossier de modèles
+        template_layout = QHBoxLayout()
         self.template_folder_btn = QPushButton("📂 Ouvrir dossier Modèles")
         self.style_secondary_button(self.template_folder_btn, "#475569", "#334155")
         self.template_folder_btn.clicked.connect(self.open_template_folder)
-        cours_layout.addWidget(self.template_folder_btn)
-
-        # Libellé pour le nom du modèle utilisé
-        self.template_name_lbl = QLabel("Modèle utilisé : <b>Cours - Template-Vide.xlsx</b>")
-        self.template_name_lbl.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 10px;")
-        cours_layout.addWidget(self.template_name_lbl)
-
-        cours_layout.addStretch()
-        buttons_layout.addLayout(cours_layout)
-
-        # Option de conversion en PDF (Nouveau !)
-        self.cours_pdf_checkbox = QCheckBox("📄 Convertir automatiquement en PDF (Format A3 Paysage pour l'impression)")
-        self.cours_pdf_checkbox.setChecked(True)
-        self.cours_pdf_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #475569;
-                font-size: 11px;
-                font-weight: bold;
-                margin-left: 10px;
-                margin-top: -4px;
-                margin-bottom: 8px;
-            }
-            QCheckBox::indicator {
-                border: 1px solid #CBD5E1;
-                border-radius: 3px;
-                background: #FFFFFF;
-                width: 14px;
-                height: 14px;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #10B981;
-                border-color: #059669;
-            }
-        """)
-        buttons_layout.addWidget(self.cours_pdf_checkbox)
+        template_layout.addWidget(self.template_folder_btn)
+        template_layout.addStretch()
+        buttons_layout.addLayout(template_layout)
 
         # 5. Export Anciens Adhérents non réinscrits (Nouveau !)
         anciens_layout = QHBoxLayout()
@@ -250,9 +218,9 @@ class ExportsPage(QWidget):
     def set_buttons_enabled(self, enabled: bool):
         """Active ou désactive l'ensemble des boutons d'exports pour prévenir des concurrences."""
         self.ffme_btn.setEnabled(enabled)
-        self.presence_btn.setEnabled(enabled)
+        self.presence_autonome_btn.setEnabled(enabled)
+        self.presence_cours_btn.setEnabled(enabled)
         self.urgency_btn.setEnabled(enabled)
-        self.cours_btn.setEnabled(enabled)
         self.template_folder_btn.setEnabled(enabled)
         self.anciens_btn.setEnabled(enabled)  # Nouveau !
         self.mycompet_btn.setEnabled(enabled)  # Nouveau !
@@ -325,7 +293,7 @@ class ExportsPage(QWidget):
     def open_template_folder(self):
         """Ouvre le dossier contenant les modèles de documents dans l'explorateur Windows."""
         import os
-        template_dir = os.path.join(ROOT_DIR, "doc", "template")
+        template_dir = os.path.join(CODE_ROOT, "doc", "template")
         if os.path.exists(template_dir):
             try:
                 os.startfile(template_dir)
@@ -333,6 +301,205 @@ class ExportsPage(QWidget):
                 self.log_area.append(f"❌ [ERREUR] Impossible d'ouvrir le dossier du template : {e}")
         else:
             self.log_area.append(f"❌ [ERREUR] Le dossier du template n'existe pas : {template_dir}")
+
+    def _load_presence_creneaux(self):
+        """Charge les groupes de créneaux depuis la table planning de la BDD.
+        Chaque créneau regroupe un ou plusieurs tarifs HelloAsso. Retourne une liste
+        de dicts {groupe, tarifs, slots} triée par nom de groupe."""
+        from infrastructure.sqlite_repository import SqliteRepository
+        SqliteRepository.setup_database()
+        planning = SqliteRepository.load_planning_data(log_debug=False)
+
+        creneaux = {}
+        order = []
+        for item in planning:
+            g_name = str(item.get("groupe") or "").strip()
+            if not g_name:
+                continue
+            if g_name not in creneaux:
+                creneaux[g_name] = {"tarifs": [], "slots": []}
+                order.append(g_name)
+            for t in item.get("helloasso_tarifs") or []:
+                t_str = str(t).strip()
+                if t_str and t_str not in creneaux[g_name]["tarifs"]:
+                    creneaux[g_name]["tarifs"].append(t_str)
+            creneaux[g_name]["slots"].append((
+                str(item.get("jour") or "").strip(),
+                str(item.get("horaires") or "").strip()
+            ))
+
+        return [
+            {"groupe": g, "tarifs": creneaux[g]["tarifs"], "slots": creneaux[g]["slots"]}
+            for g in sorted(order)
+        ]
+
+    def _build_cours_hierarchy(self, creneaux):
+        """Organise les créneaux de cours en rubriques hiérarchiques pour le dialogue :
+        Collège, Enfants (sous-rubriques par tranche d'âge 2016-2018 / 2019-2020),
+        Perfectionnement, Compétition. Les créneaux hors rubrique restent en liste plate.
+        Les libellés affichés sont raccourcis (le nom de la rubrique, redondant, est retiré).
+        Retourne une liste de (kind, libellé, nom_brut) où kind ∈ {'section', 'sub-section', 'group'}."""
+        import re
+        from domain.utils import normalize_string
+
+        def accent_class_pattern(word):
+            """Motif regex insensible aux accents (é/è/ê, à, î...) pour découper les libellés."""
+            tr = str.maketrans({
+                "e": "[eèéêë]", "a": "[aàâä]", "i": "[iîï]", "o": "[oôö]",
+                "u": "[uùûü]", "c": "[cç]", "y": "[yÿ]",
+            })
+            return word.translate(tr)
+
+        def shorten(name, keyword, drop_patterns=()):
+            """Retire du libellé le nom de rubrique (et autres motifs) devenus redondants."""
+            parts = re.split(accent_class_pattern(keyword), name, flags=re.IGNORECASE)
+            rest = max(parts, key=len) if len(parts) > 1 else name
+            for dp in drop_patterns:
+                rest = re.sub(dp, "", rest, flags=re.IGNORECASE)
+            rest = re.sub(r"\s{2,}", " ", rest).strip(" \t-–—")
+            if rest.startswith("(") and rest.endswith(")"):
+                rest = rest[1:-1].strip()
+            return rest if rest else name
+
+        buckets = {"Collège": [], "Enfants": {}, "Perfectionnement": [], "Compétition": []}
+        others = []
+        for c in creneaux:
+            name = c["groupe"]
+            n = normalize_string(name)
+            if "competition" in n:
+                buckets["Compétition"].append((name, shorten(name, "competition")))
+            elif "college" in n:
+                buckets["Collège"].append((name, shorten(name, "college")))
+            elif "enfants" in n:
+                m = re.search(r"20\d\d\s*-\s*20\d\d", n)
+                sub = m.group(0).replace(" ", "") if m else "Autres tranches"
+                short = shorten(name, "enfants", (r"20\d\d\s*-\s*20\d\d",))
+                buckets["Enfants"].setdefault(sub, []).append((name, short))
+            elif "perfectionnement" in n:
+                buckets["Perfectionnement"].append((name, shorten(name, "perfectionnement")))
+            else:
+                others.append((name, name))
+
+        items = []
+        # Les créneaux hors rubrique (ex : Loisir - Adultes débutants, Loisir - Lycée)
+        # sont listés en premier, sans titre de rubrique (libellé complet conservé).
+        items.extend(("group", short, name) for name, short in sorted(others))
+        for section in ("Collège", "Enfants", "Perfectionnement", "Compétition"):
+            entries = buckets.get(section)
+            if not entries:
+                continue
+            items.append(("section", section))
+            if isinstance(entries, dict):
+                for sub in sorted(entries):
+                    items.append(("sub-section", sub))
+                    items.extend(("group", short, name) for name, short in sorted(entries[sub]))
+            else:
+                items.extend(("group", short, name) for name, short in sorted(entries))
+        return items
+
+    def run_presence_export(self, variant: str):
+        """Lance les fiches de présence (variante 'autonome' ou 'cours') à partir des
+        groupes de créneaux du planning (un créneau peut regrouper plusieurs tarifs).
+        Les options techniques sont préconfigurées selon la variante : seul le choix
+        des groupes (pour les cours) et la période restent à la charge de l'utilisateur.
+        Le code de génération (ExportWorker / presence_sheet_generator) reste identique."""
+        try:
+            creneaux = self._load_presence_creneaux()
+            if not creneaux:
+                QMessageBox.warning(self, "Aucun groupe", "Aucun groupe de créneaux trouvé dans le planning (BDD).")
+                return
+
+            from domain.utils import normalize_string
+
+            def is_autonome(c):
+                if "autonome" in normalize_string(c["groupe"]):
+                    return True
+                return any("autonome" in normalize_string(t) for t in c["tarifs"])
+
+            tooltips = {}
+            for c in creneaux:
+                slots_txt = " · ".join(f"{j} {h}".strip() for j, h in c["slots"] if j or h)
+                tarifs_txt = ", ".join(c["tarifs"]) or "Aucun tarif HelloAsso configuré ⚠️"
+                tooltip = c["groupe"]
+                if slots_txt:
+                    tooltip += f"\nCréneau(x) : {slots_txt}"
+                tooltips[c["groupe"]] = f"{tooltip}\nTarifs HelloAsso : {tarifs_txt}"
+
+            if variant == "autonome":
+                # Fusionne les créneaux autonomes + jeunes avec autorisation parentale
+                selected_creneaux = [c for c in creneaux if is_autonome(c)]
+                if not selected_creneaux:
+                    QMessageBox.warning(
+                        self, "Aucun groupe autonome",
+                        "Aucun créneau autonome n'a été trouvé dans le planning de la BDD."
+                    )
+                    return
+                selected_groups = [c["groupe"] for c in selected_creneaux]
+                dialog = PresenceSelectionDialog(
+                    selected_groups,
+                    title="🧗 Fiche de Présence Autonome",
+                    description=(
+                        "Les créneaux autonomes ci-dessous seront fusionnés en UN SEUL tableau, "
+                        "en ajoutant les jeunes avec autorisation parentale (Autonomes / Famille) "
+                        "répartis dans les autres groupes."
+                    ),
+                    fixed_selection=True,
+                    tooltips=tooltips,
+                    parent=self,
+                )
+                preset = {"merge_groups": True, "auth_only": True, "hide_badge_cols": False, "same_sheet": False}
+            else:
+                # Export des cours : sélection manuelle, badges masqués, tableaux empilés dans la même feuille
+                cours_creneaux = [c for c in creneaux if not is_autonome(c)]
+                if not cours_creneaux:
+                    QMessageBox.warning(self, "Aucun cours", "Aucun créneau de cours trouvé dans le planning (BDD).")
+                    return
+                selected_groups = [c["groupe"] for c in cours_creneaux]
+                dialog = PresenceSelectionDialog(
+                    selected_groups,
+                    title="📚 Fiches de Présence des Cours",
+                    description=(
+                        "Les colonnes Badge rouge / Bloc / Passeport Orange seront masquées et tous les "
+                        "tableaux seront générés dans la même feuille Excel (empilés, espace QRCode réservé)."
+                    ),
+                    fixed_selection=False,
+                    tooltips=tooltips,
+                    group_items=self._build_cours_hierarchy(cours_creneaux),
+                    parent=self,
+                )
+                preset = {"merge_groups": False, "auth_only": False, "hide_badge_cols": True, "same_sheet": True}
+
+            if dialog.exec() != QDialog.Accepted:
+                return
+
+            self.set_buttons_enabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.log_area.clear()
+
+            self.log_area.append(f"ℹ️ [INFO] Lancement du compilateur d'export 'PRESENCE ({variant.upper()})'...")
+
+            # Mapping créneau -> tarifs HelloAsso pour les groupes sélectionnés uniquement
+            group_tarifs_map = {
+                c["groupe"]: c["tarifs"] for c in creneaux if c["groupe"] in dialog.selected_groups
+            }
+
+            self.worker = ExportWorker(
+                export_type="presence",
+                selected_groups=dialog.selected_groups,
+                start_date_str=dialog.start_date_str,
+                end_date_str=dialog.end_date_str,
+                merge_groups=preset["merge_groups"],
+                auth_only=preset["auth_only"],
+                hide_badge_cols=preset["hide_badge_cols"],
+                same_sheet=preset["same_sheet"],
+                group_tarifs_map=group_tarifs_map
+            )
+            self.worker.progress.connect(self.on_progress)
+            self.worker.finished.connect(self.on_finished)
+            self.worker.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'initialisation", f"Impossible de préparer l'export des fiches de présence : {e}")
 
     def run_export(self, export_type: str):
         """Déclenche la tâche d'export sélectionnée en tâche de fond (asynchrone)."""
@@ -343,36 +510,6 @@ class ExportsPage(QWidget):
         auth_only = False
         hide_badge_cols = False
         same_sheet = False
-        cours_pdf = False
-        
-        if export_type == "presence":
-            # Charger tous les groupes/tarifs uniques depuis SQLite pour les faire cocher à l'utilisateur
-            try:
-                from infrastructure.sqlite_repository import SqliteRepository
-                raw_data = SqliteRepository.load_direct_data(season_filter="2026-2027")
-                unique_groups = list(set([str(p.get("tarif_name") or "").strip() for p in raw_data if p.get("tarif_name")]))
-                if not unique_groups:
-                    QMessageBox.warning(self, "Aucun groupe", "Aucun groupe ou tarif d'adhérents trouvé en base de données.")
-                    return
-                    
-                # Ouvrir le dialogue modal de sélection
-                dialog = GroupSelectionDialog(unique_groups, self)
-                if dialog.exec() != QDialog.Accepted:
-                    # L'utilisateur a cliqué sur Annuler, on arrête proprement
-                    return
-                selected_groups = dialog.selected_groups
-                start_date_str = dialog.start_date_str
-                end_date_str = dialog.end_date_str
-                merge_groups = dialog.merge_groups
-                auth_only = dialog.auth_only  # Nouveau !
-                hide_badge_cols = dialog.hide_badge_cols  # Nouveau !
-                same_sheet = dialog.same_sheet  # Nouveau !
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur d'initialisation", f"Impossible d'analyser les groupes pour l'export : {e}")
-                return
-                
-        elif export_type == "cours":
-            cours_pdf = self.cours_pdf_checkbox.isChecked()  # Nouveau !
 
         self.set_buttons_enabled(False)
         self.progress_bar.setValue(0)
@@ -388,7 +525,6 @@ class ExportsPage(QWidget):
             end_date_str=end_date_str,
             merge_groups=merge_groups,
             auth_only=auth_only,
-            cours_pdf=cours_pdf,  # Nouveau !
             hide_badge_cols=hide_badge_cols,  # Nouveau !
             same_sheet=same_sheet  # Nouveau !
         )
@@ -534,23 +670,27 @@ class ExportsPage(QWidget):
             self.log_area.append(f"❌ [ERREUR] Impossible d'ouvrir le portail FFME : {err}")
 
 
-class GroupSelectionDialog(QDialog):
-    """Dialogue modal permettant de cocher individuellement les cours à exporter (Lot 5)."""
-    def __init__(self, groups, parent=None):
+class PresenceSelectionDialog(QDialog):
+    """Dialogue modal des fiches de présence : sélection des cours (export « cours »)
+    ou liste fixe en lecture seule (export « autonome »), plus la période de présence.
+    Les options techniques (fusion, autorisation, badge, même feuille) sont préconfigurées
+    par type d'export côté ExportsPage et ne sont plus exposées à l'utilisateur."""
+    def __init__(self, groups, title, description, fixed_selection=False, tooltips=None, group_items=None, parent=None):
         super().__init__(parent)
         self.groups = sorted(groups)
+        self.fixed_selection = fixed_selection
+        self.tooltips = tooltips or {}
+        # Structure hiérarchique optionnelle : liste de (kind, label) où
+        # kind ∈ {'section', 'sub-section', 'group'}. Sinon liste plate.
+        self.group_items = group_items if group_items is not None else [("group", g) for g in self.groups]
         self.selected_groups = []
         self.start_date_str = None
         self.end_date_str = None
-        self.merge_groups = False  # Nouveau !
-        self.auth_only = False     # Nouveau !
-        self.hide_badge_cols = False  # Nouveau !
-        self.same_sheet = False    # Nouveau !
-        self.init_ui()
+        self.init_ui(title, description)
 
-    def init_ui(self):
-        self.setWindowTitle("🎯 Sélection des Fiches de Présence")
-        self.setMinimumSize(420, 580)
+    def init_ui(self, title, description):
+        self.setWindowTitle(title)
+        self.setMinimumWidth(520)
         self.setStyleSheet("""
             QDialog {
                 background-color: #F8FAFC;
@@ -620,55 +760,110 @@ class GroupSelectionDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        lbl = QLabel("Sélectionnez les cours / groupes d'activités à générer :")
+        # Récapitulatif des options préconfigurées pour cet export
+        desc_lbl = QLabel(description)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: #475569; font-weight: 500; font-size: 11px;")
+        layout.addWidget(desc_lbl)
+
+        lbl = QLabel(
+            "Groupes inclus (sélection figée) :"
+            if self.fixed_selection else
+            "Sélectionnez les cours / groupes d'activités à générer :"
+        )
         layout.addWidget(lbl)
 
-        # Liste de cases à cocher
+        # Liste des groupes : cases à cocher (export « cours ») ou lecture seule (export « autonome »)
+        # Les rubriques (sections / sous-sections) sont des lignes de titre non sélectionnables.
         self.list_widget = QListWidget()
-        for g in self.groups:
-            item = QListWidgetItem(g)
-            item.setCheckState(Qt.Checked) # Coché par défaut !
+        section_font = QFont()
+        section_font.setBold(True)
+        sub_font = QFont()
+        sub_font.setBold(True)
+        sub_font.setItalic(True)
+
+        indent = 0
+        for entry in self.group_items:
+            kind, label = entry[0], entry[1]
+            raw_name = entry[2] if len(entry) > 2 else label  # Nom brut du groupe (sans indentation)
+            if kind == "section":
+                indent = 1
+                item = QListWidgetItem(f"📁 {label}")
+                item.setFlags(Qt.NoItemFlags)
+                item.setFont(section_font)
+                item.setForeground(QColor("#1E3A8A"))
+                item.setBackground(QColor("#DBEAFE"))
+            elif kind == "sub-section":
+                indent = 2
+                item = QListWidgetItem("\u00A0\u00A0\u00A0📂 " + label)
+                item.setFlags(Qt.NoItemFlags)
+                item.setFont(sub_font)
+                item.setForeground(QColor("#1D4ED8"))
+                item.setBackground(QColor("#EFF6FF"))
+            else:
+                item = QListWidgetItem("\u00A0" * (4 * indent) + label)
+                if self.fixed_selection:
+                    item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked)
+                else:
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked) # Coché par défaut !
+                if raw_name in self.tooltips:
+                    item.setToolTip(self.tooltips[raw_name])
+            item.setData(Qt.UserRole, kind)
+            item.setData(Qt.UserRole + 1, raw_name)  # Nom brut envoyé au générateur
             self.list_widget.addItem(item)
         layout.addWidget(self.list_widget)
 
-        # Boutons de sélection de masse
-        sel_layout = QHBoxLayout()
-        sel_layout.setSpacing(10)
+        # Dimensionner la fenêtre pour afficher la liste complète sans défilement
+        screen = QApplication.primaryScreen().availableGeometry()
+        rows = self.list_widget.count()
+        row_h = self.list_widget.sizeHintForRow(0)
+        if row_h <= 0:
+            row_h = 30
+        list_h = min(row_h * rows + 16, int(screen.height() * 0.55))
+        self.list_widget.setMinimumHeight(list_h)
+        self.setMinimumHeight(min(400 + list_h, screen.height() - 40))
 
-        btn_select_all = QPushButton("Tout Sélectionner")
-        btn_select_all.setCursor(Qt.PointingHandCursor)
-        btn_select_all.setStyleSheet("""
-            QPushButton {
-                background-color: #F1F5F9;
-                color: #475569;
-                border: 1px solid #CBD5E1;
-            }
-            QPushButton:hover {
-                background-color: #E2E8F0;
-            }
-        """)
-        btn_select_all.clicked.connect(self.select_all)
-        sel_layout.addWidget(btn_select_all)
+        # Boutons de sélection de masse (uniquement pour la sélection des cours)
+        if not self.fixed_selection:
+            sel_layout = QHBoxLayout()
+            sel_layout.setSpacing(10)
 
-        btn_deselect_all = QPushButton("Tout Décocher")
-        btn_deselect_all.setCursor(Qt.PointingHandCursor)
-        btn_deselect_all.setStyleSheet("""
-            QPushButton {
-                background-color: #F1F5F9;
-                color: #475569;
-                border: 1px solid #CBD5E1;
-            }
-            QPushButton:hover {
-                background-color: #E2E8F0;
-            }
-        """)
-        btn_deselect_all.clicked.connect(self.deselect_all)
-        sel_layout.addWidget(btn_deselect_all)
+            btn_select_all = QPushButton("Tout Sélectionner")
+            btn_select_all.setCursor(Qt.PointingHandCursor)
+            btn_select_all.setStyleSheet("""
+                QPushButton {
+                    background-color: #F1F5F9;
+                    color: #475569;
+                    border: 1px solid #CBD5E1;
+                }
+                QPushButton:hover {
+                    background-color: #E2E8F0;
+                }
+            """)
+            btn_select_all.clicked.connect(self.select_all)
+            sel_layout.addWidget(btn_select_all)
 
-        layout.addLayout(sel_layout)
+            btn_deselect_all = QPushButton("Tout Décocher")
+            btn_deselect_all.setCursor(Qt.PointingHandCursor)
+            btn_deselect_all.setStyleSheet("""
+                QPushButton {
+                    background-color: #F1F5F9;
+                    color: #475569;
+                    border: 1px solid #CBD5E1;
+                }
+                QPushButton:hover {
+                    background-color: #E2E8F0;
+                }
+            """)
+            btn_deselect_all.clicked.connect(self.deselect_all)
+            sel_layout.addWidget(btn_deselect_all)
 
-        # 📅 Section Période de Présence à Générer (Optionnelle)
-        date_title = QLabel("📅 Période de Présence (Optionnelle) :")
+            layout.addLayout(sel_layout)
+
+        # 📅 Section Période de Présence à Générer
+        date_title = QLabel("📅 Période de Présence :")
         layout.addWidget(date_title)
 
         date_group = QFrame()
@@ -722,24 +917,6 @@ class GroupSelectionDialog(QDialog):
         date_layout.addWidget(self.end_date_edit)
         layout.addWidget(date_group)
 
-        # 🔄 Cases à cocher options de génération (Nouveau !)
-        options_layout = QVBoxLayout()
-        options_layout.setSpacing(6)
-        
-        self.merge_checkbox = QCheckBox("🔄 Fusionner tous les groupes cochés sur une seule feuille")
-        options_layout.addWidget(self.merge_checkbox)
-        
-        self.auth_checkbox = QCheckBox("➕ Ajouter les jeunes avec autorisation parentale (Autonomes / Famille) répartis dans les autres groupes")
-        options_layout.addWidget(self.auth_checkbox)
-
-        self.hide_badge_checkbox = QCheckBox("🖨️ Masquer les colonnes Badge rouge / Bloc / Passeport Orange (gagne de l'espace)")
-        options_layout.addWidget(self.hide_badge_checkbox)
-
-        self.same_sheet_checkbox = QCheckBox("📋 Générer tous les tableaux dans la même feuille Excel (empilés un sous l'autre, espace QRCode réservé)")
-        options_layout.addWidget(self.same_sheet_checkbox)
-        
-        layout.addLayout(options_layout)
-
         # Boutons OK / Annuler
         ok_layout = QHBoxLayout()
         ok_layout.setSpacing(10)
@@ -779,28 +956,28 @@ class GroupSelectionDialog(QDialog):
 
     def select_all(self):
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(Qt.Checked)
+            item = self.list_widget.item(i)
+            if item.data(Qt.UserRole) == "group":
+                item.setCheckState(Qt.Checked)
 
     def deselect_all(self):
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(Qt.Unchecked)
+            item = self.list_widget.item(i)
+            if item.data(Qt.UserRole) == "group":
+                item.setCheckState(Qt.Unchecked)
 
     def accept_selection(self):
         self.selected_groups = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            if item.checkState() == Qt.Checked:
-                self.selected_groups.append(item.text())
+            if item.data(Qt.UserRole) == "group" and item.checkState() == Qt.Checked:
+                self.selected_groups.append(item.data(Qt.UserRole + 1))
                 
         if not self.selected_groups:
             QMessageBox.warning(self, "Aucune sélection", "Veuillez cocher au moins un cours pour lancer l'export.")
             return
             
-        # Récupérer et formater les dates sélectionnées et l'état de fusion (Nouveau !)
-        self.merge_groups = self.merge_checkbox.isChecked()
-        self.auth_only = self.auth_checkbox.isChecked()  # Nouveau !
-        self.hide_badge_cols = self.hide_badge_checkbox.isChecked()
-        self.same_sheet = self.same_sheet_checkbox.isChecked()  # Nouveau !
+        # Récupérer et formater les dates sélectionnées
         self.start_date_str = self.start_date_edit.date().toString("dd/MM/yyyy")
         self.end_date_str = self.end_date_edit.date().toString("dd/MM/yyyy")
         self.accept()

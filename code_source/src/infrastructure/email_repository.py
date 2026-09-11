@@ -8,7 +8,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from paths import CODE_ROOT
+from paths import DATA_ROOT
 from infrastructure.secret_store import SecretStore
 
 class EmailRepository:
@@ -16,7 +16,8 @@ class EmailRepository:
     Service gérant la transmission sécurisée des courriels et l'audit d'envoi.
     """
 
-    AUDIT_FILE_PATH = os.path.join(CODE_ROOT, "email_audit.log")
+    # Journal d'audit dans data/ : persistant, survit aux mises à jour de l'application
+    AUDIT_FILE_PATH = os.path.join(DATA_ROOT, "email_audit.log")
 
     @classmethod
     def log_audit(cls, to_email: str, subject: str, status: str, error_message: str = "") -> None:

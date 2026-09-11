@@ -422,7 +422,7 @@ class ExportWorker(QThread):
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, str, str) # (succès, message_résultat, chemin_fichier)
 
-    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, same_sheet: bool = False, parent=None):
+    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, same_sheet: bool = False, group_tarifs_map: dict = None, parent=None):
         super().__init__(parent)
         self.export_type = export_type
         self.selected_groups = selected_groups
@@ -433,6 +433,7 @@ class ExportWorker(QThread):
         self.cours_pdf = cours_pdf
         self.hide_badge_cols = hide_badge_cols
         self.same_sheet = same_sheet
+        self.group_tarifs_map = group_tarifs_map or {}
 
     def convert_excel_to_pdf(self, excel_path: str, pdf_path: str) -> bool:
         """
@@ -540,7 +541,8 @@ class ExportWorker(QThread):
                     merge_groups=self.merge_groups,
                     auth_only=self.auth_only,
                     hide_badge_cols=self.hide_badge_cols,
-                    same_sheet=self.same_sheet
+                    same_sheet=self.same_sheet,
+                    group_tarifs_map=self.group_tarifs_map
                 )
                 if success:
                     dest_dir = os.path.join(ROOT_DIR, "exports", "fiches_presence")
@@ -986,16 +988,20 @@ class UploadDriveFileWorker(QThread):
 class SyncGmailContactsWorker(QThread):
     """
     Worker asynchrone pour créer et synchroniser plusieurs groupes de contacts de façon individuelle dans Google Contacts.
+    Chaque élément de `selected_tariffs` est soit un groupe virtuel (Adhérent, Compétition, Payeur),
+    soit un groupe de créneau du planning. Dans ce dernier cas, `group_tarifs_map` fournit
+    la liste des tarifs HelloAsso rattachés au créneau (un créneau peut regrouper plusieurs tarifs).
     """
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, dict) # (succès, statistiques)
 
-    def __init__(self, selected_tariffs: list, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, parent=None):
+    def __init__(self, selected_tariffs: list, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, group_tarifs_map: dict = None, parent=None):
         super().__init__(parent)
         self.selected_tariffs = selected_tariffs
         self.use_primary_email = use_primary_email
         self.use_secondary_email = use_secondary_email
         self.use_payer_email = use_payer_email
+        self.group_tarifs_map = group_tarifs_map or {}
 
     def run(self):
         try:
@@ -1032,11 +1038,15 @@ class SyncGmailContactsWorker(QThread):
                 
                 selected_clean = tariff.strip().lower()
                 
-                # Fetch members for this specific tariff
+                # Fetch members for this specific group
+                mapped_tarifs = self.group_tarifs_map.get(tariff)
                 if selected_clean in ("adhérent", "payeur"):
                     group_members = all_members
                 elif selected_clean == "compétition":
                     group_members = [m for m in all_members if "compétition" in str(m.get("tarif_name") or "").strip().lower()]
+                elif mapped_tarifs:
+                    target_set = {str(t).strip().lower() for t in mapped_tarifs}
+                    group_members = [m for m in all_members if str(m.get("tarif_name") or "").strip().lower() in target_set]
                 else:
                     group_members = [m for m in all_members if str(m.get("tarif_name") or "").strip().lower() == selected_clean]
                 

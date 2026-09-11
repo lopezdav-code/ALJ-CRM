@@ -86,11 +86,16 @@ def extract_birth_years(text):
 
     Gère les formulations HelloAsso : « nés en 2011, 2012, 2013, 2014 »,
     « nés entre 2001 et 2008 », « enfants 2016-2018 »...
+
+    Les années >= à l'année de début de saison sont ignorées : ce sont des
+    libellés de saison (ex : « déjà licenciés FFME pour 2026-2027 »), pas des
+    années de naissance (un adhérent ne peut pas être né pendant la saison en cours).
     """
     if not text:
         return []
-    years = sorted({int(m.group(0)) for m in _YEAR_RE.finditer(str(text))})
-    return years
+    years = {int(m.group(0)) for m in _YEAR_RE.finditer(str(text))}
+    season_start_year = get_season_start_date().year
+    return sorted(y for y in years if y < season_start_year)
 
 
 def _parse_iso_or_none(val):

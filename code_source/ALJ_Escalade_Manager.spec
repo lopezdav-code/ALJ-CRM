@@ -5,7 +5,8 @@ a = Analysis(
     ['src/app.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('.env', '.')],
+    # NB : jamais de .env ici (identifiants Google) — secrets en keyring Windows uniquement
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

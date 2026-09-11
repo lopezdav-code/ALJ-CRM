@@ -83,22 +83,22 @@ class TestPresentationLot5(unittest.TestCase):
         from unittest.mock import patch
         from PySide6.QtWidgets import QApplication
         from presentation.pages.exports import ExportsPage
-        from paths import ROOT_DIR
+        from paths import CODE_ROOT
         
         app = QApplication.instance() or QApplication([])
         page = ExportsPage()
         
         self.assertIsNotNone(page.template_folder_btn)
-        self.assertIsNotNone(page.template_name_lbl)
-        self.assertEqual(page.template_name_lbl.text(), "Modèle utilisé : <b>Cours - Template-Vide.xlsx</b>")
+        self.assertFalse(hasattr(page, "cours_btn"), "Le bouton 'Remplir la grille globale de présence' doit être supprimé.")
+        self.assertFalse(hasattr(page, "cours_pdf_checkbox"), "La case PDF Cours.xlsx doit être supprimée avec l'export Cours.")
         
         # Mock de os.startfile et os.path.exists
         with patch("os.startfile") as mock_startfile, \
              patch("os.path.exists", return_value=True) as mock_exists:
-             
+            
             page.open_template_folder()
-            mock_exists.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
-            mock_startfile.assert_called_once_with(os.path.join(ROOT_DIR, "doc", "template"))
+            mock_exists.assert_called_once_with(os.path.join(CODE_ROOT, "doc", "template"))
+            mock_startfile.assert_called_once_with(os.path.join(CODE_ROOT, "doc", "template"))
 
 
 class TestSyncDialogSize(unittest.TestCase):

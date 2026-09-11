@@ -62,7 +62,7 @@ class MemberTableModel(QAbstractTableModel):
         if cache_key not in self._warning_cache:
             self._ensure_planning()
             try:
-                from domain.age_rules import check_age_conflict, find_planning_item_for_tarif
+                from domain.age_rules import check_age_conflict
                 planning_item = self._tarif_to_item.get(cache_key[0].lower())
                 self._warning_cache[cache_key] = check_age_conflict(
                     member.birth_date, member.tarif_name, planning_item

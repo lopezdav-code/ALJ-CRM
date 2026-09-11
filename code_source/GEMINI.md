@@ -157,7 +157,7 @@ Vous pouvez ensuite y accéder à l'adresse `http://127.0.0.1:8000/docs` pour co
 
 ## 🗄️ Base de Données — Schéma v2 (users / orders / purchases / purchase_options)
 
-Depuis la version 2.0.0, la base `database.db` (racine du projet) est en **schéma v2 natif** :
+Depuis la version 2.0.0, la base `database.db` (cache local dans `data/`, migrée automatiquement depuis la racine du projet) est en **schéma v2 natif** :
 
 - **`users`** : identité stable inter-saisons (clé unique : nom + prénom normalisés + date de naissance ISO).
 - **`orders`** : commandes HelloAsso (clé naturelle `order_ref`) — payeur (`payer_*`), moyen de paiement, code promo.

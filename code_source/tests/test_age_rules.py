@@ -82,7 +82,12 @@ class TestParsingUtils(unittest.TestCase):
         )
         self.assertEqual(extract_birth_years("Cours Adultes débutants"), [])
         # Les horaires ne doivent pas être capturés comme des années
-        self.assertEqual(extract_birth_years("cours 18h30 de 2026"), [2026])
+        self.assertEqual(extract_birth_years("cours 18h30 de 2026"), [])
+        # Les libellés de saison (année >= début de saison) ne sont pas des années de naissance
+        self.assertEqual(
+            extract_birth_years("Adultes autonomes déjà licenciés FFME pour 2026-2027 dans un autre club"),
+            [],
+        )
 
     def test_bounds_from_tarif_name(self):
         bmin, bmax = bounds_from_tarif_name("Compétition U15 U17 - jeunes nés en 2011, 2012, 2013, 2014")

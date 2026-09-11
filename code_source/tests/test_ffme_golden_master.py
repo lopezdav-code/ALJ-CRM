@@ -13,8 +13,7 @@ _src_dir = os.path.join(os.path.dirname(_test_dir), "src") if os.path.basename(_
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-# Racine du projet (parent de code_source/)
-ROOT_PROJET = os.path.dirname(os.path.dirname(_test_dir))
+# Fixture de référence (données personnelles : ignorée par git, poste local uniquement)
 REFERENCE = os.path.join(_test_dir, "fixtures", "import_ffme_reference.csv")
 
 
@@ -40,9 +39,10 @@ class TestFFMEGoldenMaster(unittest.TestCase):
     def test_export_ffme_identique_reference(self):
         from infrastructure.sqlite_repository import SqliteRepository
         from create_excel import generate_ffme_csv
+        from paths import DATA_ROOT
 
-        db_live = os.path.join(ROOT_PROJET, "database.db")
-        self.assertTrue(os.path.exists(db_live), "database.db introuvable à la racine du projet")
+        db_live = os.path.join(DATA_ROOT, "database.db")
+        self.assertTrue(os.path.exists(db_live), "database.db introuvable dans data/ (cache local)")
 
         tmpdir = tempfile.mkdtemp(prefix="alj_golden_test_")
         try:

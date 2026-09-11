@@ -3,7 +3,7 @@ import sqlite3
 import datetime
 import pandas as pd
 import json
-from paths import CODE_ROOT, ROOT_DIR
+from paths import CODE_ROOT, ROOT_DIR, DATA_ROOT, LEGACY_DB_PATH
 from domain.constants import CORRECTIVE_MAP
 from infrastructure import schema_v2
 
@@ -35,7 +35,8 @@ class SqliteRepository:
     """
     Gère la persistance locale ultra-légère dans une base de données SQLite des adhérents.
     """
-    _db_path = os.path.join(ROOT_DIR, "database.db")
+    _db_path = os.path.join(DATA_ROOT, "database.db")
+    _db_path_overridden = False  # True dès que set_db_path() est appelé (tests, snapshot)
     _database_setup_done = False
     _startup_db_hash = None
 
@@ -46,8 +47,28 @@ class SqliteRepository:
     @classmethod
     def set_db_path(cls, path: str):
         cls._db_path = path
+        cls._db_path_overridden = True
         cls._database_setup_done = False
         cls._startup_db_hash = None
+
+    @classmethod
+    def _migrate_legacy_db_if_needed(cls):
+        """Premier démarrage après le déplacement du cache SQLite : si la base n'existe
+        pas encore dans data/ mais qu'elle est présente à l'ancien emplacement (racine
+        du projet), la copier (avec ses fichiers WAL) pour ne perdre aucune donnée.
+        Ignorée quand un chemin personnalisé est actif (tests, snapshots)."""
+        if cls._db_path_overridden or os.path.exists(cls._db_path) or not os.path.exists(LEGACY_DB_PATH):
+            return
+        try:
+            os.makedirs(os.path.dirname(cls._db_path), exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                src = LEGACY_DB_PATH + suffix
+                if os.path.exists(src):
+                    import shutil
+                    shutil.copy2(src, cls._db_path + suffix)
+            print(f"📦 [SQLITE] Cache local migré automatiquement : {LEGACY_DB_PATH} -> {cls._db_path}")
+        except Exception as me:
+            print(f"⚠️ [SQLITE] Échec de la migration du cache local depuis {LEGACY_DB_PATH} : {me}")
 
     @classmethod
     def get_file_hash(cls) -> str:
@@ -79,6 +100,7 @@ class SqliteRepository:
         """Initialise la base de données et crée les tables requises."""
         if not force and cls._database_setup_done:
             return
+        cls._migrate_legacy_db_if_needed()
         print(f"🔧 [SQLITE] Initialisation de la BDD à l'emplacement : {cls._db_path}")
         conn = cls.get_connection()
         cursor = conn.cursor()

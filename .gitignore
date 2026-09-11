@@ -6,6 +6,7 @@ client_secret_*.json
 *.db
 *.db-wal
 *.db-shm
+data/
 import/
 exports/
 archive/
@@ -33,6 +34,7 @@ code_source/tests/fixtures/
 # ===== Build / Packaging =====
 build/
 dist/
+dist_release/
 *.spec.bak
 
 # ===== Système & raccourcis locaux =====

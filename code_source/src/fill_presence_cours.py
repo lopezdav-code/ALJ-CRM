@@ -6,10 +6,10 @@ import pandas as pd
 import openpyxl
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 
-from paths import ROOT_DIR
+from paths import ROOT_DIR, CODE_ROOT
 
 # Configuration paths
-TEMPLATE_DIR = os.path.join(ROOT_DIR, "doc", "template")
+TEMPLATE_DIR = os.path.join(CODE_ROOT, "doc", "template")
 OUTPUT_DIR = os.path.join(ROOT_DIR, "exports", "liste adhérent")
 COURS_PATH = os.path.join(OUTPUT_DIR, "Cours.xlsx")
 BACKUP_PATH = os.path.join(TEMPLATE_DIR, "Cours - Template-Vide.xlsx")

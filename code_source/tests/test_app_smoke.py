@@ -14,8 +14,6 @@ _src_dir = os.path.join(os.path.dirname(_test_dir), "src") if os.path.basename(_
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-ROOT_PROJET = os.path.dirname(os.path.dirname(_test_dir))
-
 
 class TestAppSmoke(unittest.TestCase):
     """
@@ -40,7 +38,9 @@ class TestAppSmoke(unittest.TestCase):
         cls._tmp_db = os.path.join(cls._tmpdir, "database.db")
         cls._original_db_path = SqliteRepository.get_db_path()
 
-        db_live = os.path.join(ROOT_PROJET, "database.db")
+        # La base réelle vit désormais dans data/ (cache local, cf. paths.DATA_ROOT)
+        from paths import DATA_ROOT
+        db_live = os.path.join(DATA_ROOT, "database.db")
         if os.path.exists(db_live):
             # Snapshot cohérent de la base réelle (API backup : inclut le WAL)
             uri = f"{pathlib.Path(db_live).as_uri()}?mode=ro"

@@ -1,5 +1,5 @@
 import os
-from paths import CODE_ROOT, ROOT_DIR
+from paths import CODE_ROOT, ROOT_DIR, find_doc_template
 import re
 import datetime
 import docx
@@ -101,8 +101,8 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
         print(f"Dossier de destination utilisé : {output_dir}")
         
     # 4. Vérification des chemins de modèles
-    template_path_docx = os.path.join(root_dir, "doc", "template", "ATTESTATION DE PAIEMENT_adulte.docx")
-    template_path_html = os.path.join(root_dir, "doc", "template", "ATTESTATION_TEMPLATE.html")
+    template_path_docx = find_doc_template("ATTESTATION DE PAIEMENT_adulte.docx")
+    template_path_html = find_doc_template("ATTESTATION_TEMPLATE.html")
     
     if output_format in ("docx", "both") and not os.path.exists(template_path_docx):
         print(f"[ERREUR] Modèle Word d'attestation introuvable : {template_path_docx}")
@@ -267,8 +267,11 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                     from PySide6.QtCore import QEventLoop, QUrl, QMarginsF
                     from PySide6.QtGui import QPageLayout, QPageSize
                     
-                    # Base URL pour résoudre logo.png à la racine
-                    base_url = QUrl.fromLocalFile(os.path.join(root_dir, "logo.png"))
+                    # Base URL pour résoudre logo.png (racine applicative en release, code_source en dev)
+                    logo_path = os.path.join(root_dir, "logo.png")
+                    if not os.path.exists(logo_path):
+                        logo_path = os.path.join(CODE_ROOT, "logo.png")
+                    base_url = QUrl.fromLocalFile(logo_path)
                     
                     loop = QEventLoop()
                     load_conn = web_page.loadFinished.connect(lambda ok: loop.quit())

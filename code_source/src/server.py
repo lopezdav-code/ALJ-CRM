@@ -829,6 +829,14 @@ def get_planning():
     except Exception as e:
         return {"error": str(e)}
 
+# Annuaire mobile (page web en lecture seule : télécharge database.db depuis
+# Google Drive après connexion Google, cache navigateur, filtres par créneaux).
+# Nécessaire pour l'authentification Google OAuth (origine http://localhost:8000).
+from fastapi.staticfiles import StaticFiles
+_web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+if os.path.isdir(_web_dir):
+    app.mount("/annuaire", StaticFiles(directory=_web_dir, html=True), name="annuaire")
+
 @app.post("/api/planning")
 def update_planning(planning_data: List[Dict[str, Any]] = Body(...)):
     """Met à jour le planning dans la BDD SQLite."""

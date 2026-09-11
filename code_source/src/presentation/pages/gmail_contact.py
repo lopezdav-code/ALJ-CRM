@@ -1,66 +1,156 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
-    QFrame, QProgressBar, QTextEdit, QMessageBox, QLineEdit,
-    QAbstractItemView
+    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
+    QFrame, QProgressBar, QTextEdit, QMessageBox, QGroupBox,
+    QCheckBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt
 from presentation.workers import SyncGmailContactsWorker
 
+CHIP_STYLE = (
+    'background-color:#EFF6FF;color:#1D4ED8;border-radius:10px;'
+    'padding:3px 12px;font-weight:bold;font-size:12px;'
+)
+
+
 class GmailContactPage(QWidget):
     """
     Page de synchronisation des adhérents avec l'annuaire Google Contacts (API People).
-    Permet d'organiser les membres par groupes de contacts Gmail (ex: Loisir Collège 2027).
+    Les groupes proposés proviennent du planning des créneaux (BDD) : un groupe de
+    créneau peut regrouper plusieurs tarifs HelloAsso. Des groupes virtuels
+    (Adhérent, Compétition, Payeur) complètent la liste.
     """
+    VIRTUAL_GROUPS = ["Adhérent", "Compétition", "Payeur"]
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.group_tarifs_map = {}  # Nom de groupe de créneau -> tarifs HelloAsso associés
         self.init_ui()
         self.load_available_groups()
 
+    # ------------------------------------------------------------------
+    # Construction de l'interface
+    # ------------------------------------------------------------------
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout.setSpacing(16)
 
         # En-tête
         title = QLabel("📧 Synchronisation Google Contacts")
         title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
         layout.addWidget(title)
 
-        # Description
         desc_lbl = QLabel(
-            "Créez ou mettez à jour des groupes de contacts dans votre messagerie Gmail. "
-            "Le système vérifie si les contacts existent déjà dans votre annuaire Google par adresse e-mail. "
-            "S'ils sont absents, ils sont créés automatiquement, puis rattachés au groupe ciblé."
+            "Créez ou mettez à jour des listes de contacts dans votre messagerie Gmail. "
+            "Les groupes proposés proviennent du planning des créneaux du club (un créneau peut "
+            "regrouper plusieurs tarifs HelloAsso). Les contacts absents de votre annuaire Google "
+            "sont créés automatiquement, puis rattachés aux listes cochées."
         )
-        desc_lbl.setStyleSheet("color: #64748B; font-size: 13px; margin-bottom: 5px;")
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: #64748B; font-size: 13px;")
         layout.addWidget(desc_lbl)
 
-        # ----------------- SECTION CONFIGURATION DU GROUPE -----------------
-        form_frame = QFrame()
-        form_frame.setStyleSheet("""
-            QFrame {
+        # ----------------- CARTE PRINCIPALE (2 colonnes) -----------------
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame#cardGmail {
                 background-color: #FFFFFF;
                 border: 1px solid #E2E8F0;
                 border-radius: 8px;
-                padding: 20px;
             }
         """)
-        form_layout = QVBoxLayout(form_frame)
-        form_layout.setSpacing(15)
+        card.setObjectName("cardGmail")
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.setSpacing(24)
 
-        form_title = QLabel("👥 Configurer la liste de contacts")
-        form_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; margin-bottom: 5px;")
-        form_layout.addWidget(form_title)
+        card_layout.addLayout(self._build_left_column(), stretch=3)
+        card_layout.addLayout(self._build_right_column(), stretch=2)
 
-        # Sélection du groupe HelloAsso (Désormais Multi-Sélection !)
-        combo_layout = QVBoxLayout()
-        combo_lbl = QLabel("Sélectionner les groupes d'adhérents à fusionner :")
-        combo_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #334155;")
-        combo_layout.addWidget(combo_lbl)
-        
-        from PySide6.QtWidgets import QListWidget
+        layout.addWidget(card)
+
+        # ----------------- BARRE DE PROGRESSION -----------------
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                background-color: #FFFFFF;
+                text-align: center;
+                color: #1E293B;
+                font-weight: bold;
+                max-height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #10B981;
+                border-radius: 5px;
+            }
+        """)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # ----------------- CONSOLE DE LOGS -----------------
+        log_title = QLabel("📝 Console de suivi de synchronisation")
+        log_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #334155;")
+        layout.addWidget(log_title)
+
+        self.log_area = QTextEdit()
+        self.log_area.setReadOnly(True)
+        self.log_area.setMinimumHeight(170)
+        self.log_area.setPlaceholderText("Les journaux d'exportation de contacts s'afficheront ici en temps réel...")
+        self.log_area.setStyleSheet("""
+            QTextEdit {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #0F172A;
+                border-radius: 8px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 12px;
+            }
+        """)
+        layout.addWidget(self.log_area, stretch=1)
+
+    def _build_left_column(self):
+        """Colonne gauche : sélection des groupes de créneaux (cases à cocher + compteurs)."""
+        left_col = QVBoxLayout()
+        left_col.setSpacing(10)
+
+        header_row = QHBoxLayout()
+        form_title = QLabel("👥 Groupes à exporter")
+        form_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B;")
+        header_row.addWidget(form_title)
+        header_row.addStretch()
+
+        self.select_all_btn = QPushButton("Tout cocher")
+        self.select_all_btn.setCursor(Qt.PointingHandCursor)
+        self.select_none_btn = QPushButton("Tout décocher")
+        self.select_none_btn.setCursor(Qt.PointingHandCursor)
+        mini_btn_style = """
+            QPushButton {
+                background-color: #F1F5F9;
+                color: #334155;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #E2E8F0;
+            }
+        """
+        self.select_all_btn.setStyleSheet(mini_btn_style)
+        self.select_none_btn.setStyleSheet(mini_btn_style)
+        self.select_all_btn.clicked.connect(self.check_all_groups)
+        self.select_none_btn.clicked.connect(self.uncheck_all_groups)
+        header_row.addWidget(self.select_all_btn)
+        header_row.addWidget(self.select_none_btn)
+        left_col.addLayout(header_row)
+
         self.group_list = QListWidget()
-        self.group_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.group_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #CBD5E1;
@@ -69,47 +159,45 @@ class GmailContactPage(QWidget):
                 font-size: 13px;
                 background-color: #FFFFFF;
                 color: #1E293B;
-                min-width: 250px;
-                max-height: 120px;
             }
-            QListWidget::item:selected {
-                background-color: #E0E7FF;
+            QListWidget::item {
+                padding: 6px 4px;
+            }
+            QListWidget::item:hover {
+                background-color: #F8FAFC;
+            }
+            QListWidget::item:checked {
                 color: #1D4ED8;
                 font-weight: bold;
+            }
+            QListWidget::indicator {
+                width: 15px;
+                height: 15px;
+                border: 1px solid #CBD5E1;
                 border-radius: 4px;
+                background-color: #FFFFFF;
+            }
+            QListWidget::indicator:checked {
+                background-color: #2563EB;
+                border-color: #2563EB;
+                image: url(none);
             }
         """)
-        self.group_list.itemSelectionChanged.connect(self.update_group_name_preview)
-        combo_layout.addWidget(self.group_list)
-        form_layout.addLayout(combo_layout)
+        self.group_list.itemClicked.connect(self._on_item_clicked)
+        self.group_list.itemChanged.connect(lambda _: self.update_preview())
+        left_col.addWidget(self.group_list, stretch=1)
 
-        # Prévisualisation du nom du groupe dans Google Contacts
-        preview_layout = QHBoxLayout()
-        preview_lbl = QLabel("Nom de la liste créée/mise à jour dans Google Contacts :")
-        preview_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #334155;")
-        preview_layout.addWidget(preview_lbl)
+        hint_lbl = QLabel("Un groupe de créneau peut regrouper plusieurs tarifs HelloAsso.\nSurvolez un groupe pour voir ses créneaux et tarifs associés.")
+        hint_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic;")
+        left_col.addWidget(hint_lbl)
+        return left_col
 
-        self.group_name_preview = QLineEdit()
-        self.group_name_preview.setReadOnly(True)
-        self.group_name_preview.setPlaceholderText("Les noms des groupes Google Contacts apparaîtront ici...")
-        self.group_name_preview.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 13px;
-                background-color: #F8FAFC;
-                color: #2563EB;
-                font-weight: bold;
-                min-width: 250px;
-            }
-        """)
-        preview_layout.addWidget(self.group_name_preview)
-        preview_layout.addStretch()
-        form_layout.addLayout(preview_layout)
+    def _build_right_column(self):
+        """Colonne droite : options des e-mails, prévisualisation des listes, bouton d'action."""
+        right_col = QVBoxLayout()
+        right_col.setSpacing(14)
 
         # Options des destinataires (Choix des e-mails à synchroniser)
-        from PySide6.QtWidgets import QGroupBox, QCheckBox
         dest_group = QGroupBox("📩 Choix des adresses e-mails à ajouter aux contacts")
         dest_group.setStyleSheet("""
             QGroupBox {
@@ -118,13 +206,18 @@ class GmailContactPage(QWidget):
                 font-size: 12px;
                 border: 1px solid #E2E8F0;
                 border-radius: 6px;
-                margin-top: 15px;
-                padding-top: 15px;
+                margin-top: 12px;
+                padding: 12px 12px 8px 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
             }
         """)
         dest_layout = QVBoxLayout(dest_group)
-        dest_layout.setSpacing(5)
-        
+        dest_layout.setSpacing(6)
+
         self.use_primary_email_cb = QCheckBox("Synchroniser l'E-mail Principal (Fiche Adhérent)")
         self.use_primary_email_cb.setChecked(True)
         self.use_primary_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
@@ -139,12 +232,36 @@ class GmailContactPage(QWidget):
         self.use_payer_email_cb.setChecked(False)
         self.use_payer_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
         dest_layout.addWidget(self.use_payer_email_cb)
-        
-        form_layout.addWidget(dest_group)
+
+        right_col.addWidget(dest_group)
+
+        # Prévisualisation des listes Google qui seront créées / mises à jour
+        preview_frame = QFrame()
+        preview_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+            }
+        """)
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(14, 10, 14, 12)
+        preview_layout.setSpacing(8)
+
+        preview_title = QLabel("🏷️ Listes Google Contacts concernées")
+        preview_title.setStyleSheet("font-size: 12px; font-weight: bold; color: #334155; border: none;")
+        preview_layout.addWidget(preview_title)
+
+        self.preview_area = QLabel()
+        self.preview_area.setWordWrap(True)
+        self.preview_area.setTextFormat(Qt.RichText)
+        self.preview_area.setStyleSheet("border: none; background: transparent;")
+        preview_layout.addWidget(self.preview_area)
+
+        right_col.addWidget(preview_frame)
 
         # Bouton d'action principal
-        action_layout = QHBoxLayout()
-        self.sync_btn = QPushButton("⚡ Synchroniser avec Google Contacts")
+        self.sync_btn = QPushButton("⚡  Synchroniser avec Google Contacts")
         self.sync_btn.setCursor(Qt.PointingHandCursor)
         self.sync_btn.setStyleSheet("""
             QPushButton {
@@ -164,117 +281,159 @@ class GmailContactPage(QWidget):
             }
         """)
         self.sync_btn.clicked.connect(self.start_sync_workflow)
-        action_layout.addWidget(self.sync_btn)
-        action_layout.addStretch()
-        form_layout.addLayout(action_layout)
+        right_col.addWidget(self.sync_btn)
 
-        layout.addWidget(form_frame)
+        right_col.addStretch()
+        return right_col
 
-        # ----------------- BARRE DE PROGRESSION -----------------
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                background-color: #FFFFFF;
-                text-align: center;
-                color: #1E293B;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #10B981;
-                border-radius: 5px;
-            }
-        """)
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-
-        # ----------------- CONSOLE DE LOGS -----------------
-        log_title = QLabel("📝 Console de suivi de synchronisation")
-        log_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #334155;")
-        layout.addWidget(log_title)
-
-        self.log_area = QTextEdit()
-        self.log_area.setReadOnly(True)
-        self.log_area.setPlaceholderText("Les journaux d'exportation de contacts s'afficheront ici en temps réel...")
-        self.log_area.setStyleSheet("""
-            QTextEdit {
-                background-color: #1E293B;
-                color: #F8FAFC;
-                border: 1px solid #0F172A;
-                border-radius: 8px;
-                padding: 10px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-            }
-        """)
-        layout.addWidget(self.log_area)
-
+    # ------------------------------------------------------------------
+    # Chargement des données (planning + compteurs)
+    # ------------------------------------------------------------------
     def load_available_groups(self):
-        """Récupère dynamiquement tous les tarifs uniques de la base locale pour la saison active (2026-2027)."""
+        """Charge les groupes de créneaux depuis la table planning de la BDD,
+        avec compteurs d'adhérents calculés depuis les tarifs HelloAsso mappés."""
         try:
             from infrastructure.sqlite_repository import SqliteRepository
+            from domain.constants import get_active_season
             SqliteRepository.setup_database()
-            all_members = SqliteRepository.load_direct_data(season_filter="2026-2027")
-            tarifs = sorted(list(set([str(m.get("tarif_name") or "").strip() for m in all_members if m.get("tarif_name")])))
-            
-            # Ajouter les groupes virtuels récapitulatifs au début de la liste
-            virtual_groups = ["Adhérent", "Compétition", "Payeur"]
-            # Éviter de dupliquer si un groupe de base s'appelle déjà comme un groupe virtuel
-            tarifs = [t for t in tarifs if t not in virtual_groups]
-            final_groups = virtual_groups + tarifs
-            
+            members = SqliteRepository.load_direct_data(season_filter=get_active_season())
+            planning = SqliteRepository.load_planning_data(log_debug=False)
+
+            # Agrégation des créneaux par nom de groupe unique (un groupe peut
+            # posséder plusieurs créneaux horaires et plusieurs tarifs HelloAsso)
+            creneaux = {}
+            order = []
+            for item in planning:
+                g_name = str(item.get("groupe") or "").strip()
+                if not g_name:
+                    continue
+                if g_name not in creneaux:
+                    creneaux[g_name] = {"tarifs": [], "slots": []}
+                    order.append(g_name)
+                for t in item.get("helloasso_tarifs") or []:
+                    t_str = str(t).strip()
+                    if t_str and t_str not in creneaux[g_name]["tarifs"]:
+                        creneaux[g_name]["tarifs"].append(t_str)
+                creneaux[g_name]["slots"].append((
+                    str(item.get("jour") or "").strip(),
+                    str(item.get("horaires") or "").strip()
+                ))
+
+            self.group_tarifs_map = {g: c["tarifs"] for g, c in creneaux.items()}
+
+            def tarif_of(m):
+                return str(m.get("tarif_name") or "").strip().lower()
+
+            n_total = len(members)
+            n_comp = sum(1 for m in members if "compétition" in tarif_of(m))
+
+            rows = [
+                ("Adhérent", n_total, "Tous les adhérents de la saison active."),
+                ("Compétition", n_comp, "Adhérents dont le tarif contient « Compétition »."),
+                ("Payeur", n_total, "Tous les adhérents (utile pour ajouter les e-mails payeurs)."),
+            ]
+            for g_name in order:
+                info = creneaux[g_name]
+                targets = {t.strip().lower() for t in info["tarifs"]}
+                count = sum(1 for m in members if tarif_of(m) in targets) if targets else 0
+                slots_txt = " · ".join(f"{j} {h}".strip() for j, h in info["slots"] if j or h)
+                tarifs_txt = ", ".join(info["tarifs"]) or "Aucun tarif HelloAsso configuré ⚠️"
+                tooltip = g_name
+                if slots_txt:
+                    tooltip += f"\nCréneau(x) : {slots_txt}"
+                tooltip += f"\nTarifs HelloAsso : {tarifs_txt}"
+                rows.append((g_name, count, tooltip))
+
             self.group_list.blockSignals(True)
             self.group_list.clear()
-            self.group_list.addItems(final_groups)
+            for name, count, tooltip in rows:
+                item = QListWidgetItem(f"{name}   ({count})")
+                item.setData(Qt.UserRole, name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                item.setToolTip(tooltip)
+                self.group_list.addItem(item)
             self.group_list.blockSignals(False)
-            
-            self.update_group_name_preview()
+
+            self.update_preview()
         except Exception as e:
             self.log_area.append(f"❌ [ERREUR] Impossible de charger les groupes depuis SQLite : {e}")
 
-    def update_group_name_preview(self):
-        """Met à jour le champ de texte prévisualisant le nom de la liste dans Gmail."""
-        selected_items = self.group_list.selectedItems()
-        if not selected_items:
-            self.group_name_preview.setText("")
-            return
-            
+    # ------------------------------------------------------------------
+    # Interactions UI
+    # ------------------------------------------------------------------
+    def _on_item_clicked(self, item):
+        """Un simple clic sur la ligne bascule la case à cocher (UX multi-sélection)."""
+        item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
+
+    def get_checked_groups(self):
+        """Retourne les noms de groupes cochés."""
+        return [
+            self.group_list.item(i).data(Qt.UserRole)
+            for i in range(self.group_list.count())
+            if self.group_list.item(i).checkState() == Qt.Checked
+        ]
+
+    def check_all_groups(self):
+        self.group_list.blockSignals(True)
+        for i in range(self.group_list.count()):
+            self.group_list.item(i).setCheckState(Qt.Checked)
+        self.group_list.blockSignals(False)
+        self.update_preview()
+
+    def uncheck_all_groups(self):
+        self.group_list.blockSignals(True)
+        for i in range(self.group_list.count()):
+            self.group_list.item(i).setCheckState(Qt.Unchecked)
+        self.group_list.blockSignals(False)
+        self.update_preview()
+
+    def update_preview(self):
+        """Affiche les badges des listes Google qui seront créées/mises à jour."""
         from domain.constants import get_active_season
         season = get_active_season()
         year = season.split("-")[1] if "-" in season else "2027"
-        
-        if len(selected_items) == 1:
-            # S'il n'y a qu'un groupe sélectionné, on prend son nom
-            self.group_name_preview.setText(f"{year} {selected_items[0].text().strip()}")
-        else:
-            # S'il y a plusieurs groupes sélectionnés, on propose un nom générique modifiable
-            self.group_name_preview.setText(f"{year} Sélection Multiple")
+
+        checked = self.get_checked_groups()
+        if not checked:
+            self.preview_area.setText(
+                '<span style="color:#94A3B8;font-size:12px;font-style:italic;">'
+                "Cochez des groupes pour prévisualiser les listes qui seront créées dans Google Contacts…"
+                "</span>"
+            )
+            return
+
+        chips = "<br>".join(
+            f'<span style="{CHIP_STYLE}">&nbsp;{year} {g}&nbsp;</span>'
+            for g in checked
+        )
+        self.preview_area.setText(chips)
 
     def set_ui_enabled(self, enabled: bool):
         """Active ou désactive les composants graphiques."""
         self.group_list.setEnabled(enabled)
-        self.group_name_preview.setEnabled(enabled)
+        self.select_all_btn.setEnabled(enabled)
+        self.select_none_btn.setEnabled(enabled)
+        self.use_primary_email_cb.setEnabled(enabled)
+        self.use_secondary_email_cb.setEnabled(enabled)
+        self.use_payer_email_cb.setEnabled(enabled)
         self.sync_btn.setEnabled(enabled)
 
+    # ------------------------------------------------------------------
+    # Workflow de synchronisation
+    # ------------------------------------------------------------------
     def start_sync_workflow(self):
-        """Déclenche le worker asynchrone pour synchroniser la liste."""
-        # Récupérer tous les tarifs sélectionnés
-        selected_items = self.group_list.selectedItems()
-        if not selected_items:
+        """Déclenche le worker asynchrone pour synchroniser les listes cochées."""
+        checked_groups = self.get_checked_groups()
+        if not checked_groups:
             QMessageBox.warning(
                 self,
                 "Aucun groupe sélectionné",
-                "Veuillez sélectionner au moins un groupe d'adhérents à exporter avant de lancer le traitement."
+                "Veuillez cocher au moins un groupe d'adhérents à exporter avant de lancer le traitement."
             )
             return
-            
-        selected_tariffs = [item.text().strip() for item in selected_items]
 
-        # Demander confirmation
-        tarifs_str = "\n- ".join(selected_tariffs)
+        tarifs_str = "\n- ".join(checked_groups)
         reply = QMessageBox.question(
             self,
             "Synchronisation Google Contacts",
@@ -294,12 +453,12 @@ class GmailContactPage(QWidget):
 
         self.log_area.append("🚀 Lancement de la synchronisation des contacts Gmail...")
 
-        # Lancer le worker asynchrone
         self.worker = SyncGmailContactsWorker(
-            selected_tariffs=selected_tariffs,
+            selected_tariffs=checked_groups,
             use_primary_email=self.use_primary_email_cb.isChecked(),
             use_secondary_email=self.use_secondary_email_cb.isChecked(),
-            use_payer_email=self.use_payer_email_cb.isChecked()
+            use_payer_email=self.use_payer_email_cb.isChecked(),
+            group_tarifs_map=dict(self.group_tarifs_map)
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
@@ -322,7 +481,7 @@ class GmailContactPage(QWidget):
             self.log_area.append(f"   • Contacts existants trouvés : {stats['contacts_found']}")
             self.log_area.append(f"   • Nouveaux contacts créés : {stats['contacts_created']}")
             self.log_area.append(f"   • Contacts associés dans les groupes : {stats['added_to_group']}")
-            
+
             QMessageBox.information(
                 self,
                 "Synchronisation Contacts",
