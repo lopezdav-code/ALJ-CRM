@@ -207,6 +207,7 @@ let filters = Object.assign(
   { status: "", season: "2026-2027", groups: {}, others: {} },
   JSON.parse(localStorage.getItem(FILTER_KEY) || "{}")
 );
+let currentSeason = filters.season || "2026-2027";
 
 const $ = s => document.querySelector(s);
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
