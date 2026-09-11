@@ -1,0 +1,44 @@
+name: Déployer l'annuaire (GitHub Pages)
+
+# Publie l'annuaire mobile en lecture seule (code_source/web) sur GitHub Pages :
+# https://lopezdav-code.github.io/ALJ-CRM/
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'code_source/web/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure Pages (bascule la source sur « GitHub Actions »)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload de l'annuaire (code_source/web)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'code_source/web'
+
+      - name: Déploiement
+        id: deployment
+        uses: actions/deploy-pages@v4
