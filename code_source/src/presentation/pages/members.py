@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFrame, QDialogButtonBox, QRadioButton, QMessageBox
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate, Signal
+from PySide6.QtGui import QFont
 
 from paths import ROOT_DIR
 from domain.models import Member
@@ -142,14 +143,24 @@ class SubCategoryDialog(QDialog):
     regroupées par type (Séance autonome, Cours, Compétition...),
     avec boutons "Tout sélectionner" / "Tout désélectionner".
     La sélection est appliquée en direct (la set `selected` est mutée par référence).
+
+    Deux modes d'affichage :
+    - plat (`groups`) : une catégorie -> cases à cocher = tarifs individuels
+      (onglet Communications) ;
+    - hiérarchique (`hierarchy`) : rubriques de créneaux du planning avec libellés
+      raccourcis, chaque case cochée sélectionne TOUS les tarifs rattachés au
+      créneau (payload) — onglets Adhérents.
+      Blocs : (kind, label, payload) où kind ∈ {'section', 'sub-section', 'group'}
+      et payload = liste de tarifs (None pour les titres de rubrique).
     """
     def __init__(self, groups, selected: set, on_change=None, parent=None,
-                 title="Sélection des sous-catégories"):
+                 title="Sélection des sous-catégories", hierarchy=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(360)
         self.selected = selected  # Set muté en direct par le dialogue
         self.on_change = on_change
+        self.hierarchy = hierarchy  # Si fourni, mode hiérarchique (créneaux)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 12)
@@ -166,20 +177,60 @@ class SubCategoryDialog(QDialog):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(4)
 
-        for group_name, tarifs in groups:
-            group_label = QLabel(group_name)
-            group_label.setStyleSheet(
-                "color: #1E293B; font-size: 12px; font-weight: bold;"
-                "margin-top: 8px; border-bottom: 1px solid #E2E8F0;"
-            )
-            container_layout.addWidget(group_label)
-            for tarif in tarifs:
-                cb = QCheckBox(tarif)
-                cb.setChecked(tarif in self.selected)
+        if self.hierarchy:
+            section_font = QFont()
+            section_font.setBold(True)
+            sub_font = QFont()
+            sub_font.setBold(True)
+            sub_font.setItalic(True)
+
+            indent = 0
+            for kind, label, payload in self.hierarchy:
+                if kind == "section":
+                    indent = 1
+                    sec = QLabel(f"📁 {label}")
+                    sec.setStyleSheet(
+                        "color: #1E3A8A; font-size: 12px; font-weight: bold;"
+                        "background-color: #DBEAFE; border-radius: 4px; padding: 4px 8px;"
+                        "margin-top: 8px;"
+                    )
+                    container_layout.addWidget(sec)
+                    continue
+                if kind == "sub-section":
+                    indent = 2
+                    sub = QLabel("\u00A0\u00A0\u00A0📂 " + label)
+                    sub.setStyleSheet(
+                        "color: #1D4ED8; font-size: 11px; font-weight: bold;"
+                        "font-style: italic; margin-top: 4px;"
+                    )
+                    container_layout.addWidget(sub)
+                    continue
+                tarifs = [t for t in (payload or [])]
+                if not tarifs:
+                    continue
+                cb = QCheckBox("\u00A0" * (4 * indent) + label)
+                cb.setProperty("tarifs", tarifs)
+                cb.setChecked(all(t in self.selected for t in tarifs))
                 cb.setStyleSheet("color: #475569; font-size: 11px;")
                 cb.stateChanged.connect(lambda _, box=cb: self._on_checkbox_changed(box))
                 container_layout.addWidget(cb)
                 self.checkboxes.append(cb)
+        else:
+            for group_name, tarifs in groups:
+                group_label = QLabel(group_name)
+                group_label.setStyleSheet(
+                    "color: #1E293B; font-size: 12px; font-weight: bold;"
+                    "margin-top: 8px; border-bottom: 1px solid #E2E8F0;"
+                )
+                container_layout.addWidget(group_label)
+                for tarif in tarifs:
+                    cb = QCheckBox(tarif)
+                    cb.setChecked(tarif in self.selected)
+                    cb.setProperty("tarifs", [tarif])
+                    cb.setStyleSheet("color: #475569; font-size: 11px;")
+                    cb.stateChanged.connect(lambda _, box=cb: self._on_checkbox_changed(box))
+                    container_layout.addWidget(cb)
+                    self.checkboxes.append(cb)
 
         container_layout.addStretch(1)
         scroll.setWidget(container)
@@ -232,19 +283,23 @@ class SubCategoryDialog(QDialog):
         layout.addWidget(close_box)
 
     def _on_checkbox_changed(self, box: QCheckBox):
+        # Mode hiérarchique (créneaux) : la case coche/décoche TOUS les tarifs
+        # rattachés au créneau ; mode plat : un seul tarif par case.
+        tarifs = box.property("tarifs") or [box.text()]
         if box.isChecked():
-            self.selected.add(box.text())
+            self.selected.update(tarifs)
         else:
-            self.selected.discard(box.text())
+            self.selected.difference_update(tarifs)
         if self.on_change:
             self.on_change()
 
     def select_all(self):
         for cb in self.checkboxes:
+            tarifs = cb.property("tarifs") or [cb.text()]
             cb.blockSignals(True)
             cb.setChecked(True)
             cb.blockSignals(False)
-            self.selected.add(cb.text())
+            self.selected.update(tarifs)
         if self.on_change:
             self.on_change()
 
@@ -594,12 +649,54 @@ class MembersPage(QWidget):
         else:
             self.tarif_sub_filter.setText(f"Sous-catégories ({count}) ▾")
 
+    def get_creneau_filter_blocks(self):
+        """Structure hiérarchique de la pop-up de sous-catégories, basée sur les
+        groupes de créneaux du planning (Autonome INCLUS, libellés raccourcis) :
+        liste d'attente en tête (comportement historique), puis rubriques de
+        créneaux (chaque case coche TOUS les tarifs rattachés au créneau), puis
+        rubrique « Autres tarifs » pour les tarifs non rattachés à un créneau.
+        Les payloads sont limités aux tarifs réellement présents chez les adhérents."""
+        from infrastructure.sqlite_repository import SqliteRepository
+        from domain.planning_groups import build_creneau_items, prune_empty_sections
+        creneaux = SqliteRepository.load_creneaux_groups()
+        tarifs_map = {c["groupe"]: c["tarifs"] for c in creneaux}
+
+        member_tarifs = sorted(set(m.tarif_name for m in self.members_list if m.tarif_name))
+        member_tarifs_set = set(member_tarifs)
+        covered = set()
+        for t_list in tarifs_map.values():
+            covered.update(t_list)
+
+        blocks = []
+        waiting = [t for t in member_tarifs if t == WAITING_LIST_TARIF]
+        if waiting:
+            blocks.append(("group", waiting[0], waiting))
+
+        for kind, label, raw in build_creneau_items(creneaux, include_autonome=True):
+            if kind == "group":
+                payload = [t for t in (tarifs_map.get(raw) or []) if t in member_tarifs_set]
+                if payload:
+                    blocks.append((kind, label, payload))
+            else:
+                blocks.append((kind, label, None))
+
+        uncovered = [t for t in member_tarifs if t != WAITING_LIST_TARIF and t not in covered]
+        if uncovered:
+            blocks.append(("section", "Autres tarifs", None))
+            blocks.extend(("group", t, [t]) for t in uncovered)
+
+        # Retirer les rubriques devenues sans créneau (payloads vides filtrés)
+        return prune_empty_sections(blocks)
+
     def open_sub_category_popup(self):
-        """Ouvre la pop-up de sélection des sous-catégories, regroupées par type."""
+        """Ouvre la pop-up de sélection des sous-catégories, organisée en rubriques
+        de créneaux du planning (Autonome inclus) + liste d'attente + autres tarifs.
+        Une case cochée sélectionne tous les tarifs rattachés au créneau."""
         dialog = SubCategoryDialog(
-            self.get_tarif_groups(),
+            [],
             self.selected_sub_tarifs,
             on_change=self.on_sub_selection_changed,
+            hierarchy=self.get_creneau_filter_blocks(),
             parent=self
         )
         dialog.exec()

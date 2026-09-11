@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
-    QListWidgetItem, QSplitter, QComboBox
+    QListWidgetItem, QSplitter, QComboBox, QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Qt
 from PIL import Image, ImageDraw
@@ -382,11 +382,70 @@ class DocumentsPage(QWidget):
                 item.setData(Qt.UserRole, m) # Stocker le membre
                 self.list_widget.addItem(item)
             
-            # Charger la liste des tarifs dans le ComboBox
-            unique_tarifs = sorted(list(set([m.tarif_name for m in self.members_list if m.tarif_name])))
+            # Charger la hiérarchie des créneaux dans le filtre tarif
+            # (arborescence : rubriques du planning, Autonome inclus, autres tarifs)
+            from domain.planning_groups import build_creneau_items, prune_empty_sections
+            creneaux = SqliteRepository.load_creneaux_groups()
+            tarifs_map = {c["groupe"]: c["tarifs"] for c in creneaux}
+            member_tarifs = sorted(set(m.tarif_name for m in self.members_list if m.tarif_name))
+            member_tarifs_set = set(member_tarifs)
+            covered = set()
+            for t_list in tarifs_map.values():
+                covered.update(t_list)
+
+            tree = QTreeWidget()
+            tree.setColumnCount(1)
+            tree.setHeaderHidden(True)
+            self.tarif_filter.setView(tree)
             self.tarif_filter.clear()
-            self.tarif_filter.addItem("Tous les tarifs")
-            self.tarif_filter.addItems(unique_tarifs)
+
+            tree.addTopLevelItem(QTreeWidgetItem(["Tous les tarifs"]))
+            nodes = []
+            for kind, label, raw in build_creneau_items(creneaux, include_autonome=True):
+                if kind == "group":
+                    payload = [t for t in (tarifs_map.get(raw) or []) if t in member_tarifs_set]
+                    if payload:
+                        nodes.append((kind, label, payload))
+                else:
+                    nodes.append((kind, label, None))
+            # Retirer les rubriques devenues sans créneau (payloads vides filtrés)
+            pruned = prune_empty_sections(nodes)
+
+            current_section = None
+            current_sub = None
+            for kind, label, payload in pruned:
+                if kind == "section":
+                    current_section = QTreeWidgetItem(["📁 " + label])
+                    current_section.setFlags(Qt.ItemIsEnabled)
+                    tree.addTopLevelItem(current_section)
+                    current_sub = None
+                elif kind == "sub-section":
+                    current_sub = QTreeWidgetItem(["📂 " + label])
+                    current_sub.setFlags(Qt.ItemIsEnabled)
+                    if current_section is not None:
+                        current_section.addChild(current_sub)
+                    else:
+                        tree.addTopLevelItem(current_sub)
+                else:
+                    node = QTreeWidgetItem([label])
+                    node.setData(0, Qt.UserRole, payload)
+                    parent = current_sub or current_section
+                    if parent is not None:
+                        parent.addChild(node)
+                    else:
+                        tree.addTopLevelItem(node)
+
+            # Tarifs non rattachés à un créneau (liste d'attente, tarifs libres...)
+            uncovered = [t for t in member_tarifs if t not in covered]
+            if uncovered:
+                sec = QTreeWidgetItem(["📁 Autres tarifs"])
+                sec.setFlags(Qt.ItemIsEnabled)
+                tree.addTopLevelItem(sec)
+                for t in uncovered:
+                    node = QTreeWidgetItem([t])
+                    node.setData(0, Qt.UserRole, [t])
+                    sec.addChild(node)
+            tree.expandAll()
 
             self.list_widget.blockSignals(False)
             self.update_selection_count()
@@ -401,7 +460,10 @@ class DocumentsPage(QWidget):
     def on_filters_changed(self):
         """Filtre l'affichage de la liste des bénéficiaires en combinant la recherche, le tarif et l'état d'attestation."""
         search_text = self.search_input.text().strip().lower()
-        tarif_sel = self.tarif_filter.currentText()
+        # Filtre tarif arborescent : l'item sélectionné porte la liste des tarifs
+        # rattachés au créneau (None = « Tous les tarifs »)
+        current_tree_item = self.tarif_filter.view().currentItem() if self.tarif_filter.view() else None
+        tarif_payload = current_tree_item.data(0, Qt.UserRole) if current_tree_item else None
         att_sel = self.attestation_filter.currentText()
 
         self.list_widget.blockSignals(True)
@@ -416,8 +478,8 @@ class DocumentsPage(QWidget):
                 search_text in m.user_first_name.lower()
             )
             
-            # 2. Filtre de tarif
-            match_tarif = (tarif_sel == "Tous les tarifs" or m.tarif_name == tarif_sel)
+            # 2. Filtre de tarif : créneau sélectionné (tous ses tarifs rattachés)
+            match_tarif = (not tarif_payload) or (m.tarif_name in tarif_payload)
             
             # 3. Filtre d'attestation générée
             from attestation_generator import get_safe_filename

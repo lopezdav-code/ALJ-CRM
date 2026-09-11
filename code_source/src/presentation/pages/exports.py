@@ -304,98 +304,17 @@ class ExportsPage(QWidget):
 
     def _load_presence_creneaux(self):
         """Charge les groupes de créneaux depuis la table planning de la BDD.
-        Chaque créneau regroupe un ou plusieurs tarifs HelloAsso. Retourne une liste
-        de dicts {groupe, tarifs, slots} triée par nom de groupe."""
+        Chaque créneau regroupe un ou plusieurs tarifs HelloAsso."""
         from infrastructure.sqlite_repository import SqliteRepository
-        SqliteRepository.setup_database()
-        planning = SqliteRepository.load_planning_data(log_debug=False)
-
-        creneaux = {}
-        order = []
-        for item in planning:
-            g_name = str(item.get("groupe") or "").strip()
-            if not g_name:
-                continue
-            if g_name not in creneaux:
-                creneaux[g_name] = {"tarifs": [], "slots": []}
-                order.append(g_name)
-            for t in item.get("helloasso_tarifs") or []:
-                t_str = str(t).strip()
-                if t_str and t_str not in creneaux[g_name]["tarifs"]:
-                    creneaux[g_name]["tarifs"].append(t_str)
-            creneaux[g_name]["slots"].append((
-                str(item.get("jour") or "").strip(),
-                str(item.get("horaires") or "").strip()
-            ))
-
-        return [
-            {"groupe": g, "tarifs": creneaux[g]["tarifs"], "slots": creneaux[g]["slots"]}
-            for g in sorted(order)
-        ]
+        return SqliteRepository.load_creneaux_groups()
 
     def _build_cours_hierarchy(self, creneaux):
-        """Organise les créneaux de cours en rubriques hiérarchiques pour le dialogue :
-        Collège, Enfants (sous-rubriques par tranche d'âge 2016-2018 / 2019-2020),
-        Perfectionnement, Compétition. Les créneaux hors rubrique restent en liste plate.
-        Les libellés affichés sont raccourcis (le nom de la rubrique, redondant, est retiré).
-        Retourne une liste de (kind, libellé, nom_brut) où kind ∈ {'section', 'sub-section', 'group'}."""
-        import re
-        from domain.utils import normalize_string
-
-        def accent_class_pattern(word):
-            """Motif regex insensible aux accents (é/è/ê, à, î...) pour découper les libellés."""
-            tr = str.maketrans({
-                "e": "[eèéêë]", "a": "[aàâä]", "i": "[iîï]", "o": "[oôö]",
-                "u": "[uùûü]", "c": "[cç]", "y": "[yÿ]",
-            })
-            return word.translate(tr)
-
-        def shorten(name, keyword, drop_patterns=()):
-            """Retire du libellé le nom de rubrique (et autres motifs) devenus redondants."""
-            parts = re.split(accent_class_pattern(keyword), name, flags=re.IGNORECASE)
-            rest = max(parts, key=len) if len(parts) > 1 else name
-            for dp in drop_patterns:
-                rest = re.sub(dp, "", rest, flags=re.IGNORECASE)
-            rest = re.sub(r"\s{2,}", " ", rest).strip(" \t-–—")
-            if rest.startswith("(") and rest.endswith(")"):
-                rest = rest[1:-1].strip()
-            return rest if rest else name
-
-        buckets = {"Collège": [], "Enfants": {}, "Perfectionnement": [], "Compétition": []}
-        others = []
-        for c in creneaux:
-            name = c["groupe"]
-            n = normalize_string(name)
-            if "competition" in n:
-                buckets["Compétition"].append((name, shorten(name, "competition")))
-            elif "college" in n:
-                buckets["Collège"].append((name, shorten(name, "college")))
-            elif "enfants" in n:
-                m = re.search(r"20\d\d\s*-\s*20\d\d", n)
-                sub = m.group(0).replace(" ", "") if m else "Autres tranches"
-                short = shorten(name, "enfants", (r"20\d\d\s*-\s*20\d\d",))
-                buckets["Enfants"].setdefault(sub, []).append((name, short))
-            elif "perfectionnement" in n:
-                buckets["Perfectionnement"].append((name, shorten(name, "perfectionnement")))
-            else:
-                others.append((name, name))
-
-        items = []
-        # Les créneaux hors rubrique (ex : Loisir - Adultes débutants, Loisir - Lycée)
-        # sont listés en premier, sans titre de rubrique (libellé complet conservé).
-        items.extend(("group", short, name) for name, short in sorted(others))
-        for section in ("Collège", "Enfants", "Perfectionnement", "Compétition"):
-            entries = buckets.get(section)
-            if not entries:
-                continue
-            items.append(("section", section))
-            if isinstance(entries, dict):
-                for sub in sorted(entries):
-                    items.append(("sub-section", sub))
-                    items.extend(("group", short, name) for name, short in sorted(entries[sub]))
-            else:
-                items.extend(("group", short, name) for name, short in sorted(entries))
-        return items
+        """Organise les créneaux de cours (hors autonomes) en rubriques hiérarchiques
+        pour le dialogue : Collège, Enfants (sous-rubriques par tranche d'âge),
+        Perfectionnement, Compétition. Les créneaux hors rubrique restent en liste
+        plate, en premier. Retourne une liste de (kind, libellé, nom_brut)."""
+        from domain.planning_groups import build_creneau_items
+        return build_creneau_items(creneaux, include_autonome=False)
 
     def run_presence_export(self, variant: str):
         """Lance les fiches de présence (variante 'autonome' ou 'cours') à partir des
@@ -409,12 +328,7 @@ class ExportsPage(QWidget):
                 QMessageBox.warning(self, "Aucun groupe", "Aucun groupe de créneaux trouvé dans le planning (BDD).")
                 return
 
-            from domain.utils import normalize_string
-
-            def is_autonome(c):
-                if "autonome" in normalize_string(c["groupe"]):
-                    return True
-                return any("autonome" in normalize_string(t) for t in c["tarifs"])
+            from domain.planning_groups import is_autonome_creneau
 
             tooltips = {}
             for c in creneaux:
@@ -427,7 +341,7 @@ class ExportsPage(QWidget):
 
             if variant == "autonome":
                 # Fusionne les créneaux autonomes + jeunes avec autorisation parentale
-                selected_creneaux = [c for c in creneaux if is_autonome(c)]
+                selected_creneaux = [c for c in creneaux if is_autonome_creneau(c)]
                 if not selected_creneaux:
                     QMessageBox.warning(
                         self, "Aucun groupe autonome",

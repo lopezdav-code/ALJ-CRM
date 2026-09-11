@@ -1323,6 +1323,33 @@ class SqliteRepository:
             conn.close()
 
     @classmethod
+    def load_creneaux_groups(cls) -> list:
+        """Agrège le planning par groupe de créneau unique (un groupe peut posséder
+        plusieurs créneaux horaires et plusieurs tarifs HelloAsso).
+        Retourne une liste de dicts {groupe, tarifs, slots} triée par nom de groupe."""
+        creneaux = {}
+        order = []
+        for item in cls.load_planning_data(log_debug=False):
+            g_name = str(item.get("groupe") or "").strip()
+            if not g_name:
+                continue
+            if g_name not in creneaux:
+                creneaux[g_name] = {"tarifs": [], "slots": []}
+                order.append(g_name)
+            for t in item.get("helloasso_tarifs") or []:
+                t_str = str(t).strip()
+                if t_str and t_str not in creneaux[g_name]["tarifs"]:
+                    creneaux[g_name]["tarifs"].append(t_str)
+            creneaux[g_name]["slots"].append((
+                str(item.get("jour") or "").strip(),
+                str(item.get("horaires") or "").strip()
+            ))
+        return [
+            {"groupe": g, "tarifs": creneaux[g]["tarifs"], "slots": creneaux[g]["slots"]}
+            for g in sorted(order)
+        ]
+
+    @classmethod
     def save_planning_data(cls, planning_list: list):
         """Enregistre le planning complet en SQLite et l'exporte sur planning.json pour rétrocompatibilité."""
         cls.setup_database()

@@ -125,6 +125,29 @@ class TestPresentationLot4(unittest.TestCase):
         self.assertEqual(groups_dict["Compétition"], ["Compétition U11 U13"])
         self.assertEqual(groups_dict["Cours"], ["Cours Adultes débutants"])
 
+        # 3b. Tester la structure hiérarchique par créneaux (planning BDD, Autonome inclus)
+        # - la liste d'attente reste en tête
+        # - le créneau Autonome couvre le tarif 'Adultes autonomes'
+        # - les tarifs non rattachés (ex : 'Compétition U11 U13', tarif sans créneau)
+        #   sont regroupés sous la rubrique « Autres tarifs »
+        blocks = page.get_creneau_filter_blocks()
+        self.assertEqual(blocks[0], ("group", "Liste d'attente cours", ["Liste d'attente cours"]))
+        kinds = [b[0] for b in blocks]
+        self.assertIn("section", kinds)
+        labels = [b[1] for b in blocks if b[0] == "group"]
+        payload_by_label = {b[1]: (b[2] or []) for b in blocks if b[0] == "group"}
+        # L'Autonome (créneau hors rubrique, en premier) couvre le tarif 'Adultes autonomes'
+        autonome_blocks = [b for b in blocks if b[0] == "group" and "Adultes autonomes" in (b[2] or [])]
+        self.assertTrue(autonome_blocks, "Le créneau Autonome doit couvrir le tarif 'Adultes autonomes'")
+        # Le tarif cours est rattaché à son créneau via la BDD planning
+        cours_blocks = [b for b in blocks if "Cours Adultes débutants" in (b[2] or [])]
+        self.assertTrue(cours_blocks)
+        # Le tarif 'Compétition U11 U13' n'est mappé sur aucun créneau -> 'Autres tarifs'
+        autres_idx = [i for i, b in enumerate(blocks) if b[0] == "section" and b[1] == "Autres tarifs"]
+        self.assertTrue(autres_idx, "La rubrique 'Autres tarifs' doit exister pour les tarifs sans créneau")
+        autres_labels = [b[1] for b in blocks[autres_idx[0] + 1:] if b[0] == "group"]
+        self.assertIn("Compétition U11 U13", autres_labels)
+
         # 4. Tester le filtrage par sélection de sous-catégories (pop-up à cases à cocher)
         page.tarif_type_filter.setCurrentText("Tous les types")
         page.selected_sub_tarifs = {"Adultes autonomes", "Cours Adultes débutants"}
