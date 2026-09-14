@@ -168,6 +168,16 @@ class SqliteRepository:
                 cursor.execute(f"ALTER TABLE planning ADD COLUMN {_dob_col} TEXT DEFAULT ''")
                 conn.commit()
         
+        # S'assurer de la présence de la colonne document_sante (Document de santé FFME)
+        # pour les BDD existantes (migration auto). Information associée à une personne
+        # pour une saison donnée : stockée au niveau de l'achat (purchases).
+        try:
+            cursor.execute("SELECT document_sante FROM purchases LIMIT 1")
+        except sqlite3.OperationalError:
+            print("🔧 [SQLITE] Ajout de la colonne 'document_sante' à la table purchases...")
+            cursor.execute("ALTER TABLE purchases ADD COLUMN document_sante TEXT DEFAULT ''")
+            conn.commit()
+
         # Création de la table de templates d'email (Nouveau !)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS email_templates (
@@ -570,6 +580,66 @@ class SqliteRepository:
             return False, str(e)
         finally:
             conn.close()
+
+    @classmethod
+    def add_manual_member(cls, fields: dict, season_name: str = "2026-2027") -> tuple:
+        """
+        Ajoute manuellement un adhérent dans le schéma v2 (users + orders + purchases),
+        en synthétisant une commande « MANUEL-... » équivalente à une inscription HelloAsso.
+        Champs attendus : last_name, first_name, birth_date ('JJ/MM/AAAA' ou ISO), gender,
+        phone, email_primary, address, zip_code, city, tarif_name, status, amount.
+        Retourne (True, order_ref) ou (False, message d'erreur).
+        """
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            import datetime as _dt
+            from infrastructure.schema_v2 import DOB_COLUMN
+
+            now = _dt.datetime.now()
+            order_ref = f"MANUEL-{now.strftime('%Y%m%d-%H%M%S')}"
+            payer_email = str(fields.get("email_primary") or "").strip()
+
+            rec = {
+                "order_ref": order_ref,
+                "order_date": now.strftime("%Y-%m-%d"),
+                "status": str(fields.get("status") or "Validé").strip(),
+                "tarif_name": str(fields.get("tarif_name") or "").strip(),
+                "amount": float(fields.get("amount") or 0.0),
+                "user_lastName": str(fields.get("last_name") or "").strip(),
+                "user_firstName": str(fields.get("first_name") or "").strip(),
+                DOB_COLUMN: str(fields.get("birth_date") or "").strip(),
+                "champ_Sexe": str(fields.get("gender") or "").strip(),
+                "champ_Téléphone ": str(fields.get("phone") or "").strip(),
+                "champ_Adresse mail pour la réception des informations du club": payer_email,
+                "champ_Adresse : numéro et nom de rue": str(fields.get("address") or "").strip(),
+                "champ_Code postal": str(fields.get("zip_code") or "").strip(),
+                "champ_Ville": str(fields.get("city") or "").strip(),
+                "champ_Pays": "France",
+                "payer_lastName": str(fields.get("last_name") or "").strip(),
+                "payer_firstName": str(fields.get("first_name") or "").strip(),
+                "payer_email": payer_email,
+                "is_modified": "Non",
+            }
+
+            cursor = conn.cursor()
+            stats = schema_v2.sync_members_to_v2(cursor, [rec], season_name)
+            if not stats.get("purchases"):
+                conn.rollback()
+                msg = ("Une inscription plus prioritaire existe déjà pour cet adhérent "
+                       "cette saison (statut/montant supérieurs).")
+                print(f"[SQLITE] Ajout manuel refusé : {msg}")
+                return False, msg
+            conn.commit()
+            print(f"[SQLITE] Adhérent manuel ajouté : {rec['user_lastName']} {rec['user_firstName']} "
+                  f"({order_ref}, saison {season_name}).")
+            return True, order_ref
+        except Exception as e:
+            print(f"[SQLITE] Erreur lors de l'ajout manuel de l'adherent : {e}")
+            conn.rollback()
+            return False, str(e)
+        finally:
+            conn.close()
     @classmethod
     def get_season_tarifs(cls, season_name: str = "2026-2027") -> list:
         """Retourne la liste triée des tarifs HelloAsso distincts d'une saison (groupes disponibles)."""
@@ -690,8 +760,9 @@ class SqliteRepository:
         applique le rapprochement automatique (N° de licence puis Nom/Prénom).
         Ne modifie PAS la base. Retourne :
           {
-            "updates":   [(match_type, licence, passeports, diplomas, user_id), ...],
-            "unmatched": [{"nom", "prenom", "licence", "birth_date", "passeports", "diplomes"}, ...],
+            "updates":   [(match_type, licence, passeports, diplomas, document_sante, user_id), ...],
+            "unmatched": [{"nom", "prenom", "licence", "birth_date", "passeports", "diplomes",
+                           "document_sante"}, ...],
             "users":     [{"id", "last_name", "first_name", "licence_ffme", "birth_date"}, ...],
             "stats":     {"total_processed", "matched_by_licence", "matched_by_name", "errors"},
           }
@@ -719,10 +790,44 @@ class SqliteRepository:
                 stats["errors"].append(f"Colonne requise manquante dans le fichier Excel : {col}")
                 return prep
 
+        def _clean_licence(val):
+            """Extrait le N° de licence numérique : retire l'enrobage formule Excel
+            ('=\"636947\"'), le suffixe float ('636947.0') et tout caractère non numérique.
+            La mise à jour du N° de licence utilise cette valeur nettoyée (cohérente avec
+            l'index users_by_licence)."""
+            s = str(val or "").strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            return "".join(c for c in s if c.isdigit())
+
         cls.setup_database()
         conn = cls.get_connection()
         try:
             cursor = conn.cursor()
+
+            # Secours lecture des N° de licence : les exports FFME récents stockent la
+            # colonne « N° de licence » en formule Excel ('=\"636947\"') SANS valeur
+            # cachée — pandas la lit alors comme NaN. openpyxl (data_only=False) permet
+            # de relire le texte de la formule et d'en extraire le numéro.
+            openpyxl_licences = {}
+            try:
+                import openpyxl as _openpyxl
+                _wb = _openpyxl.load_workbook(excel_path, read_only=True, data_only=False)
+                _ws = _wb.active
+                _rows = list(_ws.iter_rows(values_only=True))
+                _wb.close()
+                if _rows:
+                    _headers = [str(h or "").strip() for h in _rows[0]]
+                    if "N\u00b0 de licence" in _headers:
+                        _ci = _headers.index("N\u00b0 de licence")
+                        for _r in _rows[1:]:
+                            _nom = str(_r[0] or "").strip() if len(_r) > 0 else ""
+                            _prenom = str(_r[1] or "").strip() if len(_r) > 1 else ""
+                            _val = _r[_ci] if _ci < len(_r) else None
+                            openpyxl_licences[(_nom, _prenom)] = "" if _val is None else str(_val)
+            except Exception:
+                openpyxl_licences = {}
+
             cursor.execute("""
                 SELECT id, last_name, first_name, licence_ffme,
                        COALESCE(birth_date, birth_date_raw, '') AS birth_date
@@ -738,10 +843,7 @@ class SqliteRepository:
             users_by_licence = {}
             users_by_name = {}
             for u in users:
-                lic = str(u["licence_ffme"] or "").strip()
-                if lic.endswith(".0"):
-                    lic = lic[:-2]
-                clean_lic = "".join(c for c in lic if c.isdigit())
+                clean_lic = _clean_licence(u["licence_ffme"])
                 if clean_lic:
                     users_by_licence[clean_lic] = u
                 nk = normalize_name(u["last_name"])
@@ -755,17 +857,17 @@ class SqliteRepository:
                     return ""
                 return str(val).strip() if not hasattr(val, "strftime") else val.strftime("%d/%m/%Y")
 
+            has_sante_col = "Document de sant\u00e9" in df.columns
+
             for idx, row in df.iterrows():
                 stats["total_processed"] += 1
-                raw_lic = row["N\u00b0 de licence"]
-                if pd.isna(raw_lic):
-                    lic_str = ""
-                elif isinstance(raw_lic, float):
-                    lic_str = str(int(raw_lic)).strip()
-                else:
-                    lic_str = str(raw_lic).strip()
                 nom = str(row["Nom"] or "").strip()
                 prenom = str(row["Pr\u00e9nom"] or "").strip()
+                raw_lic = row["N\u00b0 de licence"]
+                lic_str = "" if pd.isna(raw_lic) else _clean_licence(raw_lic)
+                if not lic_str:
+                    # Secours openpyxl : formules '=\"636947\"' sans valeur cachée
+                    lic_str = _clean_licence(openpyxl_licences.get((nom, prenom), ""))
 
                 matched = None
                 if lic_str and lic_str in users_by_licence:
@@ -777,14 +879,19 @@ class SqliteRepository:
                         matched = users_by_name[key]
                         match_type = "name"
                 if matched:
-                    final_lic = lic_str if lic_str else str(matched["licence_ffme"] or "")
+                    # Le N° de licence du fichier FFME (nettoyé) fait foi ; on conserve
+                    # la licence existante uniquement si le fichier n'en fournit pas.
+                    final_lic = lic_str if lic_str else _clean_licence(matched["licence_ffme"])
                     passports_str = _cell_str(row, "Passeports")
                     if passports_str.lower() in ("nan", "none", ""):
                         passports_str = ""
                     diplomas_str = _cell_str(row, "Dipl\u00f4mes")
                     if diplomas_str.lower() in ("nan", "none", ""):
                         diplomas_str = ""
-                    prep["updates"].append(("Terminé", final_lic, passports_str, diplomas_str, matched["id"]))
+                    sante_str = _cell_str(row, "Document de sant\u00e9") if has_sante_col else ""
+                    if sante_str.lower() in ("nan", "none"):
+                        sante_str = ""
+                    prep["updates"].append(("Terminé", final_lic, passports_str, diplomas_str, sante_str, matched["id"]))
                     if match_type == "licence":
                         stats["matched_by_licence"] += 1
                     else:
@@ -795,6 +902,7 @@ class SqliteRepository:
                         "birth_date": _cell_str(row, "Date de naissance"),
                         "passeports": _cell_str(row, "Passeports"),
                         "diplomes": _cell_str(row, "Dipl\u00f4mes"),
+                        "document_sante": _cell_str(row, "Document de sant\u00e9") if has_sante_col else "",
                     })
         except Exception as e:
             stats["errors"].append(f"Erreur lors du rapprochement FFME : {e}")
@@ -806,8 +914,9 @@ class SqliteRepository:
     def apply_ffme_matches(cls, updates: list) -> bool:
         """
         Phase B de l'import FFME — écrit en base les associations validées :
-        updates = [(match_type, licence, passeports, diplomas, user_id), ...]
-        Met à jour la licence/passeports/diplômes de l'utilisateur et bascule
+        updates = [(match_type, licence, passeports, diplomas, document_sante, user_id), ...]
+        Met à jour la licence/passeports/diplômes de l'utilisateur, écrit le Document de
+        santé (associé à la personne pour la saison active, via purchases) et bascule
         ses achats de la saison active en statut "Terminé" (licence FFME confirmée).
         """
         if not updates:
@@ -821,15 +930,16 @@ class SqliteRepository:
                 UPDATE users
                 SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
                 WHERE id = ?
-            """, [(u[1], u[2], u[3], u[4]) for u in updates])
+            """, [(u[1], u[2], u[3], u[5]) for u in updates])
             cursor.executemany("""
                 UPDATE purchases
-                SET status = ?, status_normalized = ?
+                SET status = ?, status_normalized = ?, document_sante = ?, updated_at = ?
                 WHERE user_id = ? AND order_id IN (
                     SELECT id FROM orders
                     WHERE season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
                 )
-            """, [(u[0], schema_v2.normalize_status(u[0]), u[4]) for u in updates])
+            """, [(u[0], schema_v2.normalize_status(u[0]), u[4],
+                   datetime.datetime.now().isoformat(timespec="seconds"), u[5]) for u in updates])
             conn.commit()
             return True
         except Exception as e:

@@ -1,12 +1,14 @@
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QProgressBar, QTextEdit, QDialog, QMessageBox,
-    QListWidget, QListWidgetItem, QDateEdit, QCheckBox, QApplication
+    QListWidget, QListWidgetItem, QDateEdit, QCheckBox, QApplication,
+    QTabWidget
 )
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor, QFont
 from presentation.workers import ExportWorker
+from presentation.pages.gmail_contact import GmailContactPage
 from paths import CODE_ROOT
 
 class ExportsPage(QWidget):
@@ -32,35 +34,102 @@ class ExportsPage(QWidget):
         desc_lbl.setStyleSheet("color: #64748B; font-size: 13px; margin-bottom: 10px;")
         layout.addWidget(desc_lbl)
 
-        # Conteneur des boutons d'exports
-        buttons_frame = QFrame()
-        buttons_frame.setStyleSheet("""
-            QFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
+        # Onglets : Exports + Gmail Contact (déplacé depuis la barre latérale)
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
-                padding: 15px;
+                background-color: #FFFFFF;
+                padding: 10px;
+            }
+            QTabBar::tab {
+                background-color: #F1F5F9;
+                color: #475569;
+                padding: 8px 16px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                color: #2563EB;
+                border-bottom: 2px solid #2563EB;
+            }
+            QTabBar::tab:hover {
+                background-color: #E2E8F0;
             }
         """)
-        buttons_layout = QVBoxLayout(buttons_frame)
-        buttons_layout.setSpacing(12)
 
-        # 1. Export FFME CSV
+        self.exports_tab = QWidget()
+        exports_layout = QVBoxLayout(self.exports_tab)
+        exports_layout.setContentsMargins(5, 5, 5, 5)
+        exports_layout.setSpacing(12)
+
+        # Onglets internes : FFME / Fiches de présence / Documents / Données & suivi
+        self.export_sections = QTabWidget()
+        self.export_sections.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                background-color: #FFFFFF;
+                padding: 10px;
+            }
+            QTabBar::tab {
+                background-color: #F1F5F9;
+                color: #475569;
+                padding: 8px 16px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                color: #2563EB;
+                border-bottom: 2px solid #2563EB;
+            }
+            QTabBar::tab:hover {
+                background-color: #E2E8F0;
+            }
+        """)
+
+        def _section_frame():
+            """Carte blanche arrondie pour le contenu d'un onglet interne."""
+            frame = QFrame()
+            frame.setStyleSheet("""
+                QFrame {
+                    background-color: #FFFFFF;
+                    border: 1px solid #E2E8F0;
+                    border-radius: 8px;
+                    padding: 15px;
+                }
+            """)
+            lay = QVBoxLayout(frame)
+            lay.setContentsMargins(15, 15, 15, 15)
+            lay.setSpacing(12)
+            return frame, lay
+
+        # --- Onglet 1 : FFME ---
+        ffme_tab, ffme_lay = _section_frame()
         ffme_layout = QHBoxLayout()
         self.ffme_btn = QPushButton("📊 Exporter le fichier FFME (CSV)")
         self.style_button(self.ffme_btn, "#2563EB", "#1D4ED8")
         self.ffme_btn.clicked.connect(lambda: self.run_export("ffme"))
         ffme_layout.addWidget(self.ffme_btn)
-        
+
         # Lien externe vers le portail fédéral FFME (Nouveau !)
         ffme_link = QLabel('<a href="https://myffme.fr/federal/gestion-des-licences/saisir-les-licences-via-csv/2027" style="color: #2563EB; font-weight: bold; text-decoration: underline;">🌐 Aller sur le portail d\'import FFME</a>')
         ffme_link.setOpenExternalLinks(True)
         ffme_link.setCursor(Qt.PointingHandCursor)
         ffme_link.setStyleSheet("font-size: 12px; margin-left: 15px;")
         ffme_layout.addWidget(ffme_link)
-        
+
         ffme_layout.addStretch()
-        buttons_layout.addLayout(ffme_layout)
+        ffme_lay.addLayout(ffme_layout)
 
         # Sous-label pour afficher les statistiques détaillées de l'export FFME (CSV)
         self.ffme_stats_lbl = QLabel("Chargement des statistiques de l'export FFME...")
@@ -78,9 +147,12 @@ class ExportsPage(QWidget):
                 border-radius: 4px;
             }
         """)
-        buttons_layout.addWidget(self.ffme_stats_lbl)
+        ffme_lay.addWidget(self.ffme_stats_lbl)
+        ffme_lay.addStretch()
+        self.export_sections.addTab(ffme_tab, "📊 FFME")
 
-        # 2. Fiches de présence (2 exports distincts, options préconfigurées)
+        # --- Onglet 2 : Fiches de présence ---
+        presence_tab, presence_lay = _section_frame()
         presence_layout = QHBoxLayout()
         self.presence_autonome_btn = QPushButton("🧗 Fiche présence autonome")
         self.style_button(self.presence_autonome_btn, "#0EA5E9", "#0284C7")
@@ -92,45 +164,45 @@ class ExportsPage(QWidget):
         self.presence_cours_btn.clicked.connect(lambda: self.run_presence_export("cours"))
         presence_layout.addWidget(self.presence_cours_btn)
         presence_layout.addStretch()
-        buttons_layout.addLayout(presence_layout)
+        presence_lay.addLayout(presence_layout)
+        presence_lay.addStretch()
+        self.export_sections.addTab(presence_tab, "📋 Fiches de présence")
 
-        # 3. Contacts d'urgence
-        urgency_layout = QHBoxLayout()
+        # --- Onglet 3 : Documents ---
+        documents_tab, documents_lay = _section_frame()
+        documents_layout = QHBoxLayout()
         self.urgency_btn = QPushButton("📞 Générer le cahier des contacts d'urgence (A4)")
         self.style_button(self.urgency_btn, "#EA580C", "#C2410C")
         self.urgency_btn.clicked.connect(lambda: self.run_export("urgency"))
-        urgency_layout.addWidget(self.urgency_btn)
-        urgency_layout.addStretch()
-        buttons_layout.addLayout(urgency_layout)
+        documents_layout.addWidget(self.urgency_btn)
 
-        # 4. Ouverture du dossier de modèles
-        template_layout = QHBoxLayout()
         self.template_folder_btn = QPushButton("📂 Ouvrir dossier Modèles")
         self.style_secondary_button(self.template_folder_btn, "#475569", "#334155")
         self.template_folder_btn.clicked.connect(self.open_template_folder)
-        template_layout.addWidget(self.template_folder_btn)
-        template_layout.addStretch()
-        buttons_layout.addLayout(template_layout)
+        documents_layout.addWidget(self.template_folder_btn)
+        documents_layout.addStretch()
+        documents_lay.addLayout(documents_layout)
+        documents_lay.addStretch()
+        self.export_sections.addTab(documents_tab, "📄 Documents")
 
-        # 5. Export Anciens Adhérents non réinscrits (Nouveau !)
-        anciens_layout = QHBoxLayout()
+        # --- Onglet 4 : Données & suivi ---
+        data_tab, data_lay = _section_frame()
+        data_layout = QHBoxLayout()
         self.anciens_btn = QPushButton("📥 Exporter les anciens adhérents non réinscrits (Excel)")
         self.style_button(self.anciens_btn, "#8B5CF6", "#7C3AED") # Jolie couleur violette pour le CRM
         self.anciens_btn.clicked.connect(lambda: self.run_export("anciens"))
-        anciens_layout.addWidget(self.anciens_btn)
-        anciens_layout.addStretch()
-        buttons_layout.addLayout(anciens_layout)
+        data_layout.addWidget(self.anciens_btn)
 
-        # 6. Import/Export MyCompet (Nouveau !)
-        mycompet_layout = QHBoxLayout()
         self.mycompet_btn = QPushButton("🏆 Récupérer les classements MyCompet (Excel)")
         self.style_button(self.mycompet_btn, "#D97706", "#B45309") # Belle couleur ambre/dorée pour la compétition
         self.mycompet_btn.clicked.connect(lambda: self.run_export("mycompet"))
-        mycompet_layout.addWidget(self.mycompet_btn)
-        mycompet_layout.addStretch()
-        buttons_layout.addLayout(mycompet_layout)
+        data_layout.addWidget(self.mycompet_btn)
+        data_layout.addStretch()
+        data_lay.addLayout(data_layout)
+        data_lay.addStretch()
+        self.export_sections.addTab(data_tab, "📥 Données & suivi")
 
-        layout.addWidget(buttons_frame)
+        exports_layout.addWidget(self.export_sections)
 
         # Barre de progression
         self.progress_bar = QProgressBar()
@@ -151,7 +223,7 @@ class ExportsPage(QWidget):
             }
         """)
         self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
+        exports_layout.addWidget(self.progress_bar)
 
         # Console de logs
         self.log_area = QTextEdit()
@@ -167,12 +239,19 @@ class ExportsPage(QWidget):
                 padding: 10px;
             }
         """)
-        layout.addWidget(self.log_area)
+        exports_layout.addWidget(self.log_area)
+
+        # Onglet Contact Gmail (intégré dans Exports, ancien onglet latéral supprimé)
+        self.gmail_tab = GmailContactPage()
+        self.tabs.addTab(self.exports_tab, "📄 Exports")
+        self.tabs.addTab(self.gmail_tab, "📇 Contact Gmail")
+
+        layout.addWidget(self.tabs)
 
     def style_button(self, btn: QPushButton, bg_color: str, hover_color: str):
-        """Applique une charte visuelle standardisée et dynamique sur les boutons d'exports (avec largeur fixe contrôlée)."""
+        """Applique une charte visuelle standardisée et dynamique sur les boutons d'exports (largeur normale)."""
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setFixedWidth(380) # Largeur fixe pour éviter l'étirement horizontal !
+        btn.setFixedWidth(380) # Largeur normale (évite les boutons surdimensionnés)
         btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_color};
@@ -182,7 +261,7 @@ class ExportsPage(QWidget):
                 padding: 10px 20px;
                 font-size: 13px;
                 font-weight: bold;
-                text-align: left;
+                text-align: center;
             }}
             QPushButton:hover {{
                 background-color: {hover_color};
@@ -193,9 +272,9 @@ class ExportsPage(QWidget):
         """)
 
     def style_secondary_button(self, btn: QPushButton, bg_color: str, hover_color: str):
-        """Applique une charte visuelle standardisée pour un bouton secondaire d'export (plus compact)."""
+        """Applique une charte visuelle standardisée pour un bouton secondaire d'export (largeur normale)."""
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setFixedWidth(200) # Largeur fixe plus petite que le bouton principal
+        btn.setFixedWidth(380) # Largeur normale (évite les boutons surdimensionnés)
         btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_color};
@@ -260,8 +339,8 @@ class ExportsPage(QWidget):
                     termine_count += 1
                     continue
                     
-                # 3. Date de naissance invalide
-                dob_val = p.get("champ_Date de naissance de l'adhérent") or ""
+                # 3. Date de naissance invalide (clé v2 'birth_date', repli clé legacy)
+                dob_val = p.get("birth_date") or p.get("champ_Date de naissance de l'adhérent") or ""
                 dob_date = None
                 if isinstance(dob_val, (datetime.datetime, datetime.date)):
                     dob_date = dob_val
@@ -316,6 +395,115 @@ class ExportsPage(QWidget):
         from domain.planning_groups import build_creneau_items
         return build_creneau_items(creneaux, include_autonome=False)
 
+    def _build_autonome_summary(self, selected_creneaux) -> str:
+        """Résumé pré-export de la fiche de présence autonome : adultes / mineurs par
+        sous-catégorie (tarifs HelloAsso des créneaux autonomes sélectionnés), puis les
+        jeunes mineurs autorisés (parentale Autonomes / Famille) qui seront ajoutés des
+        autres groupes. Reproduit la logique du générateur (presence_sheet_generator)
+        pour refléter exactement le contenu futur du fichier Excel."""
+        try:
+            import datetime
+            from infrastructure.sqlite_repository import SqliteRepository
+            raw = SqliteRepository.load_direct_data(season_filter="2026-2027")
+        except Exception as e:
+            return f"⚠️ Résumé indisponible : {e}"
+
+        selected_tarifs = set()
+        for c in selected_creneaux:
+            for t in (c.get("tarifs") or []):
+                selected_tarifs.add(str(t).strip())
+        if not selected_tarifs:
+            return "⚠️ Aucun tarif HelloAsso rattaché aux créneaux autonomes du planning."
+
+        today = datetime.date.today()
+
+        def _dob_of(p):
+            s = str(p.get("birth_date") or p.get("champ_Date de naissance de l'adhérent") or "").strip()
+            for fmt, sliced in (("%Y-%m-%d", True), ("%d/%m/%Y", False)):
+                try:
+                    return datetime.datetime.strptime(s[:10] if sliced else s, fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        def _ikey(p, dob):
+            return (
+                str(p.get("first_name") or "").strip().lower(),
+                str(p.get("last_name") or "").strip().lower(),
+                dob.isoformat() if dob else "",
+            )
+
+        def _age_of(dob):
+            if dob is None:
+                return None
+            return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+        # Comptage adultes / mineurs par sous-catégorie (hors annulés, personnes uniques)
+        stats = {t: {"adultes": 0, "mineurs": 0, "age_inconnu": 0} for t in sorted(selected_tarifs)}
+        counted_keys = set()
+        seen_per_tarif = {t: set() for t in selected_tarifs}
+        for p in raw:
+            tarif = str(p.get("tarif_name") or "").strip()
+            if tarif not in stats or "annul" in str(p.get("status") or "").lower():
+                continue
+            dob = _dob_of(p)
+            ikey = _ikey(p, dob)
+            if ikey in seen_per_tarif[tarif]:
+                continue
+            seen_per_tarif[tarif].add(ikey)
+            counted_keys.add(ikey)
+            age = _age_of(dob)
+            if age is None:
+                stats[tarif]["age_inconnu"] += 1
+            elif age < 18:
+                stats[tarif]["mineurs"] += 1
+            else:
+                stats[tarif]["adultes"] += 1
+
+        # Jeunes mineurs autorisés (Autonomes / Famille) ajoutés des autres groupes
+        added_minors = []
+        added_seen = set()
+        for p in raw:
+            if "annul" in str(p.get("status") or "").lower():
+                continue
+            if not (str(p.get("parental_auth_autonomous") or "").strip() == "Oui"
+                    or str(p.get("parental_auth_family") or "").strip() == "Oui"):
+                continue
+            dob = _dob_of(p)
+            ikey = _ikey(p, dob)
+            if ikey in counted_keys or ikey in added_seen:
+                continue
+            age = _age_of(dob)
+            if age is not None and age >= 18:
+                continue
+            added_seen.add(ikey)
+            added_minors.append((p, age))
+
+        # Construction du texte (HTML léger)
+        lines = []
+        total_adultes = total_mineurs = total_inconnu = 0
+        for tarif in sorted(selected_tarifs):
+            s = stats[tarif]
+            total_adultes += s["adultes"]
+            total_mineurs += s["mineurs"]
+            total_inconnu += s["age_inconnu"]
+            parts = [f"{s['adultes']} adulte(s)", f"{s['mineurs']} mineur(s)"]
+            if s["age_inconnu"]:
+                parts.append(f"{s['age_inconnu']} âge inconnu")
+            lines.append(f"• <b>{tarif}</b> — " + ", ".join(parts))
+
+        total_mineurs += len(added_minors)
+        lines.append(f"➕ <b>Jeunes mineurs autorisés ajoutés d'autres groupes : {len(added_minors)}</b>")
+        for p, age in sorted(added_minors, key=lambda x: (str(x[0].get("last_name") or "").lower())):
+            age_txt = f"{age} ans" if age is not None else "âge inconnu"
+            lines.append(
+                f"&nbsp;&nbsp;&nbsp;- {p.get('first_name')} {p.get('last_name')} "
+                f"({age_txt}) — {p.get('tarif_name')}"
+            )
+        lines.append(f"<b>Total : {total_adultes} adulte(s), {total_mineurs} mineur(s)</b>"
+                     + (f" (+{total_inconnu} âge inconnu)" if total_inconnu else ""))
+        return "<br>" .join(lines)
+
     def run_presence_export(self, variant: str):
         """Lance les fiches de présence (variante 'autonome' ou 'cours') à partir des
         groupes de créneaux du planning (un créneau peut regrouper plusieurs tarifs).
@@ -349,6 +537,7 @@ class ExportsPage(QWidget):
                     )
                     return
                 selected_groups = [c["groupe"] for c in selected_creneaux]
+                summary_text = self._build_autonome_summary(selected_creneaux)
                 dialog = PresenceSelectionDialog(
                     selected_groups,
                     title="🧗 Fiche de Présence Autonome",
@@ -359,12 +548,14 @@ class ExportsPage(QWidget):
                     ),
                     fixed_selection=True,
                     tooltips=tooltips,
+                    summary_text=summary_text,
                     parent=self,
                 )
-                preset = {"merge_groups": True, "auth_only": True, "hide_badge_cols": False, "same_sheet": False}
+                preset = {"merge_groups": True, "auth_only": True, "hide_badge_cols": False,
+                          "same_sheet": False}
             else:
                 # Export des cours : sélection manuelle, badges masqués, tableaux empilés dans la même feuille
-                cours_creneaux = [c for c in creneaux if not is_autonome(c)]
+                cours_creneaux = [c for c in creneaux if not is_autonome_creneau(c)]
                 if not cours_creneaux:
                     QMessageBox.warning(self, "Aucun cours", "Aucun créneau de cours trouvé dans le planning (BDD).")
                     return
@@ -381,10 +572,15 @@ class ExportsPage(QWidget):
                     group_items=self._build_cours_hierarchy(cours_creneaux),
                     parent=self,
                 )
-                preset = {"merge_groups": False, "auth_only": False, "hide_badge_cols": True, "same_sheet": True}
+                preset = {"merge_groups": False, "auth_only": False, "hide_badge_cols": True,
+                          "same_sheet": True}
 
             if dialog.exec() != QDialog.Accepted:
                 return
+
+            # La valeur de la case « Document de santé » est lue APRÈS la fermeture
+            # de la fenêtre (elle n'existe pas encore avant l'interaction utilisateur).
+            show_health_col = bool(getattr(dialog, "show_health_col", False))
 
             self.set_buttons_enabled(False)
             self.progress_bar.setValue(0)
@@ -407,7 +603,8 @@ class ExportsPage(QWidget):
                 auth_only=preset["auth_only"],
                 hide_badge_cols=preset["hide_badge_cols"],
                 same_sheet=preset["same_sheet"],
-                group_tarifs_map=group_tarifs_map
+                group_tarifs_map=group_tarifs_map,
+                show_health_col=show_health_col
             )
             self.worker.progress.connect(self.on_progress)
             self.worker.finished.connect(self.on_finished)
@@ -589,17 +786,19 @@ class PresenceSelectionDialog(QDialog):
     ou liste fixe en lecture seule (export « autonome »), plus la période de présence.
     Les options techniques (fusion, autorisation, badge, même feuille) sont préconfigurées
     par type d'export côté ExportsPage et ne sont plus exposées à l'utilisateur."""
-    def __init__(self, groups, title, description, fixed_selection=False, tooltips=None, group_items=None, parent=None):
+    def __init__(self, groups, title, description, fixed_selection=False, tooltips=None, group_items=None, parent=None, summary_text=None):
         super().__init__(parent)
         self.groups = sorted(groups)
         self.fixed_selection = fixed_selection
         self.tooltips = tooltips or {}
+        self.summary_text = summary_text
         # Structure hiérarchique optionnelle : liste de (kind, label) où
         # kind ∈ {'section', 'sub-section', 'group'}. Sinon liste plate.
         self.group_items = group_items if group_items is not None else [("group", g) for g in self.groups]
         self.selected_groups = []
         self.start_date_str = None
         self.end_date_str = None
+        self.show_health_col = False
         self.init_ui(title, description)
 
     def init_ui(self, title, description):
@@ -680,6 +879,34 @@ class PresenceSelectionDialog(QDialog):
         desc_lbl.setStyleSheet("color: #475569; font-weight: 500; font-size: 11px;")
         layout.addWidget(desc_lbl)
 
+        # Résumé pré-export (participants par sous-catégorie, export « autonome »)
+        if self.summary_text:
+            summary_frame = QFrame()
+            summary_frame.setStyleSheet("""
+                QFrame {
+                    background-color: #EFF6FF;
+                    border: 1px solid #BFDBFE;
+                    border-radius: 6px;
+                    padding: 10px;
+                }
+                QLabel {
+                    color: #1E3A8A;
+                    font-weight: 500;
+                    font-size: 11px;
+                }
+            """)
+            summary_layout = QVBoxLayout(summary_frame)
+            summary_layout.setContentsMargins(4, 4, 4, 4)
+            summary_title = QLabel("📊 Résumé avant export")
+            summary_title.setStyleSheet("color: #1E3A8A; font-weight: bold; font-size: 12px;")
+            summary_layout.addWidget(summary_title)
+            summary_lbl = QLabel(self.summary_text)
+            summary_lbl.setWordWrap(True)
+            summary_lbl.setTextFormat(Qt.RichText)
+            summary_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            summary_layout.addWidget(summary_lbl)
+            layout.addWidget(summary_frame)
+
         lbl = QLabel(
             "Groupes inclus (sélection figée) :"
             if self.fixed_selection else
@@ -738,6 +965,18 @@ class PresenceSelectionDialog(QDialog):
         list_h = min(row_h * rows + 16, int(screen.height() * 0.55))
         self.list_widget.setMinimumHeight(list_h)
         self.setMinimumHeight(min(400 + list_h, screen.height() - 40))
+
+        # Option « Document de santé » : ajoute une colonne Santé aux tableaux
+        # (✗ rouge si le document est en attente). (Nouveau !)
+        self.health_col_checkbox = QCheckBox(
+            "🩺 Ajouter la colonne « Santé » (✗ rouge si document en attente)"
+        )
+        self.health_col_checkbox.setChecked(True)
+        self.health_col_checkbox.setToolTip(
+            "Ajoute une colonne affichant le Document de santé FFME : "
+            "une croix rouge si le document est « ATTENTE », les autres valeurs sont masquées."
+        )
+        layout.addWidget(self.health_col_checkbox)
 
         # Boutons de sélection de masse (uniquement pour la sélection des cours)
         if not self.fixed_selection:
@@ -894,4 +1133,6 @@ class PresenceSelectionDialog(QDialog):
         # Récupérer et formater les dates sélectionnées
         self.start_date_str = self.start_date_edit.date().toString("dd/MM/yyyy")
         self.end_date_str = self.end_date_edit.date().toString("dd/MM/yyyy")
+        if hasattr(self, "health_col_checkbox"):
+            self.show_health_col = self.health_col_checkbox.isChecked()
         self.accept()

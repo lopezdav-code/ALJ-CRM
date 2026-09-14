@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
     QFrame, QProgressBar, QTextEdit, QMessageBox, QGroupBox,
-    QCheckBox, QListWidget, QListWidgetItem
+    QCheckBox, QGridLayout, QScrollArea
 )
 from PySide6.QtCore import Qt
 from presentation.workers import SyncGmailContactsWorker
@@ -23,7 +23,8 @@ class GmailContactPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.group_tarifs_map = {}  # Nom de groupe de créneau -> tarifs HelloAsso associés
+        self.group_tarifs_map = {}   # Nom de groupe de créneau -> tarifs HelloAsso associés
+        self.group_checkboxes = {}   # Nom de groupe -> QCheckBox (grille 2 colonnes)
         self.init_ui()
         self.load_available_groups()
 
@@ -114,7 +115,8 @@ class GmailContactPage(QWidget):
         layout.addWidget(self.log_area, stretch=1)
 
     def _build_left_column(self):
-        """Colonne gauche : sélection des groupes de créneaux (cases à cocher + compteurs)."""
+        """Colonne gauche : sélection des groupes de créneaux (cases à cocher sur
+        2 colonnes + compteurs, boutons Tout cocher / Tout décocher)."""
         left_col = QVBoxLayout()
         left_col.setSpacing(10)
 
@@ -150,42 +152,27 @@ class GmailContactPage(QWidget):
         header_row.addWidget(self.select_none_btn)
         left_col.addLayout(header_row)
 
-        self.group_list = QListWidget()
-        self.group_list.setStyleSheet("""
-            QListWidget {
+        # Grille 2 colonnes de cases à cocher (zone défilante)
+        self.groups_scroll = QScrollArea()
+        self.groups_scroll.setWidgetResizable(True)
+        self.groups_scroll.setFrameShape(QFrame.StyledPanel)
+        self.groups_scroll.setStyleSheet("""
+            QScrollArea {
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                padding: 6px;
-                font-size: 13px;
                 background-color: #FFFFFF;
-                color: #1E293B;
-            }
-            QListWidget::item {
-                padding: 6px 4px;
-            }
-            QListWidget::item:hover {
-                background-color: #F8FAFC;
-            }
-            QListWidget::item:checked {
-                color: #1D4ED8;
-                font-weight: bold;
-            }
-            QListWidget::indicator {
-                width: 15px;
-                height: 15px;
-                border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-            }
-            QListWidget::indicator:checked {
-                background-color: #2563EB;
-                border-color: #2563EB;
-                image: url(none);
             }
         """)
-        self.group_list.itemClicked.connect(self._on_item_clicked)
-        self.group_list.itemChanged.connect(lambda _: self.update_preview())
-        left_col.addWidget(self.group_list, stretch=1)
+        self.groups_container = QWidget()
+        self.groups_container.setStyleSheet("background-color: #FFFFFF;")
+        self.groups_grid = QGridLayout(self.groups_container)
+        self.groups_grid.setContentsMargins(10, 8, 10, 8)
+        self.groups_grid.setHorizontalSpacing(24)
+        self.groups_grid.setVerticalSpacing(8)
+        self.groups_grid.setColumnStretch(0, 1)
+        self.groups_grid.setColumnStretch(1, 1)
+        self.groups_scroll.setWidget(self.groups_container)
+        left_col.addWidget(self.groups_scroll, stretch=1)
 
         hint_lbl = QLabel("Un groupe de créneau peut regrouper plusieurs tarifs HelloAsso.\nSurvolez un groupe pour voir ses créneaux et tarifs associés.")
         hint_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic;")
@@ -344,16 +331,40 @@ class GmailContactPage(QWidget):
                 tooltip += f"\nTarifs HelloAsso : {tarifs_txt}"
                 rows.append((g_name, count, tooltip))
 
-            self.group_list.blockSignals(True)
-            self.group_list.clear()
-            for name, count, tooltip in rows:
-                item = QListWidgetItem(f"{name}   ({count})")
-                item.setData(Qt.UserRole, name)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Unchecked)
-                item.setToolTip(tooltip)
-                self.group_list.addItem(item)
-            self.group_list.blockSignals(False)
+            self.group_checkboxes = {}
+            # Vider la grille (recréation d'un conteneur interne)
+            while self.groups_grid.count():
+                item = self.groups_grid.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+            for idx, (name, count, tooltip) in enumerate(rows):
+                cb = QCheckBox(f"{name}   ({count})")
+                cb.setToolTip(tooltip)
+                cb.setStyleSheet("""
+                    QCheckBox {
+                        color: #1E293B;
+                        font-size: 13px;
+                        padding: 2px 0;
+                    }
+                    QCheckBox:hover {
+                        color: #1D4ED8;
+                    }
+                    QCheckBox::indicator {
+                        width: 15px;
+                        height: 15px;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 4px;
+                        background-color: #FFFFFF;
+                    }
+                    QCheckBox::indicator:checked {
+                        background-color: #2563EB;
+                        border-color: #2563EB;
+                    }
+                """)
+                cb.stateChanged.connect(self.update_preview)
+                self.group_checkboxes[name] = cb
+                self.groups_grid.addWidget(cb, idx // 2, idx % 2)
 
             self.update_preview()
         except Exception as e:
@@ -362,30 +373,22 @@ class GmailContactPage(QWidget):
     # ------------------------------------------------------------------
     # Interactions UI
     # ------------------------------------------------------------------
-    def _on_item_clicked(self, item):
-        """Un simple clic sur la ligne bascule la case à cocher (UX multi-sélection)."""
-        item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
-
     def get_checked_groups(self):
         """Retourne les noms de groupes cochés."""
-        return [
-            self.group_list.item(i).data(Qt.UserRole)
-            for i in range(self.group_list.count())
-            if self.group_list.item(i).checkState() == Qt.Checked
-        ]
+        return [name for name, cb in self.group_checkboxes.items() if cb.isChecked()]
 
     def check_all_groups(self):
-        self.group_list.blockSignals(True)
-        for i in range(self.group_list.count()):
-            self.group_list.item(i).setCheckState(Qt.Checked)
-        self.group_list.blockSignals(False)
+        for cb in self.group_checkboxes.values():
+            cb.blockSignals(True)
+            cb.setChecked(True)
+            cb.blockSignals(False)
         self.update_preview()
 
     def uncheck_all_groups(self):
-        self.group_list.blockSignals(True)
-        for i in range(self.group_list.count()):
-            self.group_list.item(i).setCheckState(Qt.Unchecked)
-        self.group_list.blockSignals(False)
+        for cb in self.group_checkboxes.values():
+            cb.blockSignals(True)
+            cb.setChecked(False)
+            cb.blockSignals(False)
         self.update_preview()
 
     def update_preview(self):
@@ -411,7 +414,7 @@ class GmailContactPage(QWidget):
 
     def set_ui_enabled(self, enabled: bool):
         """Active ou désactive les composants graphiques."""
-        self.group_list.setEnabled(enabled)
+        self.groups_scroll.setEnabled(enabled)
         self.select_all_btn.setEnabled(enabled)
         self.select_none_btn.setEnabled(enabled)
         self.use_primary_email_cb.setEnabled(enabled)

@@ -3,12 +3,17 @@ import socket
 import sqlite3
 import webbrowser
 import threading
+import time
+import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QPushButton, QMessageBox, QGridLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView
+    QHeaderView, QSizePolicy
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QPixmap
+
+from paths import CODE_ROOT, ROOT_DIR
 
 from infrastructure.secret_store import SecretStore
 
@@ -82,204 +87,259 @@ class ReportsPage(QWidget):
         super().__init__(parent)
         self.init_ui()
 
+    # ------------------------------------------------------------------
+    # Styles QSS centralises de la page (maintenance facilitee)
+    # ------------------------------------------------------------------
+    QSS_CARD = "QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; }"
+    QSS_ICON = "QLabel {{ background-color: {bg}; border-radius: 10px; font-size: 22px; }}"
+    QSS_PILL_OK = "QLabel { background-color: #DCFCE7; color: #166534; border: 1px solid #86EFAC; border-radius: 10px; padding: 4px 12px; font-size: 12px; font-weight: bold; }"
+    QSS_PILL_WARN = "QLabel { background-color: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; border-radius: 10px; padding: 4px 12px; font-size: 12px; font-weight: bold; }"
+    QSS_PILL_NEUTRAL = "QLabel { background-color: #F1F5F9; color: #475569; border: 1px solid #E2E8F0; border-radius: 10px; padding: 4px 12px; font-size: 12px; font-weight: bold; }"
+    QSS_BTN_PRIMARY = """
+        QPushButton {
+            background-color: #2563EB; color: #FFFFFF; border: none;
+            border-radius: 6px; padding: 9px 16px; font-weight: bold; font-size: 12px;
+        }
+        QPushButton:hover { background-color: #1D4ED8; }
+        QPushButton:disabled { background-color: #94A3B8; }
+    """
+    QSS_BTN_SECONDARY = """
+        QPushButton {
+            background-color: #FFFFFF; color: #334155; border: 1px solid #CBD5E1;
+            border-radius: 6px; padding: 9px 16px; font-weight: bold; font-size: 12px;
+        }
+        QPushButton:hover { background-color: #F8FAFC; border-color: #94A3B8; }
+    """
+
+    def _make_card_title(self, icon_text, icon_bg, title_text, subtitle_text=None):
+        """En-tete de carte : pastille icone + titre (et sous-titre facultatif)."""
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        icon_lbl = QLabel(icon_text)
+        icon_lbl.setFixedSize(46, 46)
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setStyleSheet(self.QSS_ICON.format(bg=icon_bg))
+        head.addWidget(icon_lbl)
+
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        t = QLabel(title_text)
+        t.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E293B; background: transparent; border: none;")
+        col.addWidget(t)
+        if subtitle_text:
+            s = QLabel(subtitle_text)
+            s.setStyleSheet("font-size: 11px; color: #64748B; background: transparent; border: none;")
+            col.addWidget(s)
+        head.addLayout(col)
+        head.addStretch()
+        return head
+
+    def _vline(self):
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet("color: #BFDBFE; max-height: 20px;")
+        return sep
+
     def init_ui(self):
-        # Utiliser un layout vertical principal avec défilement si nécessaire
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 25, 30, 25)
-        layout.setSpacing(15)
+        layout.setSpacing(14)
 
-        # 1. EN-TÊTE PRINCIPAL DE LA PAGE
-        header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1E3A8A;
-                border-radius: 8px;
-                padding: 20px;
-            }
-        """)
-        header_layout = QVBoxLayout(header_frame)
-        header_layout.setSpacing(5)
-
+        # 1. TITRE DE PAGE (gabarit commun a tous les onglets)
         title = QLabel("🔧 Boîte à Outils d'Administration & Analyses")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
-        header_layout.addWidget(title)
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
+        title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(title)
 
-        subtitle = QLabel("Gérez le serveur local de l'application, accédez aux analyses cartographiques et supervisez la cohérence des adresses.")
-        subtitle.setStyleSheet("font-size: 12px; color: #BFDBFE;")
-        header_layout.addWidget(subtitle)
+        subtitle = QLabel("Accédez aux outils d'analyse et de cartographie, et gérez la qualité des données ainsi que la supervision du serveur.")
+        subtitle.setStyleSheet("color: #64748B; font-size: 13px;")
+        subtitle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(subtitle)
 
-        layout.addWidget(header_frame)
+        # 2. BARRE D'ETAT GENERAL (outils disponibles / anomalies / API)
+        self.status_bar = QFrame()
+        self.status_bar.setObjectName("StatusBar")
+        self.status_bar.setStyleSheet("""
+            QFrame#StatusBar {
+                background-color: #EFF6FF;
+                border: 1px solid #DBEAFE;
+                border-radius: 8px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        status_layout = QHBoxLayout(self.status_bar)
+        status_layout.setContentsMargins(16, 14, 16, 14)
+        status_layout.setSpacing(12)
 
-        # 2. GRILLE D'OUTILS ET DE MODULES (2 Colonnes)
-        grid = QGridLayout()
-        grid.setSpacing(20)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
+        lbl_tools = QLabel("🧩 3 outils disponibles")
+        lbl_tools.setStyleSheet("color: #1E293B; font-size: 13px; font-weight: bold;")
+        lbl_tools.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        lbl_tools.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        status_layout.addWidget(lbl_tools, 1)
 
-        # --- OUTIL 1 : CARTOGRAPHIE INTERACTIVE ---
+        self.status_anomalies_lbl = QLabel("✅ 0 anomalie d'adresse")
+        self.status_anomalies_lbl.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: bold;")
+        self.status_anomalies_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.status_anomalies_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
+        status_layout.addWidget(self.status_anomalies_lbl, 1)
+        status_layout.addWidget(self._vline())
+
+        self.status_api_lbl = QLabel("🟢 API opérationnelle")
+        self.status_api_lbl.setStyleSheet("color: #16A34A; font-size: 13px; font-weight: bold;")
+        self.status_api_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.status_api_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
+        status_layout.addWidget(self.status_api_lbl, 1)
+        layout.addWidget(self.status_bar)
+
+        # 3. ZONE 1 - OUTILS PRINCIPAUX (2 cartes cote a cote)
+        tools_grid = QGridLayout()
+        tools_grid.setSpacing(14)
+        tools_grid.setColumnStretch(0, 1)
+        tools_grid.setColumnStretch(1, 1)
+
+        # --- Carte 1 : Cartographie interactive ---
         card_map = QFrame()
-        card_map.setStyleSheet("QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; }")
-        lay_map = QVBoxLayout(card_map)
-        lay_map.setSpacing(12)
-
-        lbl_map_title = QLabel("📍 Cartographie Interactive")
-        lbl_map_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; border-bottom: 1px solid #F1F5F9; padding-bottom: 6px;")
-        lay_map.addWidget(lbl_map_title)
-
-        lbl_map_desc = QLabel(
-            "Visualisez la répartition géographique de vos adhérents sur une carte de France interactive. "
-            "Permet d'analyser la densité d'élèves par code postal et par commune pour adapter vos créneaux."
+        card_map.setStyleSheet(self.QSS_CARD)
+        card_map.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        map_outer = QHBoxLayout(card_map)
+        map_outer.setContentsMargins(18, 16, 18, 16)
+        map_outer.setSpacing(16)
+        lay_map = QVBoxLayout()
+        lay_map.setSpacing(10)
+        map_outer.addLayout(lay_map, 1)
+        lay_map.addLayout(self._make_card_title("🗺️", "#DBEAFE", "Cartographie interactive"))
+        desc_map = QLabel(
+            "Visualisez la répartition géographique des adhérents sur une carte de France interactive. "
+            "Analysez la densité d'effectifs par commune, département ou région."
         )
-        lbl_map_desc.setWordWrap(True)
-        lbl_map_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
-        lay_map.addWidget(lbl_map_desc)
+        desc_map.setWordWrap(True)
+        desc_map.setStyleSheet("font-size: 12px; color: #475569; background: transparent; border: none;")
+        lay_map.addWidget(desc_map)
         lay_map.addStretch()
-
-        btn_open_map = QPushButton("🗺️ Ouvrir la carte interactive")
+        btn_open_map = QPushButton("🗺️  Ouvrir la carte interactive")
         btn_open_map.setCursor(Qt.PointingHandCursor)
-        btn_open_map.setStyleSheet("""
-            QPushButton {
-                background-color: #0EA5E9;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 15px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #0284C7;
-            }
-        """)
+        btn_open_map.setStyleSheet(self.QSS_BTN_PRIMARY)
         btn_open_map.clicked.connect(self.open_interactive_map)
-        lay_map.addWidget(btn_open_map)
-        grid.addWidget(card_map, 0, 0)
+        lay_map.addWidget(btn_open_map, Qt.AlignLeft)
+        map_preview = self._load_doc_image("maps.png", height=170)
+        if map_preview is not None:
+            map_outer.addWidget(map_preview)
+        tools_grid.addWidget(card_map, 0, 0)
 
-        # --- OUTIL 2 : TABLEAU CROISÉ DYNAMIQUE ---
+        # --- Carte 2 : Analyse des effectifs (TCD) ---
         card_tcd = QFrame()
-        card_tcd.setStyleSheet("QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; }")
-        lay_tcd = QVBoxLayout(card_tcd)
-        lay_tcd.setSpacing(12)
-
-        lbl_tcd_title = QLabel("📊 Tableau Croisé Dynamique (TCD)")
-        lbl_tcd_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; border-bottom: 1px solid #F1F5F9; padding-bottom: 6px;")
-        lay_tcd.addWidget(lbl_tcd_title)
-
-        lbl_tcd_desc = QLabel(
-            "Explorez, filtrez et croisez vos dossiers d'inscriptions à l'aide d'une grille de reporting dynamique. "
-            "Glissez-déposez simplement les étiquettes (Cours, Sexe, Villes, Statut) pour construire vos analyses en temps réel."
+        card_tcd.setStyleSheet(self.QSS_CARD)
+        card_tcd.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        tcd_outer = QHBoxLayout(card_tcd)
+        tcd_outer.setContentsMargins(18, 16, 18, 16)
+        tcd_outer.setSpacing(16)
+        lay_tcd = QVBoxLayout()
+        lay_tcd.setSpacing(10)
+        tcd_outer.addLayout(lay_tcd, 1)
+        lay_tcd.addLayout(self._make_card_title("📊", "#EDE9FE", "Analyse des effectifs (TCD)"))
+        desc_tcd = QLabel(
+            "Explorez et croisez vos données d'inscription à l'aide d'une grille de reporting dynamique. "
+            "Filtrez, regroupez et analysez vos adhérents en quelques clics."
         )
-        lbl_tcd_desc.setWordWrap(True)
-        lbl_tcd_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
-        lay_tcd.addWidget(lbl_tcd_desc)
+        desc_tcd.setWordWrap(True)
+        desc_tcd.setStyleSheet("font-size: 12px; color: #475569; background: transparent; border: none;")
+        lay_tcd.addWidget(desc_tcd)
         lay_tcd.addStretch()
-
-        btn_open_tcd = QPushButton("📊 Ouvrir le TCD Interactif")
+        btn_open_tcd = QPushButton("📊  Ouvrir le tableau croisé dynamique")
         btn_open_tcd.setCursor(Qt.PointingHandCursor)
-        btn_open_tcd.setStyleSheet("""
-            QPushButton {
-                background-color: #2563EB;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 15px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #1D4ED8;
-            }
-        """)
+        btn_open_tcd.setStyleSheet(self.QSS_BTN_PRIMARY)
         btn_open_tcd.clicked.connect(self.open_interactive_pivot)
-        lay_tcd.addWidget(btn_open_tcd)
-        grid.addWidget(card_tcd, 0, 1)
+        lay_tcd.addWidget(btn_open_tcd, Qt.AlignLeft)
+        tcd_preview = self._load_doc_image("TDC.png", height=170)
+        if tcd_preview is not None:
+            tcd_outer.addWidget(tcd_preview)
+        tools_grid.addWidget(card_tcd, 0, 1)
 
-        # --- OUTIL 3 : CONTRÔLE & API SERVEUR LOCAL ---
-        card_srv = QFrame()
-        card_srv.setStyleSheet("QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; }")
-        lay_srv = QVBoxLayout(card_srv)
-        lay_srv.setSpacing(12)
+        layout.addLayout(tools_grid)
 
-        lbl_srv_title = QLabel("⚙️ Supervision du Serveur API Local")
-        lbl_srv_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; border-bottom: 1px solid #F1F5F9; padding-bottom: 6px;")
-        lay_srv.addWidget(lbl_srv_title)
+        # 4. ZONE 2/3 - QUALITE DES ADRESSES (large) + SERVEUR API LOCAL (compact)
+        bottom_grid = QGridLayout()
+        bottom_grid.setSpacing(14)
+        bottom_grid.setColumnStretch(0, 1)
+        bottom_grid.setColumnStretch(1, 1)
 
-        lbl_srv_desc = QLabel(
-            "Supervisez et pilotez le serveur web local d'arrière-plan (FastAPI / Uvicorn). "
-            "Il traite en temps réel les calculs cartographiques et structure l'analyse dynamique des effectifs."
-        )
-        lbl_srv_desc.setWordWrap(True)
-        lbl_srv_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
-        lay_srv.addWidget(lbl_srv_desc)
-        lay_srv.addStretch()
+        # --- Carte Qualite des adresses ---
+        card_quality = QFrame()
+        card_quality.setStyleSheet(self.QSS_CARD)
+        card_quality.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        quality_layout = QVBoxLayout(card_quality)
+        quality_layout.setContentsMargins(18, 16, 18, 16)
+        quality_layout.setSpacing(12)
 
-        # Ligne de boutons d'administration
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+        q_head = QHBoxLayout()
+        q_head.setSpacing(12)
+        q_icon = QLabel("📍")
+        q_icon.setFixedSize(46, 46)
+        q_icon.setAlignment(Qt.AlignCenter)
+        q_icon.setStyleSheet(self.QSS_ICON.format(bg="#DBEAFE"))
+        q_head.addWidget(q_icon)
+        q_col = QVBoxLayout()
+        q_col.setSpacing(2)
+        q_title = QLabel("Qualité des adresses")
+        q_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E293B; background: transparent; border: none;")
+        q_col.addWidget(q_title)
+        q_sub = QLabel("Vérification et correction des adresses des adhérents.")
+        q_sub.setStyleSheet("font-size: 11px; color: #64748B; background: transparent; border: none;")
+        q_col.addWidget(q_sub)
+        q_head.addLayout(q_col)
+        q_head.addStretch()
+        self.quality_badge = QLabel("Aucune anomalie détectée")
+        self.quality_badge.setStyleSheet(self.QSS_PILL_OK)
+        q_head.addWidget(self.quality_badge, Qt.AlignTop)
+        quality_layout.addLayout(q_head)
 
-        btn_test_srv = QPushButton("⚡ Tester la Connexion")
-        btn_test_srv.setCursor(Qt.PointingHandCursor)
-        btn_test_srv.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 15px;
-                font-weight: bold;
-                font-size: 12px;
+        # Etat OK : encart vert compact (empty state)
+        self.quality_ok_widget = QFrame()
+        self.quality_ok_widget.setStyleSheet("""
+            QFrame {
+                background-color: #F0FDF4;
+                border: 1px solid #BBF7D0;
+                border-radius: 8px;
             }
-            QPushButton:hover {
-                background-color: #059669;
+            QLabel { background: transparent; border: none; }
+        """)
+        # Compact : l'encart ne doit jamais s'etirer verticalement (empty state)
+        self.quality_ok_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.quality_ok_widget.setMaximumHeight(210)
+        ok_layout = QVBoxLayout(self.quality_ok_widget)
+        ok_layout.setContentsMargins(16, 14, 16, 14)
+        ok_layout.setSpacing(6)
+        ok_layout.setAlignment(Qt.AlignHCenter)
+        ok_circle = QLabel("✓")
+        ok_circle.setFixedSize(52, 52)
+        ok_circle.setAlignment(Qt.AlignCenter)
+        ok_circle.setStyleSheet("""
+            QLabel {
+                background-color: #16A34A; color: #FFFFFF;
+                border-radius: 26px; font-size: 26px; font-weight: bold;
             }
         """)
-        btn_test_srv.clicked.connect(self.test_server_connection)
-        btn_layout.addWidget(btn_test_srv)
+        ok_layout.addWidget(ok_circle, Qt.AlignHCenter)
+        ok_t1 = QLabel("Toutes les adresses sont reconnues")
+        ok_t1.setStyleSheet("font-size: 15px; font-weight: bold; color: #14532D;")
+        ok_layout.addWidget(ok_t1, Qt.AlignHCenter)
+        ok_t2 = QLabel("✓ 0 anomalie")
+        ok_t2.setStyleSheet("font-size: 12px; font-weight: bold; color: #16A34A;")
+        ok_layout.addWidget(ok_t2, Qt.AlignHCenter)
+        ok_t3 = QLabel("Aucune adresse n'a besoin d'être corrigée ou géocodée.")
+        ok_t3.setStyleSheet("font-size: 12px; color: #475569;")
+        ok_layout.addWidget(ok_t3, Qt.AlignHCenter)
+        quality_layout.addWidget(self.quality_ok_widget)
 
-        btn_restart_srv = QPushButton("🔄 Relancer le Serveur")
-        btn_restart_srv.setCursor(Qt.PointingHandCursor)
-        btn_restart_srv.setStyleSheet("""
-            QPushButton {
-                background-color: #64748B;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 15px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #475569;
-            }
-        """)
-        btn_restart_srv.clicked.connect(self.restart_map_server)
-        btn_layout.addWidget(btn_restart_srv)
+        # Etat anomalies : actions + tableau d'audit
+        self.quality_error_widget = QWidget()
+        error_layout = QVBoxLayout(self.quality_error_widget)
+        error_layout.setContentsMargins(0, 0, 0, 0)
+        error_layout.setSpacing(10)
 
-        lay_srv.addLayout(btn_layout)
-        grid.addWidget(card_srv, 1, 0, 1, 2) # Occupe toute la largeur sous la carte et le TCD
-
-        # --- OUTIL 4 : AUDIT DES ADRESSES POSTALES NON RECONNUES ---
-        card_unrec = QFrame()
-        card_unrec.setStyleSheet("QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; }")
-        lay_unrec = QVBoxLayout(card_unrec)
-        lay_unrec.setSpacing(10)
-
-        lbl_unrec_title = QLabel("⚠️ Adresses Non Reconnues ou Invalides (Audit Cartographie)")
-        lbl_unrec_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #DC2626; border-bottom: 1px solid #FEE2E2; padding-bottom: 6px;")
-        lay_unrec.addWidget(lbl_unrec_title)
-
-        lbl_unrec_desc = QLabel(
-            "Voici la liste des adhérents dont l'adresse postale comporte une anomalie ou n'a pas pu être localisée. "
-            "Vous pouvez utiliser le bouton '🪄 Corriger' pour appeler l'API de l'État (BAN) et corriger automatiquement l'adresse après votre validation."
-        )
-        lbl_unrec_desc.setWordWrap(True)
-        lbl_unrec_desc.setStyleSheet("font-size: 11px; color: #475569; line-height: 1.4;")
-        lay_unrec.addWidget(lbl_unrec_desc)
-
-        # Ligne d'action pour le géocodage manuel (Nouveau !)
         geocode_action_layout = QHBoxLayout()
         geocode_action_layout.setSpacing(15)
-        
+
         self.btn_geocode = QPushButton("🌍 Récupérer / Géocoder les adresses en attente")
         self.btn_geocode.setCursor(Qt.PointingHandCursor)
         self.btn_geocode.setStyleSheet("""
@@ -304,17 +364,17 @@ class ReportsPage(QWidget):
         """)
         self.btn_geocode.clicked.connect(self.start_manual_geocoding)
         geocode_action_layout.addWidget(self.btn_geocode)
-        
+
         self.geocode_status_lbl = QLabel("")
         self.geocode_status_lbl.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500;")
         geocode_action_layout.addWidget(self.geocode_status_lbl)
-        
+
         geocode_action_layout.addStretch()
-        lay_unrec.addLayout(geocode_action_layout)
+        error_layout.addLayout(geocode_action_layout)
 
         self.unrec_table = QTableWidget()
-        self.unrec_table.setMinimumHeight(220)
-        self.unrec_table.setMaximumHeight(350)
+        self.unrec_table.setMinimumHeight(180)
+        self.unrec_table.setMaximumHeight(320)
         self.unrec_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #E2E8F0;
@@ -331,38 +391,310 @@ class ReportsPage(QWidget):
                 font-size: 10px;
             }
         """)
-        lay_unrec.addWidget(self.unrec_table)
-        grid.addWidget(card_unrec, 2, 0, 1, 2) # Occupe toute la largeur sous la supervision
+        error_layout.addWidget(self.unrec_table)
+        self.quality_error_widget.setVisible(False)
+        quality_layout.addWidget(self.quality_error_widget)
 
-        layout.addLayout(grid)
+        bottom_grid.addWidget(card_quality, 0, 0)
 
-        # 3. BANNIÈRE D'INFORMATION DE SYNCHRONISATION
-        self.sync_banner = QFrame()
-        self.sync_banner.setStyleSheet("""
+        # --- Carte Serveur API local (zone technique, secondaire et compacte) ---
+        card_server = QFrame()
+        card_server.setStyleSheet(self.QSS_CARD)
+        card_server.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        server_layout = QVBoxLayout(card_server)
+        server_layout.setContentsMargins(18, 16, 18, 16)
+        server_layout.setSpacing(10)
+        server_layout.addLayout(self._make_card_title(
+            "🖥️", "#F1F5F9", "Serveur API local", "API locale • FastAPI / Uvicorn"))
+
+        self.server_status_pill = QLabel("● Vérification en cours...")
+        self.server_status_pill.setStyleSheet(self.QSS_PILL_NEUTRAL)
+        self.server_status_pill.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        server_layout.addWidget(self.server_status_pill, Qt.AlignLeft)
+
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
             QFrame {
                 background-color: #F8FAFC;
                 border: 1px solid #E2E8F0;
                 border-radius: 6px;
-                padding: 10px 15px;
-                margin-top: 10px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        info_grid = QGridLayout(info_frame)
+        info_grid.setContentsMargins(12, 10, 12, 10)
+        info_grid.setVerticalSpacing(6)
+        info_grid.setHorizontalSpacing(12)
+
+        def info_row(row, label_text, value_widget):
+            k = QLabel(label_text)
+            k.setStyleSheet("color: #64748B; font-size: 11px;")
+            info_grid.addWidget(k, row, 0)
+            info_grid.addWidget(value_widget, row, 1)
+
+        self.server_url_lbl = QLabel("http://127.0.0.1:8000")
+        self.server_url_lbl.setStyleSheet("color: #1E293B; font-size: 11px; font-weight: bold;")
+        info_row(0, "URL locale", self.server_url_lbl)
+        self.server_check_lbl = QLabel("—")
+        self.server_check_lbl.setStyleSheet("color: #1E293B; font-size: 11px;")
+        info_row(1, "Dernière vérification", self.server_check_lbl)
+        self.server_ms_lbl = QLabel("—")
+        self.server_ms_lbl.setStyleSheet("color: #1E293B; font-size: 11px;")
+        info_row(2, "Temps de réponse", self.server_ms_lbl)
+        info_grid.setColumnStretch(1, 1)
+        server_layout.addWidget(info_frame)
+
+        srv_btn_layout = QHBoxLayout()
+        srv_btn_layout.setSpacing(10)
+        btn_test_srv = QPushButton("↻  Tester la connexion")
+        btn_test_srv.setCursor(Qt.PointingHandCursor)
+        btn_test_srv.setStyleSheet(self.QSS_BTN_SECONDARY)
+        btn_test_srv.clicked.connect(self.test_server_connection)
+        srv_btn_layout.addWidget(btn_test_srv)
+
+        btn_restart_srv = QPushButton("▶  Relancer le serveur")
+        btn_restart_srv.setCursor(Qt.PointingHandCursor)
+        btn_restart_srv.setStyleSheet(self.QSS_BTN_PRIMARY)
+        btn_restart_srv.clicked.connect(self.restart_map_server)
+        srv_btn_layout.addWidget(btn_restart_srv)
+        srv_btn_layout.addStretch()
+        server_layout.addLayout(srv_btn_layout)
+        server_layout.addStretch()
+
+        bottom_grid.addWidget(card_server, 0, 1)
+        layout.addLayout(bottom_grid)
+
+        # 5. ZONE SYNCHRONISATION (2 cartes côte à côte : BDD Drive + HelloAsso)
+        sync_section = QLabel("🌐 Synchronisation")
+        sync_section.setStyleSheet("""
+            QLabel {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 8px 14px;
+                color: #1E293B;
+                font-size: 13px;
+                font-weight: bold;
             }
         """)
-        banner_layout = QHBoxLayout(self.sync_banner)
-        self.drive_sync_lbl = QLabel("🌐 Dernière mise à jour Drive : Inconnue")
-        self.drive_sync_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 500;")
-        banner_layout.addWidget(self.drive_sync_lbl)
+        sync_section.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(sync_section)
 
-        banner_layout.addStretch()
+        sync_grid = QGridLayout()
+        sync_grid.setSpacing(14)
+        sync_grid.setColumnStretch(0, 1)
+        sync_grid.setColumnStretch(1, 1)
 
-        self.hello_sync_lbl = QLabel("🔄 Dernière synchro HelloAsso : Inconnue")
-        self.hello_sync_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 500;")
-        banner_layout.addWidget(self.hello_sync_lbl)
+        # --- Carte 1 : Télécharger la BDD (Google Drive) ---
+        card_db = QFrame()
+        card_db.setStyleSheet(self.QSS_CARD)
+        card_db.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        db_layout = QVBoxLayout(card_db)
+        db_layout.setContentsMargins(18, 16, 18, 16)
+        db_layout.setSpacing(10)
+        db_layout.addLayout(self._make_card_title(
+            "☁️", "#DBEAFE", "Télécharger la BDD", "Base de données • Google Drive"))
 
-        layout.addWidget(self.sync_banner)
-        
-        # Mettre à jour les labels de date et peupler le tableau d'audit au démarrage
+        # Informations : dates de dernier import / fichier Drive
+        db_info_frame = QFrame()
+        db_info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        db_info_grid = QGridLayout(db_info_frame)
+        db_info_grid.setContentsMargins(12, 10, 12, 10)
+        db_info_grid.setVerticalSpacing(6)
+        db_info_grid.setHorizontalSpacing(12)
+
+        k1 = QLabel("📥 Date du dernier import")
+        k1.setStyleSheet("color: #64748B; font-size: 11px;")
+        self.drive_sync_lbl = QLabel("Inconnue")
+        self.drive_sync_lbl.setStyleSheet("color: #1E293B; font-size: 11px; font-weight: bold;")
+        db_info_grid.addWidget(k1, 0, 0)
+        db_info_grid.addWidget(self.drive_sync_lbl, 0, 1)
+
+        k2 = QLabel("☁️ Date du fichier Drive (database.db)")
+        k2.setStyleSheet("color: #64748B; font-size: 11px;")
+        self.drive_db_date_lbl = QLabel("—")
+        self.drive_db_date_lbl.setStyleSheet("color: #1E293B; font-size: 11px; font-weight: bold;")
+        db_info_grid.addWidget(k2, 1, 0)
+        db_info_grid.addWidget(self.drive_db_date_lbl, 1, 1)
+        db_info_grid.setColumnStretch(1, 1)
+        db_layout.addWidget(db_info_frame)
+
+        # Rappel de fonctionnement
+        db_recall = QLabel(
+            "💡 La BDD est sauvegardée sur Google Drive (envoi automatique à la fermeture du logiciel). "
+            "Un cache local est en place : faites la mise à jour si plusieurs personnes travaillent sur la BDD."
+        )
+        db_recall.setWordWrap(True)
+        db_recall.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic; background: transparent; border: none;")
+        db_layout.addWidget(db_recall)
+
+        # Actions : telecharger depuis Drive / envoyer sur Drive
+        db_btn_layout = QHBoxLayout()
+        db_btn_layout.setSpacing(10)
+        btn_download_db = QPushButton("⬇️  Télécharger depuis Drive")
+        btn_download_db.setCursor(Qt.PointingHandCursor)
+        btn_download_db.setStyleSheet(self.QSS_BTN_SECONDARY)
+        btn_download_db.clicked.connect(self.start_drive_sync_workflow)
+        db_btn_layout.addWidget(btn_download_db)
+
+        btn_upload_db = QPushButton("⬆️  Envoyer la BDD sur Drive")
+        btn_upload_db.setCursor(Qt.PointingHandCursor)
+        btn_upload_db.setStyleSheet(self.QSS_BTN_PRIMARY)
+        btn_upload_db.clicked.connect(self.start_drive_upload_workflow)
+        db_btn_layout.addWidget(btn_upload_db)
+        db_btn_layout.addStretch()
+        db_layout.addLayout(db_btn_layout)
+
+        sync_grid.addWidget(card_db, 0, 0)
+
+        # --- Carte 2 : Synchro avec HelloAsso ---
+        card_ha = QFrame()
+        card_ha.setStyleSheet(self.QSS_CARD)
+        card_ha.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        ha_layout = QVBoxLayout(card_ha)
+        ha_layout.setContentsMargins(18, 16, 18, 16)
+        ha_layout.setSpacing(10)
+        ha_layout.addLayout(self._make_card_title(
+            "🔄", "#DCFCE7", "Synchro avec HelloAsso", "Inscriptions • Fusion automatique"))
+
+        ha_info_frame = QFrame()
+        ha_info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        ha_info_grid = QGridLayout(ha_info_frame)
+        ha_info_grid.setContentsMargins(12, 10, 12, 10)
+        ha_info_grid.setVerticalSpacing(6)
+        ha_info_grid.setHorizontalSpacing(12)
+
+        k3 = QLabel("🔄 Date de la dernière synchronisation")
+        k3.setStyleSheet("color: #64748B; font-size: 11px;")
+        self.hello_sync_lbl = QLabel("Inconnue")
+        self.hello_sync_lbl.setStyleSheet("color: #1E293B; font-size: 11px; font-weight: bold;")
+        ha_info_grid.addWidget(k3, 0, 0)
+        ha_info_grid.addWidget(self.hello_sync_lbl, 0, 1)
+        ha_info_grid.setColumnStretch(1, 1)
+        ha_layout.addWidget(ha_info_frame)
+
+        ha_recall = QLabel(
+            "💡 Récupère les nouvelles inscriptions HelloAsso de la saison et les fusionne "
+            "automatiquement avec la base locale, puis sauvegarde sur Google Drive."
+        )
+        ha_recall.setWordWrap(True)
+        ha_recall.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic; background: transparent; border: none;")
+        ha_layout.addWidget(ha_recall)
+
+        ha_btn_layout = QHBoxLayout()
+        btn_hello_sync = QPushButton("🔄  Mettre à jour depuis HelloAsso")
+        btn_hello_sync.setCursor(Qt.PointingHandCursor)
+        btn_hello_sync.setStyleSheet(self.QSS_BTN_PRIMARY)
+        btn_hello_sync.clicked.connect(self.start_helloasso_sync_workflow)
+        ha_btn_layout.addWidget(btn_hello_sync)
+        ha_btn_layout.addStretch()
+        ha_layout.addLayout(ha_btn_layout)
+
+        sync_grid.addWidget(card_ha, 0, 1)
+
+        layout.addLayout(sync_grid)
+
+        # Espace libre en bas de page (les cartes restent compactes)
+        layout.addStretch(1)
+
+        # Mettre a jour les labels de date, le tableau d'audit et l'etat serveur au demarrage
         self.update_sync_dates_on_banner()
         self.populate_unrecognized_table()
+        self.refresh_server_status()
+
+    def _load_doc_image(self, filename: str, height: int = 170):
+        """Charge une image d'illustration depuis le dossier doc (apercu des outils).
+        Retourne un QLabel prete a afficher, ou None si le fichier est absent/illisible."""
+        path = None
+        for base in (CODE_ROOT, ROOT_DIR):
+            candidate = os.path.join(base, "doc", filename)
+            if os.path.exists(candidate):
+                path = candidate
+                break
+        if not path:
+            return None
+        try:
+            pixmap = QPixmap(path)
+            if pixmap.isNull():
+                return None
+            scaled = pixmap.scaledToHeight(height, Qt.SmoothTransformation)
+            lbl = QLabel()
+            lbl.setPixmap(scaled)
+            lbl.setStyleSheet("border: 1px solid #E2E8F0; background-color: #FFFFFF;")
+            lbl.setAlignment(Qt.AlignCenter)
+            return lbl
+        except Exception:
+            return None
+
+    def _probe_server(self, timeout=0.4):
+        """Teste la disponibilite du serveur local. Retourne (actif, temps_de_reponse_ms)."""
+        port = int(os.environ.get("FASTAPI_PORT", "8000"))
+        start = time.time()
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                s.connect(('127.0.0.1', port))
+            return True, max(1, int((time.time() - start) * 1000))
+        except Exception:
+            return False, None
+
+    def _apply_server_status(self, alive, ms=None):
+        """Met a jour la pastille serveur et l'indicateur de la barre d'etat."""
+        if alive is True:
+            self.server_status_pill.setText("●  Serveur opérationnel")
+            self.server_status_pill.setStyleSheet(self.QSS_PILL_OK)
+            self.server_ms_lbl.setText(f"{ms} ms" if ms else "—")
+            self.status_api_lbl.setText("🟢 API opérationnelle")
+            self.status_api_lbl.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
+        elif alive is False:
+            self.server_status_pill.setText("●  Serveur indisponible")
+            self.server_status_pill.setStyleSheet(self.QSS_PILL_WARN)
+            self.server_ms_lbl.setText("—")
+            self.status_api_lbl.setText("🔴 API indisponible")
+            self.status_api_lbl.setStyleSheet("color: #DC2626; font-size: 12px; font-weight: bold;")
+        else:
+            self.server_status_pill.setText("●  Vérification en cours...")
+            self.server_status_pill.setStyleSheet(self.QSS_PILL_NEUTRAL)
+
+    def refresh_server_status(self):
+        """Actualise la carte serveur (URL, date, temps de reponse) et la barre d'etat."""
+        alive, ms = self._probe_server()
+        port = os.environ.get("FASTAPI_PORT", "8000")
+        self.server_url_lbl.setText(f"http://127.0.0.1:{port}")
+        self.server_check_lbl.setText(datetime.datetime.now().strftime("%d/%m/%Y %H:%M"))
+        self._apply_server_status(alive, ms)
+
+    def _update_quality_state(self, count):
+        """Bascule l'affichage Qualite des adresses entre etat vide (0 anomalie)
+        et etat anomalies (actions + tableau), et met a jour la barre d'etat."""
+        has_errors = count > 0
+        self.quality_error_widget.setVisible(has_errors)
+        self.quality_ok_widget.setVisible(not has_errors)
+        if has_errors:
+            self.quality_badge.setText(f"⚠️ {count} adresse(s) à corriger")
+            self.quality_badge.setStyleSheet(self.QSS_PILL_WARN)
+            self.status_anomalies_lbl.setText(f"⚠️ {count} anomalie(s) d'adresse")
+            self.status_anomalies_lbl.setStyleSheet("color: #B45309; font-size: 12px; font-weight: bold;")
+        else:
+            self.quality_badge.setText("Aucune anomalie détectée")
+            self.quality_badge.setStyleSheet(self.QSS_PILL_OK)
+            self.status_anomalies_lbl.setText("✅ 0 anomalie d'adresse")
+            self.status_anomalies_lbl.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
+
 
     def get_unrecognized_addresses(self):
         """Récupère la liste des adhérents dont l'adresse est invalide ou non résolue par la carte."""
@@ -500,6 +832,9 @@ class ReportsPage(QWidget):
             self.unrec_table.setItem(idx, 2, c_addr)
             self.unrec_table.setItem(idx, 3, c_status)
             self.unrec_table.setCellWidget(idx, 4, btn_correct)
+
+        # Etat visuel : encart compact (0 anomalie) ou liste d'actions + tableau
+        self._update_quality_state(len(unresolved))
 
     def suggest_address_correction(self, idx_row):
         """Appelle le service d'API public de la BAN pour suggérer et corriger l'adresse d'un adhérent."""
@@ -683,13 +1018,74 @@ class ReportsPage(QWidget):
             self.geocode_status_lbl.setText("❌ Échec lors du géocodage en tâche de fond.")
 
     def update_sync_dates_on_banner(self):
-        """Récupère et actualise les dates de synchronisation sur la bannière."""
-        drive_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC") or "Inconnue"
-
+        """Récupère et actualise les dates de synchronisation sur les cartes."""
+        drive_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_IMPORT") or SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC") or "Inconnue"
         hello_sync = SecretStore.get_secret("LAST_HELLOASSO_SYNC") or "Inconnue"
 
-        self.drive_sync_lbl.setText(f"🌐 Dernière mise à jour Drive : {drive_sync}")
-        self.hello_sync_lbl.setText(f"🔄 Dernière synchro HelloAsso : {hello_sync}")
+        self.drive_sync_lbl.setText(drive_sync)
+        self.hello_sync_lbl.setText(hello_sync)
+        self._refresh_drive_db_date()
+
+    def _refresh_drive_db_date(self):
+        """Interroge Google Drive en arrière-plan pour afficher la date de dernière
+        modification du fichier database.db hébergé sur Drive."""
+        from infrastructure.google_drive_client import GoogleDriveClient
+        file_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
+        if not file_id:
+            self.drive_db_date_lbl.setText("Aucun ID Drive configuré")
+            return
+
+        self.drive_db_date_lbl.setText("Interrogation en cours...")
+
+        class _DriveDateWorker(QThread):
+            date_ready = Signal(str)
+
+            def __init__(self, fid, parent=None):
+                super().__init__(parent)
+                self.fid = fid
+
+            def run(self):
+                try:
+                    self.date_ready.emit(GoogleDriveClient.get_file_modified_time(self.fid))
+                except Exception:
+                    self.date_ready.emit("")
+
+        self._drive_date_worker = _DriveDateWorker(file_id)
+        self._drive_date_worker.date_ready.connect(self._on_drive_db_date_ready)
+        self._drive_date_worker.start()
+
+    def _on_drive_db_date_ready(self, date_str: str):
+        self.drive_db_date_lbl.setText(date_str if date_str else "Indisponible")
+
+    # ------------------------------------------------------------------
+    # Actions de synchronisation : délégation aux workflows de la fenêtre
+    # principale (mêmes workers et boîtes de dialogue que l'Import Data)
+    # ------------------------------------------------------------------
+    def start_drive_sync_workflow(self):
+        """Télécharge la BDD la plus récente depuis Google Drive (workflow principal)."""
+        main_win = self.window()
+        if main_win and hasattr(main_win, "start_drive_sync_workflow"):
+            main_win.start_drive_sync_workflow()
+            self.drive_sync_lbl.setText("Téléchargement en cours...")
+        else:
+            QMessageBox.warning(self, "Indisponible", "Action disponible uniquement depuis la fenêtre principale.")
+
+    def start_drive_upload_workflow(self):
+        """Envoie la BDD locale sur Google Drive (workflow principal)."""
+        main_win = self.window()
+        if main_win and hasattr(main_win, "start_drive_upload_workflow"):
+            main_win.start_drive_upload_workflow()
+        else:
+            QMessageBox.warning(self, "Indisponible", "Action disponible uniquement depuis la fenêtre principale.")
+
+    def start_helloasso_sync_workflow(self):
+        """Lance la synchronisation et fusion HelloAsso (workflow principal)."""
+        main_win = self.window()
+        if main_win and hasattr(main_win, "start_sync_workflow"):
+            main_win.start_sync_workflow()
+            self.hello_sync_lbl.setText("Synchronisation en cours...")
+        else:
+            QMessageBox.warning(self, "Indisponible", "Action disponible uniquement depuis la fenêtre principale.")
 
     def open_interactive_map(self):
         """Ouvre la carte interactive des adhérents dans le navigateur par défaut."""
@@ -703,22 +1099,22 @@ class ReportsPage(QWidget):
 
     def test_server_connection(self):
         """Tester de façon instantanée et sécuritaire si le serveur local d'API répond."""
+        alive, ms = self._probe_server(timeout=1.0)
         port = int(os.environ.get("FASTAPI_PORT", "8000"))
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1.0)
-                s.connect(('127.0.0.1', port))
+        self.server_check_lbl.setText(datetime.datetime.now().strftime("%d/%m/%Y %H:%M"))
+        self._apply_server_status(alive, ms)
+        if alive:
             QMessageBox.information(
                 self,
                 "Serveur Opérationnel",
                 f"⚡ Connexion réseau réussie ! Le serveur local d'API répond parfaitement et de manière instantanée sur le port {port}."
             )
-        except Exception as e:
+        else:
             QMessageBox.critical(
                 self,
                 "Serveur Hors-ligne",
                 f"❌ Échec de la connexion réseau : Le serveur local d'API ne répond pas sur le port {port}.\n\n"
-                f"Veuillez cliquer sur 'Relancer le Serveur' pour régénérer le canal local.\n\nDétails : {e}"
+                f"Veuillez cliquer sur 'Relancer le Serveur' pour régénérer le canal local.\n\nDétails : connexion refusée"
             )
 
     def restart_map_server(self):
@@ -754,9 +1150,15 @@ class ReportsPage(QWidget):
             f"Le serveur API d'arrière-plan a été ré-initialisé et relancé avec succès sur le port {new_port}.\n\n"
             "Vos raccourcis de cartes et de tableaux croisés s'ouvriront à présent sur ce nouveau port dynamique."
         )
+        # Mise a jour visuelle de la carte serveur (probe apres demarrage d'Uvicorn)
+        self.server_url_lbl.setText(f"http://127.0.0.1:{new_port}")
+        self.server_check_lbl.setText(datetime.datetime.now().strftime("%d/%m/%Y %H:%M"))
+        self._apply_server_status(None)
+        QTimer.singleShot(2000, self.refresh_server_status)
         self.update_sync_dates_on_banner()
 
     def load_and_calculate_stats(self, force_reload=False):
         """Rétro-compatibilité pour l'IHM globale sans ralentissement."""
         self.update_sync_dates_on_banner()
         self.populate_unrecognized_table()
+        self.refresh_server_status()

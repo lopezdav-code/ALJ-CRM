@@ -253,7 +253,6 @@ class ImportDataPage(QWidget):
             }
         """)
 
-        # Création des trois sous-onglets (Nouveau !)
         self.ffme_tab = FFMEImportWidget(self)
         self.autonomes_tab = AutonomesImportWidget(self)
         self.saison_tab = SaisonImportWidget(self)

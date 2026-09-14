@@ -175,9 +175,14 @@ def _parse_birthdate(val):
             pass
     return None
 
+def _get_birthdate(p):
+    """Date de naissance d'un participant : clé v2 ('birth_date') avec repli legacy
+    ('champ_Date de naissance de l'adhérent'), ou None si illisible."""
+    return _parse_birthdate(p.get("birth_date") or p.get("champ_Date de naissance de l'adhérent"))
+
 def _identity_key(p):
     """Clé d'identité simple d'un participant (prénom, nom, date de naissance) pour éviter les doublons."""
-    dob = _parse_birthdate(p.get("champ_Date de naissance de l'adhérent"))
+    dob = _get_birthdate(p)
     return (
         str(p.get("first_name") or "").strip().lower(),
         str(p.get("last_name") or "").strip().lower(),
@@ -344,12 +349,14 @@ def find_planning_match_dynamically(tarif_name, planning_data):
         
     return None
 
-def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False, group_tarifs_map=None):
+def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False, group_tarifs_map=None, show_health_col=False):
     """
     Génère des feuilles de présence au format Excel pour les groupes spécifiés.
     Les groupes sont des créneaux du planning : `group_tarifs_map` (optionnel) associe
     chaque nom de créneau à ses tarifs HelloAsso. À défaut, les groupes virtuels
     (VIRTUAL_GROUP_TARIFS) puis l'égalité exacte de tarif sont utilisés.
+    `show_health_col` ajoute une colonne « Santé » (Document de santé FFME :
+    ✗ rouge si « ATTENTE », sinon la valeur brute).
     Génère un fichier par groupe, un seul fichier fusionné,
     ou tous les tableaux empilés dans une même feuille Excel (Nouveau !).
     """
@@ -473,7 +480,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             )
             if not has_auth:
                 continue
-            dob = _parse_birthdate(p.get("champ_Date de naissance de l'adhérent"))
+            dob = _get_birthdate(p)
             # Mineur = moins de 18 ans ; si la date de naissance est absente/illisible, on se fie au drapeau d'autorisation
             if dob is not None:
                 age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
@@ -728,6 +735,18 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             ws.cell(row=hdr_row, column=auth_col, value="Autorisation")
             ws.column_dimensions[get_column_letter(auth_col)].width = 13
 
+        # Colonne optionnelle « Santé » (Document de santé FFME) : ✗ rouge si ATTENTE,
+        # sinon la valeur brute. Placée après l'Autorisation (autonome) ou après les badges.
+        health_col = None
+        if show_health_col:
+            if auth_only:
+                health_col = auth_col + 1
+            else:
+                health_col = 3 if hide_badge_cols else 6
+            ws.cell(row=hdr_row, column=health_col, value="Santé")
+            ws.column_dimensions[get_column_letter(health_col)].width = 7
+            start_date_col = health_col + 1
+
         if session_dates:
             col_idx = start_date_col # Les dates de séances commencent maintenant à la colonne F (Col 6) ou G (Col 7)
             for s_date in session_dates:
@@ -793,6 +812,16 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 cell_auth = ws.cell(row=row_idx, column=auth_col, value=", ".join(auths) if auths else None)
                 cells_to_style.append(cell_auth)
             
+            # Colonne « Santé » (optionnelle) : ✗ rouge si « ATTENTE », cellule vide
+            # pour toute autre valeur (QS, COMPETITION, LOISIR, OK... sont masquées)
+            sante_cross = False
+            if health_col is not None:
+                sante_raw = str(p.get("document_sante") or "").strip().upper()
+                if sante_raw == "ATTENTE":
+                    sante_cross = True
+                cell_sante = ws.cell(row=row_idx, column=health_col, value="✗" if sante_cross else None)
+                cells_to_style.append(cell_sante)
+            
             # Alternance couleur (une ligne sur deux)
             is_zebra = (row_idx % 2 == 0)
             row_fill = fill_zebra_light_gray if is_zebra else fill_white
@@ -803,6 +832,10 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
                 cell.fill = row_fill
                 cell.alignment = align_left if cell in (cell_first, cell_last) else align_center
                 cell.border = border_cell_thin
+            
+            # Croix « Document de santé en attente » : mise en évidence rouge gras
+            if sante_cross:
+                cell_sante.font = Font(name="Segoe UI", size=10, bold=True, color="DC2626")
                 
             # Appliquer le quadrillage (bordures minces) et le fond zébré aux colonnes de dates actives de cette ligne
             for col in range(start_date_col, max_active_col + 1):
@@ -875,6 +908,8 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             header_cols += [3, 4, 5]
         if auth_only:
             header_cols.append(auth_col)
+        if health_col is not None:
+            header_cols.append(health_col)
         for c_idx in header_cols:
             cell_hdr = ws.cell(row=hdr_row, column=c_idx)
             cell_hdr.font = font_date_header

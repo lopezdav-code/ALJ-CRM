@@ -422,7 +422,7 @@ class ExportWorker(QThread):
     progress = Signal(str, int)  # (message, pourcentage)
     finished = Signal(bool, str, str) # (succès, message_résultat, chemin_fichier)
 
-    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, same_sheet: bool = False, group_tarifs_map: dict = None, parent=None):
+    def __init__(self, export_type: str, selected_groups: list = None, start_date_str: str = None, end_date_str: str = None, merge_groups: bool = False, auth_only: bool = False, cours_pdf: bool = False, hide_badge_cols: bool = False, same_sheet: bool = False, group_tarifs_map: dict = None, show_health_col: bool = False, parent=None):
         super().__init__(parent)
         self.export_type = export_type
         self.selected_groups = selected_groups
@@ -434,6 +434,7 @@ class ExportWorker(QThread):
         self.hide_badge_cols = hide_badge_cols
         self.same_sheet = same_sheet
         self.group_tarifs_map = group_tarifs_map or {}
+        self.show_health_col = show_health_col
 
     def convert_excel_to_pdf(self, excel_path: str, pdf_path: str) -> bool:
         """
@@ -542,7 +543,8 @@ class ExportWorker(QThread):
                     auth_only=self.auth_only,
                     hide_badge_cols=self.hide_badge_cols,
                     same_sheet=self.same_sheet,
-                    group_tarifs_map=self.group_tarifs_map
+                    group_tarifs_map=self.group_tarifs_map,
+                    show_health_col=self.show_health_col
                 )
                 if success:
                     dest_dir = os.path.join(ROOT_DIR, "exports", "fiches_presence")
@@ -860,7 +862,7 @@ class FFMEMergeWorker(QThread):
                 if user_id:
                     prep["updates"].append((
                         "Terminé", person["licence"], person.get("passeports", ""),
-                        person.get("diplomes", ""), user_id
+                        person.get("diplomes", ""), person.get("document_sante", ""), user_id
                     ))
                     stats["matched_manually"] += 1
                 else:

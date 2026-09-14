@@ -4,7 +4,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTableView, QHeaderView, QSplitter, QComboBox,
     QDateEdit, QCheckBox, QPushButton, QDialog, QScrollArea,
-    QFrame, QDialogButtonBox, QRadioButton, QMessageBox
+    QFrame, QDialogButtonBox, QRadioButton, QMessageBox,
+    QDoubleSpinBox, QFormLayout, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate, Signal
 from PySide6.QtGui import QFont
@@ -135,6 +136,171 @@ class TarifEditDialog(QDialog):
     def get_selected_tarif(self) -> str:
         """Retourne le tarif sélectionné (ou None)."""
         return self.selected_tarif
+
+
+class AddMemberDialog(QDialog):
+    """
+    Pop-up d'ajout manuel d'un adhérent (bouton ➕ de l'onglet Adhérents) :
+    saisie de l'identité, des coordonnées et du groupe (tarif) de la saison active.
+    Une commande « MANUEL-... » est générée en base, équivalente à une inscription HelloAsso.
+    """
+    def __init__(self, tarifs: list, parent=None):
+        super().__init__(parent)
+        self.tarifs = tarifs or []
+        self.setWindowTitle("Ajouter un adhérent")
+        self.setMinimumWidth(480)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        desc = QLabel(
+            "Ajout manuel d'un adhérent dans la base (saison active). "
+            "Les champs marqués d'une * sont obligatoires."
+        )
+        desc.setStyleSheet("color: #64748B; font-size: 12px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        form_frame = QFrame()
+        form_frame.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                padding: 14px;
+            }
+        """)
+        form = QFormLayout(form_frame)
+        form.setSpacing(10)
+
+        line_style = """
+            QLineEdit, QComboBox, QDateEdit, QDoubleSpinBox {
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                color: #1E293B;
+                background-color: #FFFFFF;
+            }
+        """
+
+        # --- Identité ---
+        self.last_name_input = QLineEdit()
+        self.last_name_input.setPlaceholderText("Nom de famille")
+        self.last_name_input.setStyleSheet(line_style)
+        form.addRow("Nom * :", self.last_name_input)
+
+        self.first_name_input = QLineEdit()
+        self.first_name_input.setPlaceholderText("Prénom")
+        self.first_name_input.setStyleSheet(line_style)
+        form.addRow("Prénom * :", self.first_name_input)
+
+        self.birth_date_input = QDateEdit()
+        self.birth_date_input.setCalendarPopup(True)
+        self.birth_date_input.setDisplayFormat("dd/MM/yyyy")
+        self.birth_date_input.setDateRange(QDate(1930, 1, 1), QDate.currentDate())
+        self.birth_date_input.setStyleSheet(line_style)
+        form.addRow("Date de naissance * :", self.birth_date_input)
+
+        self.gender_input = QComboBox()
+        self.gender_input.addItems(["Homme", "Femme"])
+        self.gender_input.setStyleSheet(line_style)
+        form.addRow("Sexe :", self.gender_input)
+
+        # --- Coordonnées ---
+        self.phone_input = QLineEdit()
+        self.phone_input.setPlaceholderText("Ex : 06 12 34 56 78")
+        self.phone_input.setStyleSheet(line_style)
+        form.addRow("Téléphone :", self.phone_input)
+
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("adresse@mail.com")
+        self.email_input.setStyleSheet(line_style)
+        form.addRow("E-mail principal :", self.email_input)
+
+        self.address_input = QLineEdit()
+        self.address_input.setPlaceholderText("Numéro et nom de rue")
+        self.address_input.setStyleSheet(line_style)
+        form.addRow("Adresse :", self.address_input)
+
+        self.zip_code_input = QLineEdit()
+        self.zip_code_input.setPlaceholderText("Code postal")
+        self.zip_code_input.setStyleSheet(line_style)
+        form.addRow("Code postal :", self.zip_code_input)
+
+        self.city_input = QLineEdit()
+        self.city_input.setPlaceholderText("Ville")
+        self.city_input.setStyleSheet(line_style)
+        form.addRow("Ville :", self.city_input)
+
+        # --- Adhésion ---
+        self.tarif_input = QComboBox()
+        if self.tarifs:
+            self.tarif_input.addItems(self.tarifs)
+        self.tarif_input.setStyleSheet(line_style)
+        form.addRow("Groupe (tarif) * :", self.tarif_input)
+
+        self.status_input = QComboBox()
+        self.status_input.addItems(["Validé", "Traité", "Terminé", "En cours"])
+        self.status_input.setStyleSheet(line_style)
+        form.addRow("Statut :", self.status_input)
+
+        self.amount_input = QDoubleSpinBox()
+        self.amount_input.setRange(0.0, 1000.0)
+        self.amount_input.setDecimals(2)
+        self.amount_input.setSingleStep(5.0)
+        self.amount_input.setSuffix(" €")
+        self.amount_input.setStyleSheet(line_style)
+        form.addRow("Montant payé :", self.amount_input)
+
+        layout.addWidget(form_frame)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet("""
+            QPushButton {
+                background-color: #3B82F6;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #2563EB; }
+        """)
+        buttons.accepted.connect(self.validate)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def validate(self):
+        """Vérifie les champs obligatoires avant fermeture."""
+        if not self.last_name_input.text().strip() or not self.first_name_input.text().strip():
+            QMessageBox.warning(self, "Champs manquants", "Le nom et le prénom sont obligatoires.")
+            return
+        if not self.tarif_input.currentText().strip():
+            QMessageBox.warning(self, "Champ manquant", "Veuillez sélectionner un groupe (tarif).")
+            return
+        self.accept()
+
+    def get_fields(self) -> dict:
+        """Retourne les champs saisis, prêts pour l'enregistrement en base."""
+        qd = self.birth_date_input.date()
+        return {
+            "last_name": self.last_name_input.text().strip(),
+            "first_name": self.first_name_input.text().strip(),
+            "birth_date": qd.toString("dd/MM/yyyy"),
+            "gender": self.gender_input.currentText(),
+            "phone": self.phone_input.text().strip(),
+            "email_primary": self.email_input.text().strip(),
+            "address": self.address_input.text().strip(),
+            "zip_code": self.zip_code_input.text().strip(),
+            "city": self.city_input.text().strip(),
+            "tarif_name": self.tarif_input.currentText().strip(),
+            "status": self.status_input.currentText(),
+            "amount": float(self.amount_input.value()),
+        }
 
 
 class SubCategoryDialog(QDialog):
@@ -392,6 +558,46 @@ def parse_order_date(value):
     except Exception:
         return None
 
+def build_creneau_filter_blocks(members_list):
+    """Structure hiérarchique de la pop-up de sous-catégories, basée sur les
+    groupes de créneaux du planning (Autonome INCLUS, libellés raccourcis) :
+    liste d'attente en tête (comportement historique), puis rubriques de
+    créneaux (chaque case coche TOUS les tarifs rattachés au créneau), puis
+    rubrique « Autres tarifs » pour les tarifs non rattachés à un créneau.
+    Les payloads sont limités aux tarifs réellement présents chez les adhérents.
+    Réutilisée par les onglets Adhérents et Communications."""
+    from infrastructure.sqlite_repository import SqliteRepository
+    from domain.planning_groups import build_creneau_items, prune_empty_sections
+    creneaux = SqliteRepository.load_creneaux_groups()
+    tarifs_map = {c["groupe"]: c["tarifs"] for c in creneaux}
+
+    member_tarifs = sorted(set(m.tarif_name for m in members_list if m.tarif_name))
+    member_tarifs_set = set(member_tarifs)
+    covered = set()
+    for t_list in tarifs_map.values():
+        covered.update(t_list)
+
+    blocks = []
+    waiting = [t for t in member_tarifs if t == WAITING_LIST_TARIF]
+    if waiting:
+        blocks.append(("group", waiting[0], waiting))
+
+    for kind, label, raw in build_creneau_items(creneaux, include_autonome=True):
+        if kind == "group":
+            payload = [t for t in (tarifs_map.get(raw) or []) if t in member_tarifs_set]
+            if payload:
+                blocks.append((kind, label, payload))
+        else:
+            blocks.append((kind, label, None))
+
+    uncovered = [t for t in member_tarifs if t != WAITING_LIST_TARIF and t not in covered]
+    if uncovered:
+        blocks.append(("section", "Autres tarifs", None))
+        blocks.extend(("group", t, [t]) for t in uncovered)
+
+    # Retirer les rubriques devenues sans créneau (payloads vides filtrés)
+    return prune_empty_sections(blocks)
+
 
 class MembersPage(QWidget):
     """
@@ -428,6 +634,12 @@ class MembersPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 20)
         layout.setSpacing(12)
+
+        # Titre de la page (présentation harmonisée avec les autres onglets)
+        title = QLabel("👥 Adhérents")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
+        title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(title)
 
         # Barre de recherche principale
         search_layout = QHBoxLayout()
@@ -607,10 +819,32 @@ class MembersPage(QWidget):
 
         table_layout.addWidget(self.table_view)
         
-        # Ajouter le compteur de ligne dynamique
+        # Ajouter le compteur de ligne dynamique + bouton d'ajout manuel (Nouveau !)
+        counter_row = QHBoxLayout()
         self.counter_label = QLabel()
         self.counter_label.setStyleSheet("color: #64748B; font-size: 11px; font-weight: bold; margin-top: 4px; margin-left: 5px;")
-        table_layout.addWidget(self.counter_label)
+        counter_row.addWidget(self.counter_label)
+        counter_row.addStretch()
+
+        self.add_member_btn = QPushButton("➕ Ajouter un adhérent")
+        self.add_member_btn.setCursor(Qt.PointingHandCursor)
+        self.add_member_btn.setToolTip("Ajouter manuellement un adhérent dans la base (saison active).")
+        self.add_member_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #059669; }
+            QPushButton:disabled { background-color: #94A3B8; }
+        """)
+        self.add_member_btn.clicked.connect(self.open_add_member_dialog)
+        counter_row.addWidget(self.add_member_btn)
+        table_layout.addLayout(counter_row)
         
         self.splitter.addWidget(table_container)
 
@@ -650,43 +884,9 @@ class MembersPage(QWidget):
             self.tarif_sub_filter.setText(f"Sous-catégories ({count}) ▾")
 
     def get_creneau_filter_blocks(self):
-        """Structure hiérarchique de la pop-up de sous-catégories, basée sur les
-        groupes de créneaux du planning (Autonome INCLUS, libellés raccourcis) :
-        liste d'attente en tête (comportement historique), puis rubriques de
-        créneaux (chaque case coche TOUS les tarifs rattachés au créneau), puis
-        rubrique « Autres tarifs » pour les tarifs non rattachés à un créneau.
-        Les payloads sont limités aux tarifs réellement présents chez les adhérents."""
-        from infrastructure.sqlite_repository import SqliteRepository
-        from domain.planning_groups import build_creneau_items, prune_empty_sections
-        creneaux = SqliteRepository.load_creneaux_groups()
-        tarifs_map = {c["groupe"]: c["tarifs"] for c in creneaux}
-
-        member_tarifs = sorted(set(m.tarif_name for m in self.members_list if m.tarif_name))
-        member_tarifs_set = set(member_tarifs)
-        covered = set()
-        for t_list in tarifs_map.values():
-            covered.update(t_list)
-
-        blocks = []
-        waiting = [t for t in member_tarifs if t == WAITING_LIST_TARIF]
-        if waiting:
-            blocks.append(("group", waiting[0], waiting))
-
-        for kind, label, raw in build_creneau_items(creneaux, include_autonome=True):
-            if kind == "group":
-                payload = [t for t in (tarifs_map.get(raw) or []) if t in member_tarifs_set]
-                if payload:
-                    blocks.append((kind, label, payload))
-            else:
-                blocks.append((kind, label, None))
-
-        uncovered = [t for t in member_tarifs if t != WAITING_LIST_TARIF and t not in covered]
-        if uncovered:
-            blocks.append(("section", "Autres tarifs", None))
-            blocks.extend(("group", t, [t]) for t in uncovered)
-
-        # Retirer les rubriques devenues sans créneau (payloads vides filtrés)
-        return prune_empty_sections(blocks)
+        """Structure hiérarchique de la pop-up de sous-catégories (créneaux du planning) :
+        cf. build_creneau_filter_blocks (réutilisée par l'onglet Communications)."""
+        return build_creneau_filter_blocks(self.members_list)
 
     def open_sub_category_popup(self):
         """Ouvre la pop-up de sélection des sous-catégories, organisée en rubriques
@@ -706,6 +906,59 @@ class MembersPage(QWidget):
         """Déclenché à chaque changement de case à cocher dans la pop-up (filtrage en direct)."""
         self.update_sub_filter_button()
         self.on_filters_changed()
+
+    def open_add_member_dialog(self):
+        """Bouton ➕ : ouvre la pop-up d'ajout manuel d'un adhérent (saison active).
+        Un doublon (même nom normalisé + même date de naissance déjà présent dans la
+        liste chargée) demande une confirmation avant enregistrement."""
+        from domain.constants import get_active_season
+        from domain.utils import normalize_name
+        from infrastructure.sqlite_repository import SqliteRepository
+
+        season = get_active_season()
+        tarifs = SqliteRepository.get_season_tarifs(season)
+
+        dialog = AddMemberDialog(tarifs, parent=self)
+        while True:
+            if dialog.exec() != QDialog.Accepted:
+                return
+            fields = dialog.get_fields()
+
+            # Contrôle de doublon dans la saison affichée (nom + prénom normalisés)
+            k_last = normalize_name(fields["last_name"]).upper()
+            k_first = normalize_name(fields["first_name"]).lower()
+            duplicate = any(
+                normalize_name(m.user_last_name).upper() == k_last
+                and normalize_name(m.user_first_name).lower() == k_first
+                for m in self.members_list
+            )
+            if duplicate:
+                answer = QMessageBox.question(
+                    self,
+                    "Doublon possible",
+                    f"Un adhérent « {fields['last_name']} {fields['first_name']} » est déjà présent "
+                    "dans la liste affichée.\n\nVoulez-vous quand même l'ajouter ?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if answer != QMessageBox.Yes:
+                    continue  # Réouvrir la pop-up pour correction
+
+            ok, message = SqliteRepository.add_manual_member(fields, season_name=season)
+            if ok:
+                QMessageBox.information(
+                    self,
+                    "Adhérent ajouté",
+                    f"L'adhérent {fields['last_name']} {fields['first_name']} a été ajouté "
+                    f"avec succès (référence {message})."
+                )
+                self.load_members_from_repository(force_reload=True)
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Échec de l'ajout",
+                    f"L'enregistrement a échoué :\n\n{message}"
+                )
+            return
 
     def on_tarif_type_changed(self):
         """Déclenché lorsque la catégorie de tarif principale change."""

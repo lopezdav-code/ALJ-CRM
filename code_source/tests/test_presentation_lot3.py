@@ -62,8 +62,9 @@ class TestPresentationLot3(unittest.TestCase):
         
         win = MainWindow()
         self.assertIsNotNone(win)
-        self.assertEqual(win.stacked_widget.count(), 11)
-        self.assertEqual(len(win.nav_buttons), 11)
+        # 10 pages (Gmail Contact intégré dans l'onglet Exports)
+        self.assertEqual(win.stacked_widget.count(), 10)
+        self.assertEqual(len(win.nav_buttons), 10)
 
     @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
     def test_main_window_drive_status_email(self):
@@ -107,7 +108,7 @@ class TestPresentationLot3(unittest.TestCase):
             {"Cours Adultes débutants", "Loisir enfants nés en 2016, 2017, 2018 - mercredi 10h30"}
         )
         self.assertEqual(comm.selected_statuses, {"Validé", "Terminé"})
-        self.assertEqual(comm.tarif_filter.text(), "Tous sauf liste d'attente ▾")
+        self.assertEqual(comm.tarif_filter.text(), "Toutes sauf liste d'attente ▾")
         self.assertEqual(comm.status_filter.text(), "Tous sauf annulés ▾")
 
         # L'annulé et la liste d'attente sont masqués de la liste des destinataires

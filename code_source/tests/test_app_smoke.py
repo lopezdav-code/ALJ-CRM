@@ -17,7 +17,7 @@ if _src_dir not in sys.path:
 
 class TestAppSmoke(unittest.TestCase):
     """
-    Phase 7 — Smoke test applicatif : instancie la MainWindow complète (11 pages)
+    Phase 7 — Smoke test applicatif : instancie la MainWindow complète (10 pages)
     sur un snapshot de la base réelle, sans afficher de fenêtre ni toucher à la base live.
     """
 
@@ -72,9 +72,9 @@ class TestAppSmoke(unittest.TestCase):
         win = MainWindow()
         try:
             self.assertIsNotNone(win)
-            # 11 pages attendues (Adhérents .. Logs)
-            self.assertEqual(win.stacked_widget.count(), 11)
-            self.assertEqual(len(win.nav_buttons), 11)
+            # 10 pages attendues (Gmail Contact intégré dans l'onglet Exports)
+            self.assertEqual(win.stacked_widget.count(), 10)
+            self.assertEqual(len(win.nav_buttons), 10)
         finally:
             win.close()
 

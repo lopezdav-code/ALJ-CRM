@@ -58,6 +58,7 @@ class Member:
     parental_auth_autonomous: str = "Non"  # Nouveau !
     parental_auth_family: str = "Non"      # Nouveau !
     already_member: str = "Non"
+    document_sante: str = ""  # Document de santé FFME (« ATTENTE », QS, ...) — par saison
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Member":
@@ -161,7 +162,8 @@ class Member:
             raw_diplomas=str(data.get("raw_diplomas") or "").strip(),
             parental_auth_autonomous=str(data.get("parental_auth_autonomous") or "Non").strip(),
             parental_auth_family=str(data.get("parental_auth_family") or "Non").strip(),
-            already_member="Oui" if int(data.get("already_member", 0) or 0) > 0 or str(data.get("already_member", "")).strip().lower() in ("oui", "yes", "true", "1") else "Non"
+            already_member="Oui" if int(data.get("already_member", 0) or 0) > 0 or str(data.get("already_member", "")).strip().lower() in ("oui", "yes", "true", "1") else "Non",
+            document_sante=str(data.get("document_sante") or "").strip()
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -216,5 +218,6 @@ class Member:
             "raw_diplomas": self.raw_diplomas,
             "parental_auth_autonomous": self.parental_auth_autonomous,
             "parental_auth_family": self.parental_auth_family,
+            "document_sante": self.document_sante,
             "already_member": self.already_member
         }

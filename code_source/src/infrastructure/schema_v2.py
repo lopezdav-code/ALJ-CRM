@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     email_sent_date TEXT,
     is_modified TEXT DEFAULT 'Non',
     commentaires_correctif TEXT DEFAULT '',
+    document_sante TEXT DEFAULT '',
     legacy_adherent_id INTEGER,
     legacy_season_id INTEGER,
     created_at TEXT, updated_at TEXT,
@@ -718,6 +719,7 @@ SELECT
     p.is_modified AS "is_modified",
     p.commentaires_correctif AS "commentaires_correctif",
     p.email_sent_date AS "email_sent_date",
+    p.document_sante AS "document_sante",
     s.name AS "season_name",
     (SELECT COUNT(*) FROM purchases p3
       WHERE p3.user_id = u.id AND p3.legacy_season_id != p.legacy_season_id) AS "already_member"

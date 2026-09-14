@@ -237,3 +237,30 @@ class GoogleDriveClient:
                 return ""
         except Exception:
             return ""
+
+    @classmethod
+    def get_file_modified_time(cls, file_id: str) -> str:
+        """
+        Récupère la date de dernière modification (modifiedTime) d'un fichier sur
+        Google Drive, convertie en heure locale au format 'JJ/MM/AAAA HH:MM'.
+        Retourne une chaîne vide si l'information est indisponible.
+        """
+        if not file_id:
+            return ""
+
+        try:
+            import datetime
+            access_token = cls.get_access_token()
+            url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+
+            response = requests.get(url, headers=headers, params={"fields": "modifiedTime"}, timeout=10)
+            if response.status_code == 200:
+                raw = response.json().get("modifiedTime", "")
+                if raw:
+                    # modifiedTime est en ISO 8601 UTC (ex : '2026-09-10T18:22:33.456Z')
+                    dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone()
+                    return dt.strftime("%d/%m/%Y %H:%M")
+            return ""
+        except Exception:
+            return ""

@@ -9,7 +9,6 @@ from presentation.pages.documents import DocumentsPage
 from presentation.pages.communications import CommunicationsPage
 from presentation.pages.exports import ExportsPage
 from presentation.pages.ffme import ImportDataPage
-from presentation.pages.gmail_contact import GmailContactPage
 from presentation.pages.groups import GroupsPage
 from presentation.pages.reports import ReportsPage
 from presentation.pages.settings import SettingsPage
@@ -89,11 +88,10 @@ class MainWindow(QMainWindow):
             ("📦  Exports", 3),
             ("📥  Import Data", 4),
             ("🧗  Créneaux", 5),
-            ("📧  Gmail Contact", 6),
-            ("🔧  Outils", 7),
-            ("⚙️  Paramètres", 8),
-            ("❓  Aide", 9),
-            ("📋  Logs", 10)
+            ("🔧  Outils", 6),
+            ("⚙️  Paramètres", 7),
+            ("❓  Aide", 8),
+            ("📋  Logs", 9)
         ]
 
         for text, index in nav_items:
@@ -184,76 +182,8 @@ class MainWindow(QMainWindow):
         self.drive_status.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: 500; margin-right: 15px;")
         header_layout.addWidget(self.drive_status)
 
-        # Action 1 : Bouton "update BDD" (Bleu Ciel) - Nouveau !
-        self.drive_sync_btn = QPushButton("update BDD")
-        self.drive_sync_btn.setCursor(Qt.PointingHandCursor)
-        self.drive_sync_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0EA5E9;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 15px;
-                font-weight: bold;
-                font-size: 12px;
-                margin-right: 8px;
-            }
-            QPushButton:hover {
-                background-color: #0284C7;
-            }
-            QPushButton:disabled {
-                background-color: #94A3B8;
-            }
-        """)
-        self.drive_sync_btn.clicked.connect(self.start_drive_sync_workflow)
-        header_layout.addWidget(self.drive_sync_btn)
-
-        # Action 1.5 : Bouton "Sauvegarder sur Drive" (Orange) - Nouveau !
-        self.drive_upload_btn = QPushButton("Sauvegarder sur Drive")
-        self.drive_upload_btn.setCursor(Qt.PointingHandCursor)
-        self.drive_upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F59E0B;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 15px;
-                font-weight: bold;
-                font-size: 12px;
-                margin-right: 8px;
-            }
-            QPushButton:hover {
-                background-color: #D97706;
-            }
-            QPushButton:disabled {
-                background-color: #94A3B8;
-            }
-        """)
-        self.drive_upload_btn.clicked.connect(self.start_drive_upload_workflow)
-        header_layout.addWidget(self.drive_upload_btn)
-
-        # Action 2 : Bouton "Synchroniser et merger avec HelloAsso" (Bleu Action) - Renommé !
-        self.sync_btn = QPushButton("Synchroniser et merger avec HelloAsso")
-        self.sync_btn.setCursor(Qt.PointingHandCursor)
-        self.sync_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2563EB;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 15px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #1D4ED8;
-            }
-            QPushButton:disabled {
-                background-color: #94A3B8;
-            }
-        """)
-        self.sync_btn.clicked.connect(self.start_sync_workflow)
-        header_layout.addWidget(self.sync_btn)
+        # Les workflows Google Drive (update BDD / sauvegarde / HelloAsso)
+        # sont declenches depuis la page Outils qui delegue a main_win.
 
         right_panel_layout.addWidget(header)
 
@@ -262,20 +192,20 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(MembersPage())         # Index 0
         self.stacked_widget.addWidget(DocumentsPage())       # Index 1
         self.stacked_widget.addWidget(CommunicationsPage())  # Index 2
-        self.stacked_widget.addWidget(ExportsPage())         # Index 3
+        self.stacked_widget.addWidget(ExportsPage())         # Index 3 (Gmail Contact intégré)
         self.stacked_widget.addWidget(ImportDataPage())      # Index 4
         self.stacked_widget.addWidget(GroupsPage())          # Index 5
-        self.stacked_widget.addWidget(GmailContactPage())     # Index 6
-        self.stacked_widget.addWidget(ReportsPage())         # Index 7 (La page Outils d'Analyses !)
-        self.stacked_widget.addWidget(SettingsPage())        # Index 8
-        self.stacked_widget.addWidget(HelpPage())            # Index 9
-        self.stacked_widget.addWidget(LogsPage())            # Index 10
+        self.stacked_widget.addWidget(ReportsPage())         # Index 6 (La page Outils d'Analyses !)
+        self.stacked_widget.addWidget(SettingsPage())        # Index 7
+        self.stacked_widget.addWidget(HelpPage())            # Index 8
+        self.stacked_widget.addWidget(LogsPage())            # Index 9
 
         right_panel_layout.addWidget(self.stacked_widget)
 
         # Raccourci « enveloppe » : bouton ✉️ de la fiche adhérent vers Communication filtrée (Nouveau !)
         self.members_page = self.stacked_widget.widget(0)
         self.members_page.email_requested.connect(self.open_communications_for_member)
+
 
         # Pied de page unifié pour tout le site (Nouveau !)
         footer = QFrame()
@@ -319,11 +249,11 @@ class MainWindow(QMainWindow):
         self.drive_status.setText(status_text)
 
         # Actualiser les stats et listes si l'on revient sur l'accueil, adhérents ou logs
-        if index == 7 and hasattr(page, "load_and_calculate_stats"):
+        if index == 6 and hasattr(page, "load_and_calculate_stats"):
             page.load_and_calculate_stats(force_reload=force_reload)
         elif index == 0 and hasattr(page, "load_members_from_repository"):
             page.load_members_from_repository(force_reload=force_reload)
-        elif index == 10 and hasattr(page, "load_logs"):
+        elif index == 9 and hasattr(page, "load_logs"):
             page.load_logs()
 
     def open_communications_for_member(self, member):
@@ -346,26 +276,16 @@ class MainWindow(QMainWindow):
 
     def start_drive_sync_workflow(self):
         """Déclenche le téléchargement du tableur de référence depuis Google Drive en tâche de fond."""
-        self.drive_sync_btn.setEnabled(False)
-        self.drive_sync_btn.setText("🔄 update BDD...")
-        self.sync_btn.setEnabled(False)
-
         drive_db_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
-        
+
         print("🔄 [MAIN] Lancement du worker de téléchargement seul depuis Google Drive...")
         self.drive_worker = DownloadDriveFileWorker(drive_db_id)
         self.drive_worker.progress.connect(self.on_drive_sync_progress)
         self.drive_worker.finished.connect(self.on_drive_sync_finished)
         self.drive_worker.start()
-
     def on_drive_sync_progress(self, message: str, percent: int):
         print(f"🔄 [DRIVE_SYNC] {percent}% - {message}")
-
     def on_drive_sync_finished(self, success: bool, result_message: str):
-        self.drive_sync_btn.setEnabled(True)
-        self.drive_sync_btn.setText("update BDD")
-        self.sync_btn.setEnabled(True)
-
         if success:
             import datetime
             now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -384,30 +304,18 @@ class MainWindow(QMainWindow):
                 "Échec Google Drive",
                 f"Le téléchargement Google Drive a échoué :\n\n{result_message}"
             )
-
     def start_drive_upload_workflow(self):
         """Déclenche le téléversement de la base SQLite locale vers Google Drive en arrière-plan."""
-        self.drive_upload_btn.setEnabled(False)
-        self.drive_upload_btn.setText("🔄 Envoi...")
-        self.drive_sync_btn.setEnabled(False)
-        self.sync_btn.setEnabled(False)
-
         print("📤 [MAIN] Lancement du worker de sauvegarde SQLite vers Google Drive...")
         from presentation.workers import UploadDriveFileWorker
         self.upload_worker = UploadDriveFileWorker()
         self.upload_worker.progress.connect(self.on_drive_upload_progress)
         self.upload_worker.finished.connect(self.on_drive_upload_finished)
         self.upload_worker.start()
-
     def on_drive_upload_progress(self, message: str, percent: int):
         print(f"📤 [DRIVE_UPLOAD] {percent}% - {message}")
 
     def on_drive_upload_finished(self, success: bool, result_message: str):
-        self.drive_upload_btn.setEnabled(True)
-        self.drive_upload_btn.setText("Sauvegarder sur Drive")
-        self.drive_sync_btn.setEnabled(True)
-        self.sync_btn.setEnabled(True)
-
         if success:
             import datetime
             now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -425,26 +333,19 @@ class MainWindow(QMainWindow):
                 "Échec de Sauvegarde",
                 f"La sauvegarde sur Google Drive a échoué :\n\n{result_message}"
             )
-
     def start_sync_workflow(self):
         """Déclenche la synchronisation HelloAsso & Google Drive en arrière-plan."""
-        self.sync_btn.setEnabled(False)
-        self.sync_btn.setText("🔄 Synchro...")
-        self.drive_sync_btn.setEnabled(False)
-        
         drive_file_id = SecretStore.get_secret("GOOGLE_DRIVE_FILE_ID")
         campaign_slug = SecretStore.get_secret("CAMPAIGN_SLUG") or f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade"
-        
+
         print("🔄 [MAIN] Lancement du worker de synchronisation HelloAsso...")
-        
+
         self.sync_worker = SyncHelloAssoWorker(drive_file_id, campaign_slug)
         self.sync_worker.progress.connect(self.on_sync_progress)
         self.sync_worker.finished.connect(self.on_sync_finished)
         self.sync_worker.start()
-
     def on_sync_progress(self, message: str, percent: int):
         print(f"🔄 [SYNC] {percent}% - {message}")
-
     @staticmethod
     def _apply_sync_dialog_size(box: QMessageBox, has_tables: bool):
         """Élargit la fenêtre de résultat de la synchronisation quand elle affiche des
@@ -459,18 +360,13 @@ class MainWindow(QMainWindow):
         box.setSizeGripEnabled(True)
 
     def on_sync_finished(self, success: bool, result_message: str):
-        self.sync_btn.setEnabled(True)
-        self.sync_btn.setText("Synchroniser et merger avec HelloAsso")
-        self.drive_sync_btn.setEnabled(True)
-        
         if success:
             import datetime
             now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             SecretStore.set_secret("LAST_HELLOASSO_SYNC", now_str)
-            SecretStore.set_secret("LAST_GOOGLE_DRIVE_SYNC", now_str) # Car HelloAsso sync téléverse aussi vers Drive !
-
+            SecretStore.set_secret("LAST_GOOGLE_DRIVE_SYNC", now_str)  # HelloAsso sync televerse aussi vers Drive !
+            self.update_last_sync_footer_label()
             import json
-            # Vérifier s'il y a des données de nouveaux adhérents + conflits d'âge
             new_members = []
             age_conflicts = []
             if result_message.startswith("SUCCESS_DATA:"):
@@ -484,14 +380,13 @@ class MainWindow(QMainWindow):
                         new_members = payload
                 except Exception:
                     pass
-            
-            # Formater l'affichage du pop-up de confirmation sous forme de tableau HTML
+
             total_added = len(new_members)
             if total_added > 0:
                 html_msg = (
-                    f"<h3><b>🎉 Synchronisation Réussie !</b></h3>"
+                    f"<h3><b>✅ Synchronisation Réussie !</b></h3>"
                     f"<p>La base d'adhérents a été actualisée de manière transparente.</p>"
-                    f"<p><b>📊 {total_added} nouveau(x) membre(s) ajouté(s) dans l'Excel :</b></p>"
+                    f"<p><b>📥 {total_added} nouveau(x) membre(s) ajouté(s) :</b></p>"
                     f"<table border='1' cellpadding='6' cellspacing='0' style='border-collapse: collapse; border: 1px solid #CBD5E1; font-family: Segoe UI; font-size: 11px;'>"
                     f"<tr bgcolor='#163A5F' style='color: white; font-weight: bold;'>"
                     f"  <th>Nom</th>"
@@ -520,13 +415,11 @@ class MainWindow(QMainWindow):
                 html_msg += "</table>"
             else:
                 html_msg = (
-                    "<h3><b>✔️ Synchronisation Réussie !</b></h3>"
+                    "<h3><b>✓ Synchronisation Réussie !</b></h3>"
                     "<p>La base d'adhérents est déjà entièrement à jour.</p>"
-                    "<p><b>📊 0 nouvelle ligne ajoutée.</b></p>"
-            )
-            
-            # Bloc d'avertissement en cas de conflit d'âge sur les nouvelles inscriptions
-            # (adulte dans un groupe enfants/collège/lycée ou année de naissance hors bornes)
+                    "<p><b>📥 0 nouvelle ligne ajoutée.</b></p>"
+                )
+
             if age_conflicts:
                 html_msg += (
                     f"<h3 style='color: #B45309; margin-top: 15px;'><b>⚠️ Conflits d'âge détectés ({len(age_conflicts)})</b></h3>"
@@ -542,7 +435,7 @@ class MainWindow(QMainWindow):
                     f"</tr>"
                 )
                 for c in age_conflicts:
-                    problems = "<br>".join(f"• {msg}" for msg in c.get("messages", []))
+                    problems = "<br>".join(f"✓ {msg}" for msg in c.get("messages", []))
                     html_msg += (
                         f"<tr bgcolor='#FEF3C7'>"
                         f"  <td><b>{c.get('last_name', '')}</b></td>"
@@ -552,27 +445,24 @@ class MainWindow(QMainWindow):
                         f"</tr>"
                     )
                 html_msg += "</table>"
-                
-            # Créer un QMessageBox personnalisé pour intégrer le bouton d'ouverture web Google Drive
+
             box = QMessageBox(self)
             box.setWindowTitle("Synchronisation ALJ Escalade")
             box.setText(html_msg)
             box.setTextFormat(Qt.TextFormat.RichText)
-            # Fenêtre élargie quand des tableaux sont affichés : les colonnes
-            # « Date d'inscription » et « Alerte » restent lisibles sans se tasser.
             self._apply_sync_dialog_size(box, bool(new_members or age_conflicts))
             if age_conflicts:
                 box.setIcon(QMessageBox.Icon.Warning)
-            
-            ok_btn = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
-            
+
+            box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+
             drive_file_id = SecretStore.get_secret("GOOGLE_DRIVE_FILE_ID")
             open_btn = None
             if drive_file_id:
-                open_btn = box.addButton("🌐 Ouvrir sur Google Drive", QMessageBox.ButtonRole.ActionRole)
-                
+                open_btn = box.addButton("🔗 Ouvrir sur Google Drive", QMessageBox.ButtonRole.ActionRole)
+
             box.exec()
-            
+
             if open_btn and box.clickedButton() == open_btn:
                 url = f"https://drive.google.com/file/d/{drive_file_id}/view"
                 import webbrowser
@@ -580,47 +470,41 @@ class MainWindow(QMainWindow):
                     webbrowser.open(url)
                 except Exception:
                     pass
-                    
-            # Actualiser la page active pour refléter les nouvelles données immédiatement en vidant le cache
+
             self.on_nav_changed(self.stacked_widget.currentIndex(), force_reload=True)
         else:
             QMessageBox.critical(
-                self, 
-                "Échec de Synchronisation", 
+                self,
+                "Échec de Synchronisation",
                 f"La synchronisation a échoué :\n\n{result_message}"
             )
-
     def load_initial_data_async(self):
         """Lance le chargement asynchrone des données locales au démarrage pour accélérer l'ouverture de l'application."""
         # Désactiver temporairement les boutons de navigation
         for btn in self.nav_buttons:
             btn.setEnabled(False)
-        self.sync_btn.setEnabled(False)
-        self.drive_sync_btn.setEnabled(False)
-        self.drive_upload_btn.setEnabled(False)
-        
+
         # Créer un dialogue de chargement propre et moderne
         self.loading_dialog = QMessageBox(self)
         self.loading_dialog.setWindowTitle("Initialisation")
-        self.loading_dialog.setText("🚀 <b>ALJ Escalade Manager</b><br><br>Chargement en cours...")
+        self.loading_dialog.setText("🔄 <b>ALJ Escalade Manager</b><br><br>Chargement en cours...")
         self.loading_dialog.setIcon(QMessageBox.Information)
         self.loading_dialog.setStandardButtons(QMessageBox.Ok)
-        
+
         # Désactiver le bouton OK pour empêcher la fermeture prématurée pendant le chargement
         ok_btn = self.loading_dialog.button(QMessageBox.Ok)
         if ok_btn:
             ok_btn.setEnabled(False)
-        
+
         # Lancer le worker de chargement
         from presentation.workers import LocalDataLoaderWorker
         self.loader_worker = LocalDataLoaderWorker()
         self.loader_worker.progress.connect(self.on_loader_progress)
         self.loader_worker.finished.connect(self.on_loader_finished)
         self.loader_worker.start()
-        
+
         # Afficher le dialogue de manière non-bloquante
         self.loading_dialog.show()
-
     def on_loader_progress(self, message: str, percent: int):
         # Afficher la progression dans la console, mais ne pas modifier le texte du dialogue
         # pour éviter d'avoir du texte entre "chargement en cours" et "chargement terminé"
@@ -630,41 +514,38 @@ class MainWindow(QMainWindow):
         # Réactiver les boutons
         for btn in self.nav_buttons:
             btn.setEnabled(True)
-        self.sync_btn.setEnabled(True)
-        self.drive_sync_btn.setEnabled(True)
-        self.drive_upload_btn.setEnabled(True)
-        
+
         if success and members_list:
             # Distribuer les données aux pages de l'application
-            members_page = self.stacked_widget.widget(0) # Index 0 (Adhérents)
-            documents_page = self.stacked_widget.widget(1) # Index 1 (Attestations)
-            communications_page = self.stacked_widget.widget(2) # Index 2 (Communications)
-            reports_page = self.stacked_widget.widget(7) # Index 7 (Outils)
-            
+            members_page = self.stacked_widget.widget(0)  # Index 0 (Adhérents)
+            documents_page = self.stacked_widget.widget(1)  # Index 1 (Attestations)
+            communications_page = self.stacked_widget.widget(2)  # Index 2 (Communications)
+            reports_page = self.stacked_widget.widget(6)  # Index 6 (Outils)
+
             # Injecter la liste de membres préchargée
             members_page.members_list = members_list
             reports_page.members_list = members_list
             documents_page.load_members(members_list)
             communications_page.load_members(members_list)
-            
+
             # Actualiser la vue d'accueil / outils (statistiques ou bannière)
             if hasattr(reports_page, "calculate_and_display_stats"):
                 reports_page.calculate_and_display_stats()
             elif hasattr(reports_page, "load_and_calculate_stats"):
                 reports_page.load_and_calculate_stats()
-            
+
             # Mettre à jour la table des adhérents
             members_page.base_model.update_data(members_list)
             members_page.update_counter(len(members_list))
-            
+
             # Actualiser les filtres (tarifs + statuts dynamiques) sur la page des membres
             members_page.notify_members_reloaded()
-            
+
             print(f"✅ [SYSTEM] {len(members_list)} adhérents chargés de façon asynchrone au démarrage.")
-            
+
             # Mettre à jour le texte du dialogue de chargement et ACTIVER le bouton OK pour fermer !
             if hasattr(self, 'loading_dialog'):
-                self.loading_dialog.setText("🚀 <b>ALJ Escalade Manager</b><br><br>✅ Chargement terminé !")
+                self.loading_dialog.setText("✅ <b>ALJ Escalade Manager</b><br><br>Chargement terminé !")
                 ok_btn = self.loading_dialog.button(QMessageBox.Ok)
                 if ok_btn:
                     ok_btn.setEnabled(True)
@@ -672,15 +553,14 @@ class MainWindow(QMainWindow):
             # Fermer le dialogue d'attente s'il y a une erreur
             if hasattr(self, 'loading_dialog'):
                 self.loading_dialog.close()
-                
+
             # S'il n'y a pas de fichier ou en cas d'erreur
             QMessageBox.warning(
                 self,
                 "Données locales absentes",
                 f"Aucun fichier d'adhérents local n'a pu être chargé au démarrage : {error_msg}\n\n"
-                "Veuillez cliquer sur le bouton 'update BDD' pour récupérer la base d'adhérents."
+                "Veuillez utiliser le bouton « Update BDD » de la page Outils pour récupérer la base d'adhérents."
             )
-
     def update_last_sync_footer_label(self):
         """Met à jour l'étiquette de dernière sauvegarde et de dernier import de la BDD SQLite sur le Google Drive dans le pied de page."""
         last_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC")

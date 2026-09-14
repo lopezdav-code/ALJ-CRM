@@ -5,9 +5,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
     QListWidgetItem, QSplitter, QComboBox, QCheckBox, QMessageBox,
-    QRadioButton, QDialog, QGroupBox, QDateEdit, QScrollArea
+    QRadioButton, QDialog, QDateEdit, QScrollArea, QSizePolicy,
+    QGridLayout
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QSize, QEvent
+from PySide6.QtGui import QColor
 from PIL import Image, ImageDraw
 
 from paths import CODE_ROOT
@@ -16,8 +18,8 @@ from infrastructure.sqlite_repository import SqliteRepository, DEFAULT_SENDER_EM
 from infrastructure.schema_v2 import normalize_status
 from presentation.workers import SendEmailCampaignWorker
 from presentation.pages.members import (
-    SubCategoryDialog, CANCELLED_STATUS,
-    build_tarif_groups, build_default_tarif_selection, build_status_list,
+    SubCategoryDialog, CANCELLED_STATUS, WAITING_LIST_TARIF,
+    build_creneau_filter_blocks, build_default_tarif_selection, build_status_list,
     parse_order_date
 )
 
@@ -93,15 +95,15 @@ class CommunicationsPage(QWidget):
         """
 
     def update_tarif_button(self):
-        """Met à jour le libellé du bouton tarifs selon la sélection courante."""
-        all_tarifs = set(m.tarif_name for m in self.members_list if m.tarif_name)
+        """Met à jour le libellé du bouton de sous-catégories (libellés identiques à l'onglet Adhérents)."""
         default_tarifs = build_default_tarif_selection(self.members_list)
-        if not self.selected_tarifs or self.selected_tarifs == all_tarifs:
-            self.tarif_filter.setText("Tous les tarifs ▾")
+        count = len(self.selected_tarifs)
+        if count == 0 or self.selected_tarifs == default_tarifs | {WAITING_LIST_TARIF}:
+            self.tarif_filter.setText("Toutes les sous-catégories ▾")
         elif self.selected_tarifs == default_tarifs:
-            self.tarif_filter.setText("Tous sauf liste d'attente ▾")
+            self.tarif_filter.setText("Toutes sauf liste d'attente ▾")
         else:
-            self.tarif_filter.setText(f"Tarifs ({len(self.selected_tarifs)}) ▾")
+            self.tarif_filter.setText(f"Sous-catégories ({count}) ▾")
 
     def update_status_button(self):
         """Met à jour le libellé du bouton statuts selon la sélection courante."""
@@ -114,11 +116,14 @@ class CommunicationsPage(QWidget):
             self.status_filter.setText(f"Statuts ({len(self.selected_statuses)}) ▾")
 
     def open_tarif_popup(self):
-        """Ouvre la pop-up de sélection des tarifs, regroupés par type (comme l'onglet Adhérents)."""
+        """Ouvre la pop-up de sélection des sous-catégories (identique à l'onglet Adhérents :
+        rubriques de créneaux du planning, une case cochée sélectionne tous les tarifs
+        rattachés au créneau)."""
         dialog = SubCategoryDialog(
-            build_tarif_groups(self.members_list),
+            [],
             self.selected_tarifs,
             on_change=self.on_popup_selection_changed,
+            hierarchy=build_creneau_filter_blocks(self.members_list),
             parent=self
         )
         dialog.exec()
@@ -142,12 +147,98 @@ class CommunicationsPage(QWidget):
         self.update_status_button()
         self.on_filters_changed()
 
+    # ------------------------------------------------------------------
+    # Styles QSS centralises de la page Communications
+    # ------------------------------------------------------------------
+    QSS_CARD = "QFrame { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; } QLabel { background: transparent; border: none; }"
+    QSS_INNER = "QFrame { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; } QLabel { background: transparent; border: none; }"
+    QSS_BAR = "QFrame { background-color: #EFF6FF; border: 1px solid #DBEAFE; border-radius: 8px; } QLabel { background: transparent; border: none; }"
+    QSS_BTN_PRIMARY = """
+        QPushButton {
+            background-color: #2563EB; color: #FFFFFF; border: none;
+            border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: bold;
+        }
+        QPushButton:hover { background-color: #1D4ED8; }
+        QPushButton:disabled { background-color: #94A3B8; }
+    """
+    QSS_BTN_SECONDARY = """
+        QPushButton {
+            background-color: #FFFFFF; color: #334155; border: 1px solid #CBD5E1;
+            border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 600;
+        }
+        QPushButton:hover { background-color: #F8FAFC; border-color: #94A3B8; }
+    """
+    QSS_BTN_DANGER = """
+        QPushButton {
+            background-color: #FFFFFF; color: #B91C1C; border: 1px solid #FCA5A5;
+            border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 600;
+        }
+        QPushButton:hover { background-color: #FEF2F2; border-color: #DC2626; }
+    """
+    QSS_PILL = "QLabel { background-color: #DBEAFE; color: #1D4ED8; border-radius: 9px; padding: 3px 10px; font-size: 11px; font-weight: bold; }"
+    QSS_CARD_TITLE = "font-size: 14px; font-weight: bold; color: #1E293B; background: transparent; border: none;"
+    QSS_FIELD_LABEL = "color: #475569; font-size: 11px; font-weight: 600; background: transparent; border: none;"
+
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 20)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
-        # Séparateur mobile horizontal (Splitter) pour séparer les Destinataires à gauche et la Composition à droite
+        # 1. TITRE + SOUS-TITRE (gabarit commun de l application)
+        title = QLabel("\u2709 Communications")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
+        title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(title)
+
+        subtitle = QLabel("Envoyez un message personnalis\u00e9 aux adh\u00e9rents")
+        subtitle.setStyleSheet("color: #64748B; font-size: 13px;")
+        subtitle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(subtitle)
+
+        # 2. INDICATEUR DE WORKFLOW (purement visuel)
+        self.wf_bar = QFrame()
+        self.wf_bar.setObjectName("WorkflowBar")
+        self.wf_bar.setStyleSheet(self.QSS_BAR)
+        wf_layout = QHBoxLayout(self.wf_bar)
+        wf_layout.setContentsMargins(16, 8, 16, 8)
+        wf_layout.setSpacing(10)
+
+        def _wf_step(badge_text, active, title_text, detail_label):
+            badge = QLabel(badge_text)
+            badge.setFixedSize(26, 26)
+            badge.setAlignment(Qt.AlignCenter)
+            color = "#2563EB" if active else "#94A3B8"
+            badge.setStyleSheet(f"QLabel {{ background-color: {color}; color: #FFFFFF; border-radius: 13px; font-size: 12px; font-weight: bold; }}")
+            wf_layout.addWidget(badge)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            t = QLabel(title_text)
+            t.setStyleSheet("font-size: 12px; font-weight: bold; color: #1E293B; background: transparent;")
+            col.addWidget(t)
+            detail_label.setStyleSheet("font-size: 11px; color: #64748B; background: transparent;")
+            col.addWidget(detail_label)
+            wf_layout.addLayout(col)
+
+        self.wf_step1_lbl = QLabel("0 s\u00e9lectionn\u00e9")
+        _wf_step("\u2460", True, "Destinataires", self.wf_step1_lbl)
+        wf_layout.addStretch()
+        wf_layout.addWidget(self._vsep())
+        wf_layout.addStretch()
+        self.wf_step2_lbl = QLabel("\u2014")
+        _wf_step("\u2461", True, "Message", self.wf_step2_lbl)
+        wf_layout.addStretch()
+        wf_layout.addWidget(self._vsep())
+        wf_layout.addStretch()
+        self.wf_step3_lbl = QLabel("Aucun destinataire")
+        _wf_step("\u2462", False, "V\u00e9rification", self.wf_step3_lbl)
+        wf_layout.addStretch()
+        wf_layout.addWidget(self._vsep())
+        wf_layout.addStretch()
+        self.wf_step4_lbl = QLabel("\u2014")
+        _wf_step("\u2463", False, "Envoi", self.wf_step4_lbl)
+        layout.addWidget(self.wf_bar)
+
+        # 3. SPLITTER : DESTINATAIRES (gauche) / MESSAGE (droite, un peu plus large)
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setStyleSheet("""
             QSplitter::handle {
@@ -155,81 +246,135 @@ class CommunicationsPage(QWidget):
                 width: 1px;
             }
         """)
-
-        # ----------------------------------------------------
-        # CÔTÉ GAUCHE : SÉLECTION DES DESTINATAIRES
-        # ----------------------------------------------------
+        # ------------------ COTE GAUCHE : DESTINATAIRES ------------------
         left_container = QWidget()
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 10, 0)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(0, 0, 8, 0)
+        left_layout.setSpacing(8)
 
-        self.dest_title = QLabel("🎯 Sélection des Destinataires (0)")
-        self.dest_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #1E293B;")
-        left_layout.addWidget(self.dest_title)
+        dest_card = QFrame()
+        dest_card.setStyleSheet(self.QSS_CARD)
+        dest_layout = QVBoxLayout(dest_card)
+        dest_layout.setContentsMargins(14, 12, 14, 12)
+        dest_layout.setSpacing(8)
 
-        # Barre de recherche de destinataire
+        dest_head = QHBoxLayout()
+        lbl_dest = QLabel("\U0001F465 Destinataires")
+        lbl_dest.setStyleSheet(self.QSS_CARD_TITLE)
+        dest_head.addWidget(lbl_dest)
+        dest_head.addStretch()
+        self.dest_title = QLabel("0 s\u00e9lectionn\u00e9s")
+        self.dest_title.setStyleSheet(self.QSS_PILL)
+        dest_head.addWidget(self.dest_title)
+        dest_layout.addLayout(dest_head)
+
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Filtrer par nom, prénom ou e-mail...")
+        self.search_input.setPlaceholderText("\U0001F50E Rechercher un adh\u00e9rent (nom, pr\u00e9nom, e-mail)...")
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #FFFFFF;
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                padding: 6px 10px;
+                padding: 7px 10px;
                 font-size: 12px;
                 color: #1E293B;
             }
         """)
         self.search_input.textChanged.connect(self.on_search_changed)
-        left_layout.addWidget(self.search_input)
+        dest_layout.addWidget(self.search_input)
 
-        # Barre de filtres avancés (Tarifs et e-mail envoyé)
-        filters_bar = QHBoxLayout()
-        filters_bar.setSpacing(6)
+        # Carte Filtres
+        filters_frame = QFrame()
+        filters_frame.setStyleSheet(self.QSS_INNER)
+        filters_layout = QVBoxLayout(filters_frame)
+        filters_layout.setContentsMargins(10, 8, 10, 10)
+        filters_layout.setSpacing(6)
 
-        # 0. Filtre par Saison (Nouveau !)
+        f_head = QHBoxLayout()
+        lbl_filters = QLabel("\u2699 Filtres")
+        lbl_filters.setStyleSheet("color: #334155; font-size: 12px; font-weight: bold; background: transparent; border: none;")
+        f_head.addWidget(lbl_filters)
+        f_head.addStretch()
+        self.btn_reset_filters = QPushButton("\u21ba R\u00e9initialiser")
+        self.btn_reset_filters.setCursor(Qt.PointingHandCursor)
+        self.btn_reset_filters.setToolTip("Remet tous les filtres \u00e0 z\u00e9ro (saison, statut, cr\u00e9neau, sant\u00e9, dipl\u00f4me, recherche).")
+        self.btn_reset_filters.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #2563EB; border: none;
+                padding: 2px 6px; font-size: 11px; font-weight: 600;
+            }
+            QPushButton:hover { text-decoration: underline; }
+        """)
+        self.btn_reset_filters.clicked.connect(self.reset_filters)
+        f_head.addWidget(self.btn_reset_filters)
+        filters_layout.addLayout(f_head)
+
+        f_grid = QGridLayout()
+        f_grid.setHorizontalSpacing(10)
+        f_grid.setVerticalSpacing(4)
+        lbl_season = QLabel("Saison")
+        lbl_season.setStyleSheet(self.QSS_FIELD_LABEL)
         self.season_filter = QComboBox()
         self.season_filter.addItems([
-            "Saison 2026-2027 (Active)", 
-            "Saison 2025-2026", 
-            "Toutes les saisons confondues", 
-            "Anciens non réinscrits (Présents en 25/26 mais pas en 26/27)"
+            "Saison 2026-2027 (Active)",
+            "Saison 2025-2026",
+            "Toutes les saisons confondues",
+            "Anciens non r\u00e9inscrits (Pr\u00e9sents en 25/26 mais pas en 26/27)"
         ])
         self.season_filter.setStyleSheet(self.get_combobox_style())
         self.season_filter.currentIndexChanged.connect(self.on_season_changed)
-        filters_bar.addWidget(self.season_filter)
-
-        # 1. Filtre par Tarif (pop-up de sélection multi-critères, identique à l'onglet Adhérents)
-        self.tarif_filter = QPushButton("Tous les tarifs ▾")
-        self.tarif_filter.setCursor(Qt.PointingHandCursor)
-        self.tarif_filter.setStyleSheet(self.get_filter_button_style())
-        self.tarif_filter.clicked.connect(self.open_tarif_popup)
-        filters_bar.addWidget(self.tarif_filter)
-
-        # 1b. Filtre par Statut (pop-up à cases à cocher ; "Annulé" décoché par défaut)
-        self.status_filter = QPushButton("Tous sauf annulés ▾")
+        lbl_status = QLabel("Statut")
+        lbl_status.setStyleSheet(self.QSS_FIELD_LABEL)
+        self.status_filter = QPushButton("Tous les statuts \u25be")
         self.status_filter.setCursor(Qt.PointingHandCursor)
         self.status_filter.setStyleSheet(self.get_filter_button_style())
         self.status_filter.clicked.connect(self.open_status_popup)
-        filters_bar.addWidget(self.status_filter)
+        lbl_tarif = QLabel("Cr\u00e9neau")
+        lbl_tarif.setStyleSheet(self.QSS_FIELD_LABEL)
+        self.tarif_filter = QPushButton("Toutes les sous-cat\u00e9gories \u25be")
+        self.tarif_filter.setCursor(Qt.PointingHandCursor)
+        self.tarif_filter.setStyleSheet(self.get_filter_button_style())
+        self.tarif_filter.clicked.connect(self.open_tarif_popup)
+        for col_idx, w in enumerate((lbl_season, lbl_status, lbl_tarif)):
+            f_grid.addWidget(w, 0, col_idx)
+        for col_idx, w in enumerate((self.season_filter, self.status_filter, self.tarif_filter)):
+            f_grid.addWidget(w, 1, col_idx)
+        filters_layout.addLayout(f_grid)
 
-        # 2. Filtre E-mail envoyé
+        checks_row = QHBoxLayout()
+        checks_row.setSpacing(14)
+        self.health_filter_checkbox = QCheckBox("\u26a0 Sant\u00e9 en attente")
+        self.health_filter_checkbox.setToolTip(
+            "N'affiche que les adh\u00e9rents dont le Document de sant\u00e9 FFME est \u00ab ATTENTE \u00bb."
+        )
+        self.health_filter_checkbox.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500; background: transparent;")
+        self.health_filter_checkbox.stateChanged.connect(self.on_filters_changed)
+        checks_row.addWidget(self.health_filter_checkbox)
+        self.diploma_filter_checkbox = QCheckBox("\U0001F393 Sans dipl\u00f4me")
+        self.diploma_filter_checkbox.setToolTip(
+            "N'affiche que les adh\u00e9rents qui n'ont ni le Badge Rouge ni le Passeport Orange "
+            "(utile pour relancer l'obtention des dipl\u00f4mes FFME)."
+        )
+        self.diploma_filter_checkbox.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500; background: transparent;")
+        self.diploma_filter_checkbox.stateChanged.connect(self.on_filters_changed)
+        checks_row.addWidget(self.diploma_filter_checkbox)
+        checks_row.addStretch()
+        filters_layout.addLayout(checks_row)
+
+        adv_row = QHBoxLayout()
+        adv_row.setSpacing(6)
         self.sent_filter = QComboBox()
-        self.sent_filter.addItems(["Tous les envois", "Non envoyés", "Envoyés"])
+        self.sent_filter.addItems(["Tous les envois", "Non envoy\u00e9s", "Envoy\u00e9s"])
         self.sent_filter.setStyleSheet(self.get_combobox_style())
         self.sent_filter.currentIndexChanged.connect(self.on_filters_changed)
-        filters_bar.addWidget(self.sent_filter)
-
-        # 3. Filtre Calendrier : Inscrit après le (QCheckBox + QDateEdit)
-        self.date_checkbox = QCheckBox("Inscrit après le :")
-        self.date_checkbox.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500;")
+        adv_row.addWidget(self.sent_filter)
+        self.date_checkbox = QCheckBox("Inscrit apr\u00e8s le :")
+        self.date_checkbox.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500; background: transparent;")
         self.date_checkbox.stateChanged.connect(self.on_filters_changed)
-        filters_bar.addWidget(self.date_checkbox)
-
+        adv_row.addWidget(self.date_checkbox)
         self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True) # Affiche un calendrier pop-up visuel !
-        self.date_edit.setDate(QDate(2026, 7, 1)) # Par défaut au début de la saison
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate(2026, 7, 1))
         self.date_edit.setStyleSheet("""
             QDateEdit {
                 background-color: #FFFFFF;
@@ -241,84 +386,36 @@ class CommunicationsPage(QWidget):
             }
         """)
         self.date_edit.dateChanged.connect(self.on_filters_changed)
-        filters_bar.addWidget(self.date_edit)
+        adv_row.addWidget(self.date_edit)
+        adv_row.addStretch()
+        filters_layout.addLayout(adv_row)
+        dest_layout.addWidget(filters_frame)
+        # Boutons de selection compacts
+        sel_btns = QHBoxLayout()
+        sel_btns.setSpacing(6)
+        self.btn_select_all = QPushButton("\u2611  Tout s\u00e9lectionner (0)")
+        self.btn_select_all.setCursor(Qt.PointingHandCursor)
+        self.btn_select_all.setStyleSheet(self.QSS_BTN_PRIMARY)
+        self.btn_select_all.clicked.connect(self.select_visible)
+        sel_btns.addWidget(self.btn_select_all)
 
-        left_layout.addLayout(filters_bar)
+        self.btn_deselect_filtered = QPushButton("\u2610  D\u00e9cocher le filtre")
+        self.btn_deselect_filtered.setCursor(Qt.PointingHandCursor)
+        self.btn_deselect_filtered.setStyleSheet(self.QSS_BTN_SECONDARY)
+        self.btn_deselect_filtered.clicked.connect(self.deselect_visible)
+        sel_btns.addWidget(self.btn_deselect_filtered)
 
-        # Boutons de sélection de masse pour la sélection filtrée
-        selection_btns = QHBoxLayout()
-        selection_btns.setSpacing(6)
+        self.btn_clear_selection = QPushButton("\U0001F5D1  Tout d\u00e9s\u00e9lectionner")
+        self.btn_clear_selection.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_selection.setToolTip("D\u00e9coche tous les destinataires, y compris ceux masqu\u00e9s par les filtres.")
+        self.btn_clear_selection.setStyleSheet(self.QSS_BTN_DANGER)
+        self.btn_clear_selection.clicked.connect(self.deselect_all_members)
+        sel_btns.addWidget(self.btn_clear_selection)
+        sel_btns.addStretch()
+        dest_layout.addLayout(sel_btns)
 
-        check_all_btn = QPushButton("Cocher le filtre")
-        check_all_btn.setCursor(Qt.PointingHandCursor)
-        check_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-size: 11px;
-                font-weight: 500;
-                color: #2563EB;
-            }
-            QPushButton:hover {
-                background-color: #EFF6FF;
-                border-color: #BFDBFE;
-            }
-        """)
-        check_all_btn.clicked.connect(self.select_visible)
-        selection_btns.addWidget(check_all_btn)
-
-        uncheck_all_btn = QPushButton("Décocher le filtre")
-        uncheck_all_btn.setCursor(Qt.PointingHandCursor)
-        uncheck_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-size: 11px;
-                font-weight: 500;
-                color: #EF4444;
-            }
-            QPushButton:hover {
-                background-color: #FEF2F2;
-                border-color: #FCA5A5;
-            }
-        """)
-        uncheck_all_btn.clicked.connect(self.deselect_visible)
-        selection_btns.addWidget(uncheck_all_btn)
-
-        # Tout désélectionner : décoche TOUS les destinataires, y compris ceux
-        # masqués par les filtres actifs (recherche, tarifs, statuts...) (Nouveau !)
-        deselect_everyone_btn = QPushButton("🚫 Tout désélectionner")
-        deselect_everyone_btn.setCursor(Qt.PointingHandCursor)
-        deselect_everyone_btn.setToolTip("Décoche tous les destinataires, y compris ceux masqués par les filtres.")
-        deselect_everyone_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                border: 1px solid #EF4444;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-size: 11px;
-                font-weight: bold;
-                color: #B91C1C;
-            }
-            QPushButton:hover {
-                background-color: #FEF2F2;
-                border-color: #DC2626;
-            }
-        """)
-        deselect_everyone_btn.clicked.connect(self.deselect_all_members)
-        selection_btns.addWidget(deselect_everyone_btn)
-
-        selection_btns.addStretch()
-        left_layout.addLayout(selection_btns)
-
-        # Encart repliable « Personnes sélectionnées » (Nouveau !) : liste toujours à jour
-        # des destinataires cochés, y compris ceux masqués par les filtres (recherche, tarifs...),
-        # pour éviter qu'une personne reçoive un e-mail sans être visible dans la liste.
-        self.selected_panel_btn = QPushButton("✅ Personnes sélectionnées (0) ▸")
+        # Encart repliable des personnes selectionnees
+        self.selected_panel_btn = QPushButton("\u2713 Personnes s\u00e9lectionn\u00e9es (0) \u25b8")
         self.selected_panel_btn.setCursor(Qt.PointingHandCursor)
         self.selected_panel_btn.setStyleSheet("""
             QPushButton {
@@ -337,13 +434,13 @@ class CommunicationsPage(QWidget):
             }
         """)
         self.selected_panel_btn.clicked.connect(self.toggle_selected_panel)
-        left_layout.addWidget(self.selected_panel_btn)
+        dest_layout.addWidget(self.selected_panel_btn)
 
         self.selected_panel = QListWidget()
         self.selected_panel.setVisible(False)
         self._selected_panel_open = False
-        self.selected_panel.setFixedHeight(170)
-        self.selected_panel.setToolTip("Destinataires cochés, même s'ils sont masqués par les filtres.")
+        self.selected_panel.setFixedHeight(150)
+        self.selected_panel.setToolTip("Destinataires coch\u00e9s, m\u00eame s'ils sont masqu\u00e9s par les filtres.")
         self.selected_panel.setStyleSheet("""
             QListWidget {
                 background-color: #F8FAFC;
@@ -358,26 +455,26 @@ class CommunicationsPage(QWidget):
                 border-bottom: 1px solid #D1FAE5;
             }
         """)
-        left_layout.addWidget(self.selected_panel)
+        dest_layout.addWidget(self.selected_panel)
 
-        # List Widget contenant les checkboxes d'adhérents (avec style de checkbox VERT !)
+        # Liste des destinataires (items riches)
         icon_url = generate_check_icon()
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
                 background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
+                border: none;
                 padding: 5px;
             }}
             QListWidget::item {{
-                padding: 8px 10px;
-                border-bottom: 1px solid #F1F5F9;
-                font-size: 12px;
-                color: #1E293B;
+                padding: 4px;
+                border: none;
             }}
             QListWidget::item:hover {{
                 background-color: #F8FAFC;
+            }}
+            QListWidget::item:selected {{
+                background-color: #EFF6FF;
             }}
             QListWidget::indicator {{
                 width: 16px;
@@ -396,36 +493,53 @@ class CommunicationsPage(QWidget):
             }}
         """)
         self.list_widget.itemChanged.connect(self.update_selection_count)
-        left_layout.addWidget(self.list_widget)
+        self.list_widget.setSpacing(2)
+        dest_layout.addWidget(self.list_widget, 1)
 
+        dest_footer = QHBoxLayout()
+        self.footer_lbl = QLabel("\U0001F465 0 destinataire s\u00e9lectionn\u00e9")
+        self.footer_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 600; background: transparent;")
+        dest_footer.addWidget(self.footer_lbl)
+        dest_footer.addStretch()
+        self.btn_show_all = QPushButton("Tout afficher")
+        self.btn_show_all.setCursor(Qt.PointingHandCursor)
+        self.btn_show_all.setToolTip("Efface la recherche pour r\u00e9afficher tous les destinataires.")
+        self.btn_show_all.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #2563EB; border: none;
+                padding: 2px 6px; font-size: 11px; font-weight: 600;
+            }
+            QPushButton:hover { text-decoration: underline; }
+        """)
+        self.btn_show_all.clicked.connect(self.show_all_recipients)
+        dest_footer.addWidget(self.btn_show_all)
+        dest_layout.addLayout(dest_footer)
+
+        left_layout.addWidget(dest_card, 1)
         self.splitter.addWidget(left_container)
-
-        # ----------------------------------------------------
-        # CÔTÉ DROIT : COMPOSITION DE L'EMAIL & ENVOI
-        # ----------------------------------------------------
+        # ------------------ COTE DROIT : MESSAGE ------------------
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(10, 0, 0, 0)
-        right_layout.setSpacing(15)
+        right_layout.setContentsMargins(8, 0, 0, 0)
+        right_layout.setSpacing(8)
 
-        form_frame = QFrame()
-        form_frame.setStyleSheet("""
-            QFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                padding: 15px;
-            }
-        """)
-        form_layout = QVBoxLayout(form_frame)
+        form_widget = QWidget()
+        form_layout = QVBoxLayout(form_widget)
+        form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(10)
-        self.form_frame = form_frame
+        self.form_frame = form_widget  # compatibilite du nom historique
 
-        # Section de Gestion des modèles d'e-mails (Nouveau !)
-        form_layout.addWidget(QLabel("Modèle d'e-mail :"))
-        template_bar = QHBoxLayout()
-        template_bar.setSpacing(6)
-        
+        # Carte Modele d e-mail
+        template_card = QFrame()
+        template_card.setStyleSheet(self.QSS_CARD)
+        tc_layout = QVBoxLayout(template_card)
+        tc_layout.setContentsMargins(14, 12, 14, 12)
+        tc_layout.setSpacing(8)
+        lbl_tpl = QLabel("\U0001F4C4 Mod\u00e8le d e-mail")
+        lbl_tpl.setStyleSheet(self.QSS_CARD_TITLE)
+        tc_layout.addWidget(lbl_tpl)
+        tpl_row = QHBoxLayout()
+        tpl_row.setSpacing(6)
         self.template_selector = QComboBox()
         self.template_selector.setStyleSheet("""
             QComboBox {
@@ -434,76 +548,52 @@ class CommunicationsPage(QWidget):
                 border-radius: 6px;
                 padding: 6px;
                 color: #1E293B;
-                min-width: 180px;
             }
         """)
         self.template_selector.currentIndexChanged.connect(self.on_template_selected)
-        template_bar.addWidget(self.template_selector)
-        
-        self.btn_save_template = QPushButton("💾 Enregistrer")
-        self.btn_save_template.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        tpl_row.addWidget(self.template_selector, 1)
+
+        self.btn_save_template = QPushButton("\U0001F4BE Enregistrer")
+        self.btn_save_template.setStyleSheet(self.QSS_BTN_PRIMARY)
         self.btn_save_template.clicked.connect(self.on_save_template_clicked)
-        template_bar.addWidget(self.btn_save_template)
-        
-        self.btn_new_template = QPushButton("➕ Nouveau")
-        self.btn_new_template.setStyleSheet("""
-            QPushButton {
-                background-color: #3B82F6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2563EB;
-            }
-        """)
+        tpl_row.addWidget(self.btn_save_template)
+
+        self.btn_new_template = QPushButton("\u2795 Nouveau")
+        self.btn_new_template.setStyleSheet(self.QSS_BTN_SECONDARY)
         self.btn_new_template.clicked.connect(self.on_new_template_clicked)
-        template_bar.addWidget(self.btn_new_template)
-        
-        self.btn_delete_template = QPushButton("🗑️ Supprimer")
-        self.btn_delete_template.setStyleSheet("""
-            QPushButton {
-                background-color: #EF4444;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #DC2626;
-            }
-        """)
+        tpl_row.addWidget(self.btn_new_template)
+
+        self.btn_delete_template = QPushButton("\U0001F5D1 Supprimer")
+        self.btn_delete_template.setStyleSheet(self.QSS_BTN_DANGER)
         self.btn_delete_template.clicked.connect(self.on_delete_template_clicked)
-        template_bar.addWidget(self.btn_delete_template)
-        
-        form_layout.addLayout(template_bar)
+        tpl_row.addWidget(self.btn_delete_template)
+        tc_layout.addLayout(tpl_row)
+        form_layout.addWidget(template_card)
 
-        # Section Adresse d'expédition (De) : choisissable et sauvegardable avec le modèle (Nouveau !)
-        form_layout.addWidget(QLabel("Adresse d'expédition (De) :"))
-        sender_bar = QHBoxLayout()
-        sender_bar.setSpacing(6)
+        # Carte Message
+        message_card = QFrame()
+        message_card.setStyleSheet(self.QSS_CARD)
+        mc_layout = QVBoxLayout(message_card)
+        mc_layout.setContentsMargins(14, 12, 14, 12)
+        mc_layout.setSpacing(6)
+        lbl_msg = QLabel("\u2709 Message")
+        lbl_msg.setStyleSheet(self.QSS_CARD_TITLE)
+        mc_layout.addWidget(lbl_msg)
 
+        sender_row = QHBoxLayout()
+        sender_row.setSpacing(8)
+        sender_col = QVBoxLayout()
+        sender_col.setSpacing(2)
+        lbl_sender = QLabel("Exp\u00e9diteur")
+        lbl_sender.setStyleSheet(self.QSS_FIELD_LABEL)
+        sender_col.addWidget(lbl_sender)
+        sender_email_row = QHBoxLayout()
+        sender_email_row.setSpacing(4)
         self.sender_email_combo = QComboBox()
         self.sender_email_combo.setEditable(True)
         self.sender_email_combo.setToolTip(
-            "Adresse utilisée comme expéditeur (De) des e-mails.\n"
-            "Elle est enregistrée avec le modèle d'e-mail et réutilisée à chaque envoi.\n"
-            "Astuce : elle doit correspondre à un alias configuré sur le compte d'envoi."
+            "Adresse utilis\u00e9e comme exp\u00e9diteur (De) des e-mails.\n"
+            "Elle est enregistr\u00e9e avec le mod\u00e8le d e-mail et r\u00e9utilis\u00e9e \u00e0 chaque envoi."
         )
         self.sender_email_combo.setStyleSheet("""
             QComboBox {
@@ -512,7 +602,6 @@ class CommunicationsPage(QWidget):
                 border-radius: 6px;
                 padding: 6px;
                 color: #1E293B;
-                min-width: 220px;
             }
             QComboBox::drop-down {
                 border: none;
@@ -528,38 +617,29 @@ class CommunicationsPage(QWidget):
                 color: #1E293B;
             }
         """)
-        sender_bar.addWidget(self.sender_email_combo, 1)
-
-        self.btn_save_sender = QPushButton("💾 Enregistrer")
+        sender_email_row.addWidget(self.sender_email_combo, 1)
+        self.btn_save_sender = QPushButton("\U0001F4BE")
+        self.btn_save_sender.setFixedSize(30, 30)
         self.btn_save_sender.setToolTip(
-            "Enregistre cette adresse comme expéditeur par défaut de la Communication "
-            "(elle est aussi mémorisée dans la liste déroulante)."
+            "Enregistre cette adresse comme exp\u00e9diteur par d\u00e9faut de la Communication "
+            "(elle est aussi m\u00e9moris\u00e9e dans la liste d\u00e9roulante)."
         )
-        self.btn_save_sender.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        self.btn_save_sender.setStyleSheet(self.QSS_BTN_SECONDARY)
         self.btn_save_sender.clicked.connect(self.on_save_sender_clicked)
-        sender_bar.addWidget(self.btn_save_sender)
+        sender_email_row.addWidget(self.btn_save_sender)
+        sender_col.addLayout(sender_email_row)
+        sender_row.addLayout(sender_col, 2)
 
-        form_layout.addLayout(sender_bar)
-
-        # Nom d'affichage de l'expéditeur (colonne « De » des messageries) (Nouveau !)
-        form_layout.addWidget(QLabel("Nom d'affichage de l'expéditeur (visible par les destinataires) :"))
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
+        lbl_name = QLabel("Nom affich\u00e9")
+        lbl_name.setStyleSheet(self.QSS_FIELD_LABEL)
+        name_col.addWidget(lbl_name)
         self.sender_name_input = QLineEdit()
         self.sender_name_input.setPlaceholderText(DEFAULT_SENDER_NAME)
         self.sender_name_input.setToolTip(
-            "Nom affiché dans la colonne « De » des messageries (ex : Amicale Laïque Jonage - Inscriptions).\n"
-            "Il est enregistré avec le modèle d'e-mail et réutilisé à chaque envoi."
+            "Nom affich\u00e9 dans la colonne \u00ab De \u00bb des messageries (ex : Amicale La\u00efque Jonage - Inscriptions).\n"
+            "Il est enregistr\u00e9 avec le mod\u00e8le d e-mail et r\u00e9utilis\u00e9 \u00e0 chaque envoi."
         )
         self.sender_name_input.setStyleSheet("""
             QLineEdit {
@@ -570,108 +650,97 @@ class CommunicationsPage(QWidget):
                 color: #1E293B;
             }
         """)
-        form_layout.addWidget(self.sender_name_input)
+        name_col.addWidget(self.sender_name_input)
+        sender_row.addLayout(name_col, 1)
+        mc_layout.addLayout(sender_row)
 
-        # Objet du mail
-        form_layout.addWidget(QLabel("Objet du courriel :"))
+        lbl_subject = QLabel("Objet")
+        lbl_subject.setStyleSheet(self.QSS_FIELD_LABEL)
+        mc_layout.addWidget(lbl_subject)
         self.subject_input = QLineEdit()
-        self.subject_input.setPlaceholderText("Entrez le sujet de l'email...")
-        self.subject_input.setText("Attestation de paiement escalade - Amicale Laïque de Jonage")
+        self.subject_input.setPlaceholderText("Entrez le sujet de l email...")
+        self.subject_input.setText("[ALJ] Attestation de paiement relative \u00e0 votre adh\u00e9sion \u00e0 l Amicale La\u00efque de Jonage")
         self.subject_input.setStyleSheet("""
             QLineEdit {
                 background-color: #FFFFFF;
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                padding: 8px;
+                padding: 7px;
                 color: #1E293B;
             }
         """)
-        form_layout.addWidget(self.subject_input)
+        mc_layout.addWidget(self.subject_input)
 
-        # Corps du mail
-        form_layout.addWidget(QLabel("Corps du message (Texte brut) :"))
+        body_head = QHBoxLayout()
+        lbl_body = QLabel("Corps du message")
+        lbl_body.setStyleSheet(self.QSS_FIELD_LABEL)
+        body_head.addWidget(lbl_body)
+        body_head.addStretch()
+        self.btn_variables = QPushButton("{ }  Variables")
+        self.btn_variables.setCursor(Qt.PointingHandCursor)
+        self.btn_variables.setToolTip("Affiche les variables personnalis\u00e9es utilisables dans le message.")
+        self.btn_variables.setStyleSheet(self.QSS_BTN_SECONDARY)
+        self.btn_variables.clicked.connect(self.show_variables_hint)
+        body_head.addWidget(self.btn_variables)
+        mc_layout.addLayout(body_head)
+
         self.body_input = QTextEdit()
-        self.body_input.setPlaceholderText("Saisissez le texte d'accompagnement...")
+        self.body_input.setPlaceholderText("Saisissez le texte d accompagnement...")
         self.body_input.setPlainText(
-            "Bonjour {Prénom},\n\n"
-            "Veuillez trouver ci-joint l'attestation de paiement relative à votre adhésion au club d'escalade "
+            "Bonjour {first_name},\n\n"
+            "Veuillez trouver ci-joint l attestation de paiement relative \u00e0 votre adh\u00e9sion au club d escalade "
             "pour la saison active.\n\n"
             "Sportivement,\n"
-            "L'équipe ALJ Escalade"
+            "L \u00e9quipe ALJ Escalade"
         )
+        self.body_input.setMinimumHeight(200)
         self.body_input.setStyleSheet("""
             QTextEdit {
                 background-color: #FFFFFF;
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                padding: 8px;
+                padding: 6px;
                 color: #1E293B;
-                min-height: 120px;
             }
         """)
-        form_layout.addWidget(self.body_input)
+        mc_layout.addWidget(self.body_input, 1)
+        form_layout.addWidget(message_card, 1)
+        # Carte Options d envoi
+        options_card = QFrame()
+        options_card.setStyleSheet(self.QSS_CARD)
+        opt_layout = QVBoxLayout(options_card)
+        opt_layout.setContentsMargins(14, 12, 14, 12)
+        opt_layout.setSpacing(6)
+        lbl_opt = QLabel("\u2699 Options d envoi")
+        lbl_opt.setStyleSheet(self.QSS_CARD_TITLE)
+        opt_layout.addWidget(lbl_opt)
 
-        # Option d'attestation PDF (Nouveau !)
-        self.attach_pdf_checkbox = QCheckBox("Joindre l'attestation de paiement (PDF)")
-        self.attach_pdf_checkbox.setChecked(True)
-        self.attach_pdf_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #475569;
-                font-size: 12px;
-                font-weight: 500;
-                margin-top: 5px;
-                margin-bottom: 2px;
-            }
-        """)
-        form_layout.addWidget(self.attach_pdf_checkbox)
+        self.attach_pdf_checkbox = QCheckBox("Joindre l attestation de paiement (PDF)")
+        self.attach_pdf_checkbox.setChecked(False)
+        self.attach_pdf_checkbox.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        opt_layout.addWidget(self.attach_pdf_checkbox)
 
-        # Option WhatsApp (Nouveau !)
-        self.attach_whatsapp_checkbox = QCheckBox("Joindre l'invitation & le QRCode WhatsApp du créneau")
-        self.attach_whatsapp_checkbox.setChecked(True)
-        self.attach_whatsapp_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #475569;
-                font-size: 12px;
-                font-weight: 500;
-                margin-top: 2px;
-                margin-bottom: 5px;
-            }
-        """)
-        form_layout.addWidget(self.attach_whatsapp_checkbox)
+        self.attach_whatsapp_checkbox = QCheckBox("Joindre l invitation & le QRCode WhatsApp du cr\u00e9neau")
+        self.attach_whatsapp_checkbox.setChecked(False)
+        self.attach_whatsapp_checkbox.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        opt_layout.addWidget(self.attach_whatsapp_checkbox)
 
-        # Conteneur pour le gabarit WhatsApp personnalisé (Nouveau !)
+        # Gabarit WhatsApp (conditionne par la case ci-dessus)
         self.whatsapp_template_widget = QWidget()
-        whatsapp_temp_layout = QVBoxLayout(self.whatsapp_template_widget)
-        whatsapp_temp_layout.setContentsMargins(0, 5, 0, 5)
-        whatsapp_temp_layout.setSpacing(5)
-        
-        lbl_bar_wt = QHBoxLayout()
-        lbl_bar_wt.setSpacing(6)
-        lbl_wt = QLabel("📝 Texte d'invitation WhatsApp joint au mail (supporte {group_name} et {whatsapp_link}) :")
-        lbl_wt.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
-        lbl_bar_wt.addWidget(lbl_wt)
-        lbl_bar_wt.addStretch()
-
-        self.btn_save_whatsapp_template = QPushButton("💾 Enregistrer")
-        self.btn_save_whatsapp_template.setToolTip("Enregistre ce texte WhatsApp en base de données pour tous les prochains envois.")
-        self.btn_save_whatsapp_template.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 3px 10px;
-                font-weight: bold;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        wtmp_layout = QVBoxLayout(self.whatsapp_template_widget)
+        wtmp_layout.setContentsMargins(18, 2, 0, 4)
+        wtmp_layout.setSpacing(4)
+        wtmp_head = QHBoxLayout()
+        lbl_wt = QLabel("\U0001F4DD Texte d invitation WhatsApp (supporte {group_name} et {whatsapp_link}) :")
+        lbl_wt.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold; background: transparent;")
+        wtmp_head.addWidget(lbl_wt)
+        wtmp_head.addStretch()
+        self.btn_save_whatsapp_template = QPushButton("\U0001F4BE Enregistrer")
+        self.btn_save_whatsapp_template.setToolTip("Enregistre ce texte WhatsApp en base de donn\u00e9es pour tous les prochains envois.")
+        self.btn_save_whatsapp_template.setStyleSheet(self.QSS_BTN_SECONDARY)
         self.btn_save_whatsapp_template.clicked.connect(self.on_save_whatsapp_template_clicked)
-        lbl_bar_wt.addWidget(self.btn_save_whatsapp_template)
-        whatsapp_temp_layout.addLayout(lbl_bar_wt)
-        
+        wtmp_head.addWidget(self.btn_save_whatsapp_template)
+        wtmp_layout.addLayout(wtmp_head)
         self.whatsapp_template_input = QTextEdit()
         saved_wt = SqliteRepository.get_whatsapp_template()
         self.whatsapp_template_input.setPlainText(saved_wt if saved_wt else DEFAULT_WHATSAPP_TEMPLATE)
@@ -679,182 +748,118 @@ class CommunicationsPage(QWidget):
             QTextEdit {
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                padding: 6px;
+                padding: 5px;
                 color: #1E293B;
-                min-height: 80px;
-                max-height: 100px;
+                min-height: 60px;
+                max-height: 90px;
                 font-size: 11px;
             }
         """)
-        whatsapp_temp_layout.addWidget(self.whatsapp_template_input)
-        form_layout.addWidget(self.whatsapp_template_widget)
-
-        # Gérer la visibilité dynamique du texte d'invitation
+        wtmp_layout.addWidget(self.whatsapp_template_input)
+        opt_layout.addWidget(self.whatsapp_template_widget)
+        # Le texte d invitation WhatsApp n est visible que si la case d envoi est cochée
         self.attach_whatsapp_checkbox.toggled.connect(self.whatsapp_template_widget.setVisible)
+        self.whatsapp_template_widget.setVisible(self.attach_whatsapp_checkbox.isChecked())
 
-        # Option Signature du club (radio boutons : avec / sans signature en fin d'e-mail)
-        sig_group = QGroupBox("✍️ Signature du club")
-        sig_group.setStyleSheet("""
-            QGroupBox {
-                color: #1E293B;
-                font-weight: bold;
-                font-size: 12px;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 15px;
-            }
-        """)
-        sig_layout = QHBoxLayout(sig_group)
-        sig_layout.setSpacing(12)
-
-        self.signature_yes_radio = QRadioButton("Ajouter la signature du club (logos Instagram & Facebook)")
+        # Signature du club
+        lbl_sig = QLabel("Signature du club")
+        lbl_sig.setStyleSheet(self.QSS_FIELD_LABEL)
+        opt_layout.addWidget(lbl_sig)
+        sig_row = QHBoxLayout()
+        sig_row.setSpacing(16)
+        self.signature_yes_radio = QRadioButton("\u2713 Ajouter la signature du club (logos Instagram & Facebook)")
         self.signature_yes_radio.setChecked(True)
-        self.signature_yes_radio.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
-        sig_layout.addWidget(self.signature_yes_radio)
-
+        self.signature_yes_radio.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        sig_row.addWidget(self.signature_yes_radio)
         self.signature_no_radio = QRadioButton("Sans signature")
-        self.signature_no_radio.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
-        sig_layout.addWidget(self.signature_no_radio)
-        sig_layout.addStretch()
+        self.signature_no_radio.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        sig_row.addWidget(self.signature_no_radio)
+        sig_row.addStretch()
+        opt_layout.addLayout(sig_row)
 
-        form_layout.addWidget(sig_group)
-
-        # Options des destinataires (Choix des e-mails)
-        dest_group = QGroupBox("📩 Choix des adresses de destination")
-        dest_group.setStyleSheet("""
-            QGroupBox {
-                color: #1E293B;
-                font-weight: bold;
-                font-size: 12px;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 15px;
+        # Repli : options avancees (adresses de destination + dedoublonnage)
+        self.btn_advanced = QCheckBox("\u25b8 Options avanc\u00e9es (adresses de destination & d\u00e9doublonnage)")
+        self.btn_advanced.setStyleSheet("""
+            QCheckBox {
+                color: #2563EB; font-size: 12px; font-weight: 600;
+                background: transparent; border: none; padding: 2px 0;
             }
+            QCheckBox:hover { text-decoration: underline; }
         """)
-        dest_layout = QVBoxLayout(dest_group)
-        dest_layout.setSpacing(5)
-        
-        self.use_primary_email_cb = QCheckBox("Envoyer à l'E-mail Principal (Fiche Adhérent)")
+        opt_layout.addWidget(self.btn_advanced)
+
+        self.advanced_widget = QWidget()
+        adv_layout = QVBoxLayout(self.advanced_widget)
+        adv_layout.setContentsMargins(18, 2, 0, 2)
+        adv_layout.setSpacing(4)
+        lbl_dest_choice = QLabel("Choix des adresses de destination")
+        lbl_dest_choice.setStyleSheet(self.QSS_FIELD_LABEL)
+        adv_layout.addWidget(lbl_dest_choice)
+
+        self.use_primary_email_cb = QCheckBox("Envoyer \u00e0 l E-mail Principal (Fiche Adh\u00e9rent)")
         self.use_primary_email_cb.setChecked(True)
-        self.use_primary_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
-        dest_layout.addWidget(self.use_primary_email_cb)
+        self.use_primary_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        adv_layout.addWidget(self.use_primary_email_cb)
 
-        self.use_secondary_email_cb = QCheckBox("Envoyer au Deuxième E-mail (Fiche Adhérent)")
+        self.use_secondary_email_cb = QCheckBox("Envoyer au Deuxi\u00e8me E-mail (Fiche Adh\u00e9rent)")
         self.use_secondary_email_cb.setChecked(True)
-        self.use_secondary_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
-        dest_layout.addWidget(self.use_secondary_email_cb)
+        self.use_secondary_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        adv_layout.addWidget(self.use_secondary_email_cb)
 
-        self.use_payer_email_cb = QCheckBox("Envoyer à l'E-mail du Payeur (Acheteur HelloAsso)")
+        self.use_payer_email_cb = QCheckBox("Envoyer \u00e0 l E-mail du Payeur (Acheteur HelloAsso)")
         self.use_payer_email_cb.setChecked(False)
-        self.use_payer_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
-        dest_layout.addWidget(self.use_payer_email_cb)
+        self.use_payer_email_cb.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500; background: transparent;")
+        adv_layout.addWidget(self.use_payer_email_cb)
 
-        # Bouton de dédoublonnage : décoche les destinataires dont toutes les adresses
-        # e-mail (selon les cases cochées) sont déjà couvertes par un autre sélectionné.
-        dedup_row = QHBoxLayout()
-        self.btn_remove_duplicates = QPushButton("🧹 Supprimer les doublons de la sélection")
+        self.btn_remove_duplicates = QPushButton("\U0001F9F9 Supprimer les doublons de la s\u00e9lection")
         self.btn_remove_duplicates.setCursor(Qt.PointingHandCursor)
         self.btn_remove_duplicates.setToolTip(
-            "Décoche les destinataires dont toutes les adresses e-mail sélectionnées "
-            "(principal, deuxième, payeur) sont déjà couvertes par un autre destinataire,\n"
-            "pour éviter d'envoyer plusieurs fois le même e-mail à la même adresse."
+            "D\u00e9coche les destinataires dont toutes les adresses e-mail s\u00e9lectionn\u00e9es "
+            "(principal, deuxi\u00e8me, payeur) sont d\u00e9j\u00e0 couvertes par un autre destinataire,\n"
+            "pour \u00e9viter d envoyer plusieurs fois le m\u00eame e-mail \u00e0 la m\u00eame adresse."
         )
-        self.btn_remove_duplicates.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                color: #B45309;
-                border: 1px solid #FDE68A;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #FFFBEB;
-                border-color: #FCD34D;
-            }
-        """)
+        self.btn_remove_duplicates.setStyleSheet(self.QSS_BTN_SECONDARY)
         self.btn_remove_duplicates.clicked.connect(self.remove_duplicate_recipients)
-        dedup_row.addWidget(self.btn_remove_duplicates)
-        dedup_row.addStretch()
-        dest_layout.addLayout(dedup_row)
+        adv_layout.addWidget(self.btn_remove_duplicates)
+        self.advanced_widget.setVisible(False)
+        self.btn_advanced.toggled.connect(self.advanced_widget.setVisible)
+        opt_layout.addWidget(self.advanced_widget)
+        form_layout.addWidget(options_card)
 
-        form_layout.addWidget(dest_group)
+        # Barre d action en bas du formulaire
+        self.action_bar = QFrame()
+        self.action_bar.setStyleSheet(self.QSS_BAR)
+        action_layout = QHBoxLayout(self.action_bar)
+        action_layout.setContentsMargins(14, 10, 14, 10)
+        action_layout.setSpacing(10)
+        self.action_count_lbl = QLabel("0 destinataire")
+        self.action_count_lbl.setStyleSheet("color: #1E293B; font-size: 13px; font-weight: bold; background: transparent;")
+        action_layout.addWidget(self.action_count_lbl)
+        self.action_ready_lbl = QLabel("Aucun destinataire s\u00e9lectionn\u00e9")
+        self.action_ready_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 500; background: transparent;")
+        action_layout.addWidget(self.action_ready_lbl)
+        action_layout.addStretch()
 
-        # Bouton d'aperçu du code HTML + Bouton Envoi
-        send_row = QHBoxLayout()
-        send_row.setSpacing(8)
-
-        self.btn_preview_email = QPushButton("🔍 Prévisualiser l'email")
-        self.btn_preview_email.setCursor(Qt.PointingHandCursor)
-        self.btn_preview_email.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                padding: 10px 14px;
-                font-size: 12px;
-                font-weight: 500;
-                color: #059669;
-            }
-            QPushButton:hover {
-                background-color: #ECFDF5;
-                border-color: #A7F3D0;
-            }
-        """)
-        self.btn_preview_email.clicked.connect(self.on_preview_email_clicked)
-        send_row.addWidget(self.btn_preview_email)
-
-        self.btn_view_html = QPushButton("👁️ Voir le code HTML du mail")
+        self.btn_view_html = QPushButton("\U0001F441 Voir le code HTML du mail")
         self.btn_view_html.setCursor(Qt.PointingHandCursor)
-        self.btn_view_html.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                padding: 10px 14px;
-                font-size: 12px;
-                font-weight: 500;
-                color: #2563EB;
-            }
-            QPushButton:hover {
-                background-color: #EFF6FF;
-                border-color: #BFDBFE;
-            }
-        """)
+        self.btn_view_html.setStyleSheet(self.QSS_BTN_SECONDARY)
         self.btn_view_html.clicked.connect(self.on_view_html_clicked)
-        send_row.addWidget(self.btn_view_html)
-        send_row.addStretch()
+        action_layout.addWidget(self.btn_view_html)
 
-        self.send_btn = QPushButton("🚀 Lancer l'envoi de la campagne de courriels")
+        self.btn_preview_email = QPushButton("\U0001F441 Aper\u00e7u complet")
+        self.btn_preview_email.setCursor(Qt.PointingHandCursor)
+        self.btn_preview_email.setStyleSheet(self.QSS_BTN_SECONDARY)
+        self.btn_preview_email.clicked.connect(self.on_preview_email_clicked)
+        action_layout.addWidget(self.btn_preview_email)
+
+        self.send_btn = QPushButton("\u2709  Envoyer \u00e0 0 personne(s)")
         self.send_btn.setCursor(Qt.PointingHandCursor)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2563EB;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1D4ED8;
-            }
-            QPushButton:disabled {
-                background-color: #94A3B8;
-            }
-        """)
+        self.send_btn.setStyleSheet(self.QSS_BTN_PRIMARY)
         self.send_btn.clicked.connect(self.start_email_campaign)
-        send_row.addWidget(self.send_btn)
-
-        form_layout.addLayout(send_row)
-
-        # Formulaire défilable : garantit la lisibilité de tous les champs sur les petits écrans
-        # (la barre de progression et les logs restent visibles en dehors de la zone défilante).
-        form_frame.setMinimumWidth(540)
+        action_layout.addWidget(self.send_btn)
+        form_layout.addWidget(self.action_bar)
+        # Zone de formulaire defilable (presentation conservee)
+        form_widget.setMinimumWidth(480)
         self.form_scroll = QScrollArea()
         self.form_scroll.setWidgetResizable(True)
         self.form_scroll.setFrameShape(QFrame.NoFrame)
@@ -903,10 +908,16 @@ class CommunicationsPage(QWidget):
                 width: 0px;
             }
         """)
-        self.form_scroll.setWidget(form_frame)
+        self.form_scroll.setWidget(form_widget)
         right_layout.addWidget(self.form_scroll, 1)
+        self.splitter.addWidget(right_container)
 
-        # Barre de progression
+        # Ratios d expansion : la colonne Message un peu plus large
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 3)
+        layout.addWidget(self.splitter, 1)
+
+        # 4. JOURNAL DES ENVOIS (repliable, compact)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -918,6 +929,7 @@ class CommunicationsPage(QWidget):
                 text-align: center;
                 color: #1E293B;
                 font-weight: bold;
+                max-height: 18px;
             }
             QProgressBar::chunk {
                 background-color: #3B82F6;
@@ -925,43 +937,96 @@ class CommunicationsPage(QWidget):
             }
         """)
         self.progress_bar.setVisible(False)
-        right_layout.addWidget(self.progress_bar)
 
-        # Zone d'affichage des logs
+        self.log_toggle_btn = QPushButton("\u25b8  Journal des envois")
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.log_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF; color: #334155; border: 1px solid #CBD5E1;
+                border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 600;
+                text-align: left;
+            }
+            QPushButton:hover { background-color: #F8FAFC; border-color: #94A3B8; }
+            QPushButton:checked { background-color: #F1F5F9; }
+        """)
+        self.log_container = QWidget()
+        log_layout = QVBoxLayout(self.log_container)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(6)
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
-        self.log_area.setMinimumHeight(80)  # Reste lisible même sur les petits écrans
-        self.log_area.setPlaceholderText("Les comptes-rendus d'envois SMTP / Gmail REST s'afficheront ici...")
+        self.log_area.setMinimumHeight(120)
+        self.log_area.setPlaceholderText("Les comptes-rendus d envois SMTP / Gmail REST s afficheront ici...")
         self.log_area.setStyleSheet("""
             QTextEdit {
                 background-color: #1E293B;
                 color: #A7F3D0;
-                font-family: 'Consolas', 'Courier New', monospace;
+                font-family: Consolas, Courier New, monospace;
                 font-size: 12px;
                 border-radius: 8px;
                 padding: 10px;
-                min-height: 100px;
             }
         """)
-        right_layout.addWidget(self.log_area)
+        log_layout.addWidget(self.log_area)
+        self.log_container.setVisible(False)
+        self.log_toggle_btn.toggled.connect(self.log_container.setVisible)
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.log_toggle_btn)
+        layout.addWidget(self.log_container)
 
-        self.splitter.addWidget(right_container)
-        
-        # Ratios d'expansion
-        self.splitter.setStretchFactor(0, 1) # Liste destinataires
-        self.splitter.setStretchFactor(1, 2) # Formulaire d'édition
-
-        layout.addWidget(self.splitter)
-        
-        # Initialiser la liste des adresses d'expédition disponibles (Nouveau !)
+        # Initialiser la liste des adresses d expedition disponibles
         self.init_sender_combo()
 
-        # Charger les templates d'email initiaux (Nouveau !)
+        # Charger les templates d email initiaux
         self.load_email_templates()
 
-    # ------------------------------------------------------------------
-    # Gestion de l'adresse d'expédition (De) — choisie / enregistrable (Nouveau !)
-    # ------------------------------------------------------------------
+    def _vsep(self):
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet("color: #BFDBFE; max-height: 22px;")
+        return sep
+
+    def show_all_recipients(self):
+        """Efface la recherche pour reafficher tous les destinataires (presentation)."""
+        self.search_input.clear()
+
+    def show_variables_hint(self):
+        """Rappel des variables personnalisees utilisees par le mecanisme d envoi existant."""
+        QMessageBox.information(
+            self,
+            "Variables disponibles",
+            "Variables remplacees pour chaque destinataire lors de l envoi :\n\n"
+            "- {Pr\u00e9nom} ou {first_name} : prenom de l adherent\n"
+            "- {Nom} ou {last_name} : nom de l adherent\n\n"
+            "Variables du texte d invitation WhatsApp (lorsque l invitation est jointe) :\n\n"
+            "- {group_name} : nom du groupe de creneau\n"
+            "- {whatsapp_link} : lien d invitation WhatsApp du creneau"
+        )
+
+    def reset_filters(self):
+        """Remet tous les filtres de destinataires a zero (reutilise les mecanismes existants)."""
+        self.search_input.clear()
+        self.season_filter.blockSignals(True)
+        self.season_filter.setCurrentIndex(0)
+        self.season_filter.blockSignals(False)
+        self.sent_filter.blockSignals(True)
+        self.sent_filter.setCurrentIndex(0)
+        self.sent_filter.blockSignals(False)
+        self.date_checkbox.blockSignals(True)
+        self.date_checkbox.setChecked(False)
+        self.date_checkbox.blockSignals(False)
+        self.health_filter_checkbox.blockSignals(True)
+        self.health_filter_checkbox.setChecked(False)
+        self.health_filter_checkbox.blockSignals(False)
+        self.diploma_filter_checkbox.blockSignals(True)
+        self.diploma_filter_checkbox.setChecked(False)
+        self.diploma_filter_checkbox.blockSignals(False)
+        self.selected_tarifs = build_default_tarif_selection(self.members_list)
+        self.selected_statuses = set(build_status_list(self.members_list)) - {CANCELLED_STATUS}
+        self.update_tarif_button()
+        self.update_status_button()
+        self.on_filters_changed()
     def get_saved_sender_emails(self) -> list:
         """Retourne la liste des adresses d'expédition mémorisées en BDD."""
         raw = SqliteRepository.get_app_setting("sender_emails", "") or ""
@@ -1028,10 +1093,31 @@ class CommunicationsPage(QWidget):
         self.remember_sender_email(email, name)
         self.init_sender_combo()
         self.log_area.append(f"💾 [EXPÉDITION] Expéditeur par défaut enregistré : {name} <{email}>")
+        QMessageBox.information(
+            self, "Expéditeur enregistré",
+            f"L'expéditeur par défaut a été enregistré :\n\n{name} <{email}>\n\n"
+            "Il sera proposé automatiquement à chaque ouverture de l'onglet Communication."
+        )
 
     def on_season_changed(self):
         """Déclenché lorsque l'utilisateur change de saison dans la liste déroulante."""
         self.load_members(members_list=None)
+
+    def _build_tarif_group_labels(self) -> dict:
+        """Associe chaque tarif HelloAsso au nom du groupe issu du planning de la
+        BDD, pour afficher le groupe de la personne entre parenthèses dans la
+        liste des destinataires."""
+        try:
+            from infrastructure.sqlite_repository import SqliteRepository
+            creneaux = SqliteRepository.load_creneaux_groups()
+        except Exception:
+            return {}
+        labels = {}
+        for c in creneaux:
+            g_name = c["groupe"]
+            for t in c["tarifs"]:
+                labels.setdefault(str(t).strip(), g_name)
+        return labels
 
     def load_members(self, members_list=None):
         """Récupère la liste des d'adhérents et peuple le widget de liste avec des cases à cocher (compatible multi-saisons)."""
@@ -1061,15 +1147,21 @@ class CommunicationsPage(QWidget):
             # Bloquer les signaux temporairement pour éviter des surcoûts d'évaluation
             self.list_widget.blockSignals(True)
             self.list_widget.clear()
-            
+
+            tarif_group_labels = self._build_tarif_group_labels()
             for m in self.members_list:
                 email_dest = m.primary_email or m.payer_email
                 if email_dest:
-                    item = QListWidgetItem(f"{m.user_last_name} {m.user_first_name} <{email_dest}>")
+                    group_lbl = tarif_group_labels.get(m.tarif_name, "")
+                    item_text = f"{m.user_last_name} {m.user_first_name} <{email_dest}>"
+                    if group_lbl:
+                        item_text += f" ({group_lbl})"
+                    item = QListWidgetItem(item_text)
                     item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                     item.setCheckState(Qt.Unchecked) # Décoché par défaut
                     item.setData(Qt.UserRole, m) # Stocker le membre complet
                     self.list_widget.addItem(item)
+                    self._decorate_recipient_item(item, m, email_dest, group_lbl)
             
             # Réinitialiser les sélections des pop-up tarifs / statuts :
             # - Tarifs : tout sauf la liste d'attente (comme l'onglet Adhérents)
@@ -1085,6 +1177,71 @@ class CommunicationsPage(QWidget):
         except Exception as e:
             self.dest_title.setText(f"❌ Erreur lors du chargement : {e}")
             self.send_btn.setEnabled(False)
+
+    def _decorate_recipient_item(self, item, m, email_dest, group_label):
+        """Habille un destinataire d une ligne riche (nom, e-mail, creneau, badge)
+        tout en conservant le comportement natif de l item (case, donnees, filtres)."""
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(4, 3, 6, 3)
+        row.setSpacing(8)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        lbl_name = QLabel(f"{m.user_last_name} {m.user_first_name}")
+        lbl_name.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; background: transparent;")
+        lbl_meta = QLabel("  \u00b7  ".join(x for x in [email_dest, group_label] if x))
+        lbl_meta.setStyleSheet("font-size: 12px; color: #64748B; background: transparent;")
+        col.addWidget(lbl_name)
+        col.addWidget(lbl_meta)
+        row.addLayout(col, 1)
+        # Masquer le texte natif de l item (dessine derriere le widget transparent)
+        # tout en le conservant pour les journaux et la liste des envois reussis.
+        item.setForeground(QColor(0, 0, 0, 0))
+        badge_text, badge_qss = self._category_badge(m.tarif_name)
+        if badge_text:
+            lbl_badge = QLabel(badge_text)
+            lbl_badge.setStyleSheet(badge_qss)
+            row.addWidget(lbl_badge, 0, Qt.AlignTop)
+        # Les labels enfants laissent passer la souris ; le conteneur capte le clic
+        # (n importe ou sur la ligne) et inverse la case via eventFilter.
+        widget.setCursor(Qt.PointingHandCursor)
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        item.setSizeHint(QSize(0, widget.sizeHint().height() + 6))
+        self.list_widget.setItemWidget(item, widget)
+
+    def eventFilter(self, obj, event):
+        """Clic n importe ou sur une ligne de destinataire : inverse sa case a cocher."""
+        if event.type() == QEvent.MouseButtonRelease and obj.parent() is self.list_widget.viewport():
+            for i in range(self.list_widget.count()):
+                it = self.list_widget.item(i)
+                if self.list_widget.itemWidget(it) is obj:
+                    it.setCheckState(Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _category_badge(self, tarif_name: str):
+        """Pastille de categorie (presentation) derivee du libelle du tarif."""
+        t = str(tarif_name or "").lower()
+        badge_qss = "QLabel { background-color: %bg%; color: %fg%; border-radius: 8px; padding: 2px 8px; font-size: 12px; font-weight: bold; }"
+        if "autonome" in t:
+            return "Autonome", badge_qss.replace("%bg%", "#EFF6FF").replace("%fg%", "#1D4ED8")
+        if "perfectionnement" in t:
+            return "Perf.", badge_qss.replace("%bg%", "#EDE9FE").replace("%fg%", "#6D28D9")
+        if "compétition" in t:
+            return "Compét.", badge_qss.replace("%bg%", "#FEF3C7").replace("%fg%", "#B45309")
+        if "lycée" in t or "collège" in t or "enfants" in t or "cours" in t:
+            return "Loisir", badge_qss.replace("%bg%", "#ECFDF5").replace("%fg%", "#047857")
+        return "", ""
+
+    def _update_select_all_label(self):
+        """Presentational : affiche le nombre de destinataires visibles dans le bouton Tout selectionner."""
+        visible = sum(
+            1 for i in range(self.list_widget.count())
+            if not self.list_widget.item(i).isHidden()
+        )
+        self.btn_select_all.setText(f"☑  Tout sélectionner ({visible})")
 
     def on_search_changed(self, text: str):
         """Filtrage textuel à la volée."""
@@ -1140,6 +1297,19 @@ class CommunicationsPage(QWidget):
                 or normalize_status(m.status) in self.selected_statuses
             )
 
+            # 3b. Filtre Santé (Nouveau !) : Document de santé FFME « ATTENTE » uniquement
+            match_health = (
+                not self.health_filter_checkbox.isChecked()
+                or str(getattr(m, "document_sante", "") or "").strip().upper() == "ATTENTE"
+            )
+
+            # 3c. Filtre Sans diplôme (Nouveau !) : ni Badge Rouge ni Passeport Orange
+            match_diploma = True
+            if self.diploma_filter_checkbox.isChecked():
+                has_badge = str(getattr(m, "badge_rouge", "") or "").strip() == "Oui"
+                has_orange = "orange" in str(getattr(m, "raw_passports", "") or "").lower()
+                match_diploma = not (has_badge or has_orange)
+
             # 4. Filtre d'envoi
             is_sent = bool(m.email_sent_date)
             match_sent = True
@@ -1155,10 +1325,12 @@ class CommunicationsPage(QWidget):
                 match_date = m_date is not None and m_date >= filter_date
 
             # Masquer l'item s'il ne valide pas les critères
-            item.setHidden(not (match_search and match_tarif and match_status and match_sent and match_date))
+            item.setHidden(not (match_search and match_tarif and match_status and match_health
+                                and match_diploma and match_sent and match_date))
             
         self.list_widget.blockSignals(False)
         self.update_selection_count()
+        self._update_select_all_label()
 
     def select_visible(self):
         """Coche uniquement les destinataires visibles (ceux qui passent le filtre actif)."""
@@ -1260,9 +1432,20 @@ class CommunicationsPage(QWidget):
                 if item.isHidden():
                     hidden_checked += 1
 
-        suffix = f"  —  ⚠️ {hidden_checked} masqué(s) par le filtre" if hidden_checked else ""
-        self.dest_title.setText(f"🎯 Sélection des Destinataires ({checked_count}){suffix}")
+        suffix = f"  ·  ⚠ {hidden_checked} masqué(s) par le filtre" if hidden_checked else ""
+        self.dest_title.setText(f"{checked_count} sélectionnés{suffix}")
+        self.footer_lbl.setText(f"👥 {checked_count} destinataire(s) sélectionné(s)")
+        self.action_count_lbl.setText(f"{checked_count} destinataire(s)")
+        self.action_ready_lbl.setText("✓ Message complet" if checked_count else "Aucun destinataire sélectionné")
+        self.action_ready_lbl.setStyleSheet(
+            "color: #16A34A; font-size: 12px; font-weight: 500; background: transparent;"
+            if checked_count else
+            "color: #94A3B8; font-size: 12px; font-weight: 500; background: transparent;"
+        )
+        self.wf_step1_lbl.setText(f"{checked_count} sélectionné(s)")
+        self.wf_step3_lbl.setText("Prêt à envoyer" if checked_count else "Aucun destinataire")
         self.send_btn.setEnabled(checked_count > 0)
+        self.send_btn.setText(f"✉  Envoyer à {checked_count} personne(s)")
         self.refresh_selected_panel()
 
     # ------------------------------------------------------------------
@@ -1325,6 +1508,9 @@ class CommunicationsPage(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.log_area.clear()
+        # Presentational : ouvre le journal repliable pour suivre l envoi
+        self.log_toggle_btn.setChecked(True)
+        self.log_container.setVisible(True)
 
         subject = self.subject_input.text().strip()
         body = self.body_input.toPlainText()
@@ -1695,6 +1881,7 @@ class CommunicationsPage(QWidget):
         if not sender_name:
             sender_name = DEFAULT_SENDER_NAME
         self.sender_name_input.setText(sender_name)
+        self.wf_step2_lbl.setText(tmpl.get("name") or "—")
 
     def on_save_template_clicked(self):
         """Enregistre les modifications apportées au template sélectionné (avec son expéditeur)."""
@@ -1705,6 +1892,21 @@ class CommunicationsPage(QWidget):
             
         subject = self.subject_input.text().strip()
         body = self.body_input.toPlainText()
+
+        # Rappel : l'objet est encore celui par défaut d'un nouveau modèle
+        if subject.lower() == "sujet du nouveau courriel":
+            answer = QMessageBox.question(
+                self,
+                "Objet par défaut",
+                "L'objet du courriel est encore « Sujet du nouveau courriel ».\n\n"
+                "Pensez à le personnaliser avant d'enregistrer votre modèle.\n\n"
+                "Voulez-vous l'enregistrer quand même ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if answer != QMessageBox.Yes:
+                return
+
         sender_email = self.get_current_sender_email()
         sender_name = self.get_current_sender_name()
         if not sender_email or "@" not in sender_email:

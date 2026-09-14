@@ -29,7 +29,7 @@ class LogsPage(QWidget):
         # En-tête
         header_layout = QHBoxLayout()
         title = QLabel("📋 Journaux d'activité de l'application (Logs)")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E293B;")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
         header_layout.addWidget(title)
         header_layout.addStretch()
         layout.addLayout(header_layout)

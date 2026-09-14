@@ -27,7 +27,7 @@ class HelpPage(QWidget):
 
         # En-tête de la page d'aide
         title = QLabel("❓ Centre d'Aide & Documentation")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #163A5F;")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
         layout.addWidget(title)
 
         subtitle = QLabel("Guide de référence concernant les 3 fichiers d'entrée majeurs gérés par ALJ Escalade Manager.")

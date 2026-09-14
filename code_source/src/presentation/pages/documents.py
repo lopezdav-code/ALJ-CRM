@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
-    QListWidgetItem, QSplitter, QComboBox, QTreeWidget, QTreeWidgetItem
+    QListWidgetItem, QSplitter, QComboBox, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from PIL import Image, ImageDraw
@@ -11,6 +11,10 @@ from paths import CODE_ROOT, ROOT_DIR
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
 from presentation.workers import GenerateAttestationsWorker
+from presentation.pages.members import (
+    SubCategoryDialog, WAITING_LIST_TARIF,
+    build_creneau_filter_blocks, build_default_tarif_selection
+)
 
 def generate_check_icon() -> str:
     """Génère une icône de coche blanche transparente pour le style personnalisé des checkboxes (sert à la fois pour documents et emails)."""
@@ -34,6 +38,7 @@ class DocumentsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.members_list = []
+        self.selected_tarifs = set()  # Sous-catégories cochées dans la pop-up (vide = tous)
         self.init_ui()
         # Ne pas charger de manière synchrone au démarrage pour optimiser le temps de lancement !
 
@@ -57,6 +62,12 @@ class DocumentsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 20)
         layout.setSpacing(12)
+
+        # Titre de la page (présentation harmonisée avec les autres onglets)
+        title = QLabel("📄 Attestations")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1E293B;")
+        title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(title)
 
         # Séparateur mobile horizontal (Splitter) pour séparer les Adhérents à gauche et la Configuration à droite
         self.splitter = QSplitter(Qt.Horizontal)
@@ -99,7 +110,8 @@ class DocumentsPage(QWidget):
         filters_bar = QHBoxLayout()
         filters_bar.setSpacing(6)
 
-        # 0. Filtre par Saison (Nouveau !)
+        # 0. Filtre par Saison (Masqué !) : les attestations sont générées uniquement
+        #    pour la saison active (le widget reste présent pour le code, non affiché)
         self.season_filter = QComboBox()
         self.season_filter.addItems([
             "Saison 2026-2027 (Active)", 
@@ -109,13 +121,16 @@ class DocumentsPage(QWidget):
         ])
         self.season_filter.setStyleSheet(self.get_combobox_style())
         self.season_filter.currentIndexChanged.connect(self.on_season_changed)
-        filters_bar.addWidget(self.season_filter)
+        # N'est pas ajouté à la barre de filtres : saison active 2026-2027 uniquement
+        self.season_filter.setVisible(False)
+        self.season_filter.hide()
 
-        # 1. Filtre par Tarif
-        self.tarif_filter = QComboBox()
-        self.tarif_filter.addItems(["Tous les tarifs"])
-        self.tarif_filter.setStyleSheet(self.get_combobox_style())
-        self.tarif_filter.currentIndexChanged.connect(self.on_filters_changed)
+        # 1. Filtre de sous-catégorie (pop-up hiérarchique des créneaux, identique
+        #    aux onglets Adhérents et Communications)
+        self.tarif_filter = QPushButton("Toutes les sous-catégories ▾")
+        self.tarif_filter.setCursor(Qt.PointingHandCursor)
+        self.tarif_filter.setStyleSheet(self.get_filter_button_style())
+        self.tarif_filter.clicked.connect(self.open_sub_category_popup)
         filters_bar.addWidget(self.tarif_filter)
 
         # 2. Filtre Attestation générée
@@ -343,6 +358,55 @@ class DocumentsPage(QWidget):
 
         layout.addWidget(self.splitter)
 
+    def get_filter_button_style(self) -> str:
+        """Style du bouton ouvrant la pop-up de sous-catégories (identique aux autres onglets)."""
+        return """
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 11px;
+                color: #475569;
+                min-width: 110px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #F8FAFC;
+            }
+        """
+
+    def update_tarif_button(self):
+        """Met à jour le libellé du bouton de sous-catégories (libellés identiques
+        aux onglets Adhérents et Communications)."""
+        default_tarifs = build_default_tarif_selection(self.members_list)
+        count = len(self.selected_tarifs)
+        if count == 0 or self.selected_tarifs == default_tarifs | {WAITING_LIST_TARIF}:
+            self.tarif_filter.setText("Toutes les sous-catégories ▾")
+        elif self.selected_tarifs == default_tarifs:
+            self.tarif_filter.setText("Toutes sauf liste d'attente ▾")
+        else:
+            self.tarif_filter.setText(f"Sous-catégories ({count}) ▾")
+
+    def open_sub_category_popup(self):
+        """Ouvre la pop-up « Sélection des sous-catégories » (identique aux onglets
+        Adhérents et Communications : rubriques de créneaux du planning, une case
+        cochée sélectionne tous les tarifs rattachés au créneau)."""
+        dialog = SubCategoryDialog(
+            [],
+            self.selected_tarifs,
+            on_change=self.on_sub_selection_changed,
+            hierarchy=build_creneau_filter_blocks(self.members_list),
+            parent=self
+        )
+        dialog.exec()
+        self.on_filters_changed()
+
+    def on_sub_selection_changed(self):
+        """Déclenché à chaque changement de case à cocher dans la pop-up (filtrage en direct)."""
+        self.update_tarif_button()
+        self.on_filters_changed()
+
     def on_season_changed(self):
         """Déclenché lorsque l'utilisateur change de saison dans la liste déroulante."""
         self.load_members(members_list=None)
@@ -382,70 +446,10 @@ class DocumentsPage(QWidget):
                 item.setData(Qt.UserRole, m) # Stocker le membre
                 self.list_widget.addItem(item)
             
-            # Charger la hiérarchie des créneaux dans le filtre tarif
-            # (arborescence : rubriques du planning, Autonome inclus, autres tarifs)
-            from domain.planning_groups import build_creneau_items, prune_empty_sections
-            creneaux = SqliteRepository.load_creneaux_groups()
-            tarifs_map = {c["groupe"]: c["tarifs"] for c in creneaux}
-            member_tarifs = sorted(set(m.tarif_name for m in self.members_list if m.tarif_name))
-            member_tarifs_set = set(member_tarifs)
-            covered = set()
-            for t_list in tarifs_map.values():
-                covered.update(t_list)
-
-            tree = QTreeWidget()
-            tree.setColumnCount(1)
-            tree.setHeaderHidden(True)
-            self.tarif_filter.setView(tree)
-            self.tarif_filter.clear()
-
-            tree.addTopLevelItem(QTreeWidgetItem(["Tous les tarifs"]))
-            nodes = []
-            for kind, label, raw in build_creneau_items(creneaux, include_autonome=True):
-                if kind == "group":
-                    payload = [t for t in (tarifs_map.get(raw) or []) if t in member_tarifs_set]
-                    if payload:
-                        nodes.append((kind, label, payload))
-                else:
-                    nodes.append((kind, label, None))
-            # Retirer les rubriques devenues sans créneau (payloads vides filtrés)
-            pruned = prune_empty_sections(nodes)
-
-            current_section = None
-            current_sub = None
-            for kind, label, payload in pruned:
-                if kind == "section":
-                    current_section = QTreeWidgetItem(["📁 " + label])
-                    current_section.setFlags(Qt.ItemIsEnabled)
-                    tree.addTopLevelItem(current_section)
-                    current_sub = None
-                elif kind == "sub-section":
-                    current_sub = QTreeWidgetItem(["📂 " + label])
-                    current_sub.setFlags(Qt.ItemIsEnabled)
-                    if current_section is not None:
-                        current_section.addChild(current_sub)
-                    else:
-                        tree.addTopLevelItem(current_sub)
-                else:
-                    node = QTreeWidgetItem([label])
-                    node.setData(0, Qt.UserRole, payload)
-                    parent = current_sub or current_section
-                    if parent is not None:
-                        parent.addChild(node)
-                    else:
-                        tree.addTopLevelItem(node)
-
-            # Tarifs non rattachés à un créneau (liste d'attente, tarifs libres...)
-            uncovered = [t for t in member_tarifs if t not in covered]
-            if uncovered:
-                sec = QTreeWidgetItem(["📁 Autres tarifs"])
-                sec.setFlags(Qt.ItemIsEnabled)
-                tree.addTopLevelItem(sec)
-                for t in uncovered:
-                    node = QTreeWidgetItem([t])
-                    node.setData(0, Qt.UserRole, [t])
-                    sec.addChild(node)
-            tree.expandAll()
+            # Réinitialiser la sélection des sous-catégories : tout sauf la liste
+            # d'attente (comme les onglets Adhérents et Communications)
+            self.selected_tarifs = build_default_tarif_selection(self.members_list)
+            self.update_tarif_button()
 
             self.list_widget.blockSignals(False)
             self.update_selection_count()
@@ -458,12 +462,9 @@ class DocumentsPage(QWidget):
         self.on_filters_changed()
 
     def on_filters_changed(self):
-        """Filtre l'affichage de la liste des bénéficiaires en combinant la recherche, le tarif et l'état d'attestation."""
+        """Filtre l'affichage de la liste des bénéficiaires en combinant la recherche, les
+        sous-catégories (pop-up multi-sélection) et l'état d'attestation."""
         search_text = self.search_input.text().strip().lower()
-        # Filtre tarif arborescent : l'item sélectionné porte la liste des tarifs
-        # rattachés au créneau (None = « Tous les tarifs »)
-        current_tree_item = self.tarif_filter.view().currentItem() if self.tarif_filter.view() else None
-        tarif_payload = current_tree_item.data(0, Qt.UserRole) if current_tree_item else None
         att_sel = self.attestation_filter.currentText()
 
         self.list_widget.blockSignals(True)
@@ -478,8 +479,11 @@ class DocumentsPage(QWidget):
                 search_text in m.user_first_name.lower()
             )
             
-            # 2. Filtre de tarif : créneau sélectionné (tous ses tarifs rattachés)
-            match_tarif = (not tarif_payload) or (m.tarif_name in tarif_payload)
+            # 2. Filtre de tarifs (sélection multi via la pop-up ; vide = tous)
+            match_tarif = (
+                not self.selected_tarifs
+                or m.tarif_name in self.selected_tarifs
+            )
             
             # 3. Filtre d'attestation générée
             from attestation_generator import get_safe_filename
