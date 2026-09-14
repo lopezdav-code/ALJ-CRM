@@ -21,6 +21,25 @@ class MemberTableModel(QAbstractTableModel):
     def __init__(self, members: List[Member] = None, parent=None):
         super().__init__(parent)
         self.members: List[Member] = members or []
+        self._date_ts_cache = {}  # order_date brut -> pandas.Timestamp (None si illisible)
+
+    def _parsed_order_date(self, raw):
+        """Parse (une fois par valeur brute) la date d'inscription en pandas.Timestamp.
+        Cache indispensable : pd.to_datetime est coûteux et data() est rappelé à
+        chaque repeinture de cellule (recherche, tri, défilement)."""
+        key = str(raw or "")
+        if key in self._date_ts_cache:
+            return self._date_ts_cache[key]
+        import pandas as pd
+        parsed = None
+        try:
+            dt = pd.to_datetime(raw)
+            if pd.notna(dt):
+                parsed = dt
+        except Exception:
+            parsed = None
+        self._date_ts_cache[key] = parsed
+        return parsed
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self.members)
@@ -53,14 +72,11 @@ class MemberTableModel(QAbstractTableModel):
                 return f"{member.amount:.2f} €"
                 
             if col_name == "order_date":
-                # Formater joliment la date d'inscription au format FR
-                import pandas as pd
-                try:
-                    dt = pd.to_datetime(member.order_date)
-                    if pd.notna(dt):
-                        return dt.strftime("%d/%m/%Y")
-                except Exception:
-                    pass
+                # Formater joliment la date d'inscription au format FR (parse mis en
+                # cache) ; si illisible, retombe sur la valeur brute ci-dessous
+                dt = self._parsed_order_date(member.order_date)
+                if dt is not None:
+                    return dt.strftime("%d/%m/%Y")
                     
             if col_name == "diplome":
                 # Construire les pictogrammes d'autonomie / passeport Orange (Nouveau !)
@@ -102,13 +118,9 @@ class MemberTableModel(QAbstractTableModel):
                 except Exception:
                     return 0.0
             if col_name == "order_date":
-                import pandas as pd
-                try:
-                    dt = pd.to_datetime(member.order_date)
-                    if pd.notna(dt):
-                        return dt.strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    pass
+                dt = self._parsed_order_date(member.order_date)
+                if dt is not None:
+                    return dt.strftime("%Y-%m-%d %H:%M:%S")
                 return "1970-01-01 00:00:00"
             if col_name == "licence_ffme":
                 val = str(getattr(member, "licence_ffme", "")).strip()
@@ -134,16 +146,9 @@ class MemberTableModel(QAbstractTableModel):
         if col_name == "order_date":
             import pandas as pd
             def get_date_key(m):
-                val = getattr(m, "order_date", None)
-                if not val:
-                    return pd.Timestamp.min
-                try:
-                    dt = pd.to_datetime(val)
-                    if pd.notna(dt):
-                        return dt
-                except Exception:
-                    pass
-                return pd.Timestamp.min
+                # Parse mis en cache : le tri par date ne re-parse plus chaque ligne
+                dt = self._parsed_order_date(getattr(m, "order_date", None))
+                return dt if dt is not None else pd.Timestamp.min
             self.members.sort(key=get_date_key, reverse=reverse)
             
         elif col_name == "amount":
@@ -173,4 +178,5 @@ class MemberTableModel(QAbstractTableModel):
         """Met à jour les données de la table."""
         self.beginResetModel()
         self.members = new_members
+        self._date_ts_cache = {}
         self.endResetModel()
