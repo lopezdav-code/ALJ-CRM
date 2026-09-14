@@ -1,4 +1,3 @@
-import os
 import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -7,10 +6,9 @@ from PySide6.QtWidgets import (
     QFrame, QDialogButtonBox, QRadioButton, QMessageBox,
     QDoubleSpinBox, QFormLayout, QSizePolicy
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate, Signal
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate, Signal, QTimer
 from PySide6.QtGui import QFont
 
-from paths import ROOT_DIR
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository
 from infrastructure.schema_v2 import normalize_status
@@ -656,6 +654,12 @@ class MembersPage(QWidget):
             }
         """)
         self.search_input.textChanged.connect(self.on_search_changed)
+        # Anti-rebond : le filtrage complet (avec réinitialisation du tableau) n'est
+        # appliqué que 250 ms après la dernière frappe, pour garder la saisie fluide.
+        self.search_debounce_timer = QTimer(self)
+        self.search_debounce_timer.setSingleShot(True)
+        self.search_debounce_timer.setInterval(250)
+        self.search_debounce_timer.timeout.connect(self.on_filters_changed)
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
 
@@ -718,14 +722,6 @@ class MembersPage(QWidget):
         self.sent_filter.setStyleSheet(self.get_combobox_style())
         self.sent_filter.currentIndexChanged.connect(self.on_filters_changed)
         filters_layout.addWidget(self.sent_filter)
-
-        # 5. Filtre Attestation générée (Masqué !)
-        self.attestation_filter = QComboBox()
-        self.attestation_filter.addItems(["Toutes les attestations", "Générées (.pdf)", "Non générées"])
-        self.attestation_filter.setStyleSheet(self.get_combobox_style())
-        self.attestation_filter.currentIndexChanged.connect(self.on_filters_changed)
-        filters_layout.addWidget(self.attestation_filter)
-        self.attestation_filter.setVisible(False) # Masquer le filtre visuellement
 
         # 5b. Case à cocher : Nouveau membre
         self.new_member_checkbox = QCheckBox("Nouveau membre")
@@ -1057,7 +1053,8 @@ class MembersPage(QWidget):
             print(f"❌ [MEMBERS] Erreur lors du peuplement de la liste : {e}")
 
     def on_search_changed(self, text: str):
-        self.on_filters_changed()
+        # Anti-rebond : on attend que la saisie soit stabilisée avant de filtrer
+        self.search_debounce_timer.start()
 
     def on_filters_changed(self):
         """Filtre la table en croisant toutes les options de filtres sélectionnées."""
@@ -1066,7 +1063,6 @@ class MembersPage(QWidget):
         type_sel = self.tarif_type_filter.currentText()
         sub_selection = self.selected_sub_tarifs
         sent_sel = self.sent_filter.currentText()
-        att_sel = self.attestation_filter.currentText()
 
         filtered = []
         for m in self.members_list:
@@ -1101,18 +1097,7 @@ class MembersPage(QWidget):
             if sent_sel == "Non envoyés" and is_sent:
                 continue
 
-            # 5. Filtre attestation générée
-            from attestation_generator import get_safe_filename
-            filename = get_safe_filename(m.user_last_name, m.user_first_name, m.order_ref)
-            pdf_path = os.path.join(ROOT_DIR, "exports", "attestation", filename.replace(".docx", ".pdf"))
-            has_pdf = os.path.exists(pdf_path)
-            
-            if att_sel == "Générées (.pdf)" and not has_pdf:
-                continue
-            if att_sel == "Non générées" and has_pdf:
-                continue
-
-            # 6. Filtre d'inscription après la date sélectionnée
+            # 5. Filtre d'inscription après la date sélectionnée
             #    (comparaison de DATES sans heure/fuseau : les horodatages HelloAsso
             #    avec fuseau '+02:00' étaient exclus à tort par une TypeError)
             if self.date_checkbox.isChecked():
@@ -1122,7 +1107,7 @@ class MembersPage(QWidget):
                 if m_date is None or m_date < filter_date:
                     continue
 
-            # 7. Filtre Nouveau membre (déjà adhérent == Non)
+            # 6. Filtre Nouveau membre (déjà adhérent == Non)
             if self.new_member_checkbox.isChecked():
                 if m.already_member != "Non":
                     continue

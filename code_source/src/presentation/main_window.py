@@ -297,6 +297,11 @@ class MainWindow(QMainWindow):
                 "Téléchargement Google Drive",
                 "Le fichier d'adhérents le plus récent a été récupéré avec succès depuis Google Drive !"
             )
+            # La base locale vient d'être remplacée : invalider le cache mémoire de
+            # l'onglet Adhérents pour qu'il réaffiche les données à jour
+            members_page = self.stacked_widget.widget(0)
+            if hasattr(members_page, "load_members_from_repository") and self.stacked_widget.currentIndex() != 0:
+                members_page.load_members_from_repository(force_reload=True)
             self.on_nav_changed(self.stacked_widget.currentIndex(), force_reload=True)
         else:
             QMessageBox.critical(
@@ -470,6 +475,12 @@ class MainWindow(QMainWindow):
                     webbrowser.open(url)
                 except Exception:
                     pass
+
+            # L'onglet Adhérents conserve un cache mémoire : le forcer à recharger
+            # la base fraîchement synchronisée, sinon il affiche les anciennes données.
+            members_page = self.stacked_widget.widget(0)
+            if hasattr(members_page, "load_members_from_repository") and self.stacked_widget.currentIndex() != 0:
+                members_page.load_members_from_repository(force_reload=True)
 
             self.on_nav_changed(self.stacked_widget.currentIndex(), force_reload=True)
         else:
