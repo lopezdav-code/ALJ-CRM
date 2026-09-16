@@ -1,15 +1,14 @@
 import os
 import requests
-import webbrowser
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
+    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
     QFrame, QTableWidget, QTableWidgetItem, QMessageBox, QDialog,
     QLineEdit, QComboBox, QFormLayout, QAbstractItemView, QHeaderView,
     QListWidget, QListWidgetItem, QGroupBox, QDateEdit
 )
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QPixmap, QColor
-from paths import ROOT_DIR, CODE_ROOT
+from PySide6.QtGui import QColor
+from paths import ROOT_DIR
 from domain.age_rules import extract_birth_years
 
 class GroupsPage(QWidget):
@@ -235,10 +234,56 @@ class GroupsPage(QWidget):
         self.save_btn.clicked.connect(self.save_planning)
         actions_btn_layout.addWidget(self.save_btn)
 
+        self.export_planning_btn = QPushButton("📅 Export planning")
+        self.export_planning_btn.setCursor(Qt.PointingHandCursor)
+        self.export_planning_btn.setToolTip(
+            "Construit un fichier Excel du planning hebdomadaire (blocs colorés par type,\n"
+            "libellés des groupes et encadrants — initiales si la place est insuffisante)."
+        )
+        self.export_planning_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0284C7;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0369A1;
+            }
+        """)
+        self.export_planning_btn.clicked.connect(self.on_export_planning_excel)
+        actions_btn_layout.addWidget(self.export_planning_btn)
+
+        self.export_list_btn = QPushButton("📋 Export liste")
+        self.export_list_btn.setCursor(Qt.PointingHandCursor)
+        self.export_list_btn.setToolTip(
+            "Extraction du planning au format liste (une ligne par créneau, comme la BDD :\n"
+            "jour, groupe, type, horaires, encadrants, tarifs, catégorie d'âge, naissance)."
+        )
+        self.export_list_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4F46E5;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4338CA;
+            }
+        """)
+        self.export_list_btn.clicked.connect(self.on_export_planning_list_excel)
+        actions_btn_layout.addWidget(self.export_list_btn)
+
         left_layout.addLayout(actions_btn_layout)
         main_content_layout.addLayout(left_layout, stretch=3)
 
-        # ----------------- PARTIE DROITE (Infographie Planning) -----------------
+        # ----------------- PARTIE DROITE (Vue semaine du planning) -----------------
         right_frame = QFrame()
         right_frame.setStyleSheet("""
             QFrame {
@@ -247,35 +292,21 @@ class GroupsPage(QWidget):
                 border-radius: 8px;
                 padding: 15px;
                 min-width: 320px;
-                max-width: 350px;
             }
         """)
         right_layout = QVBoxLayout(right_frame)
         right_layout.setSpacing(12)
-        right_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
-        right_title = QLabel("📅 Infographie du Planning")
+        right_title = QLabel("📅 Vue semaine du Planning")
         right_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B;")
         right_title.setAlignment(Qt.AlignCenter)
         right_layout.addWidget(right_title)
 
-        # Label d'image cliquable
-        self.img_lbl = QLabel()
-        self.img_lbl.setCursor(Qt.PointingHandCursor)
-        self.img_lbl.setAlignment(Qt.AlignCenter)
-
-        # Tenter de charger l'infographie
-        img_path = os.path.join(CODE_ROOT, "doc", "Planning-2026-2027-ALJ-1-2048x1448.png")
-        if os.path.exists(img_path):
-            pixmap = QPixmap(img_path)
-            # Redimensionner pour tenir à droite
-            self.img_lbl.setPixmap(pixmap.scaled(300, 212, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            self.img_lbl.setText("🖼️ Image du planning introuvable dans doc/")
-            self.img_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-style: italic;")
-
-        self.img_lbl.mousePressEvent = self.on_image_clicked
-        right_layout.addWidget(self.img_lbl)
+        # Vue hebdomadaire vivante (même présentation que l'export Excel :
+        # blocs colorés par type, 30 min par ligne, lignes d'heures marquées)
+        from presentation.components.planning_week_view import PlanningWeekView
+        self.week_view = PlanningWeekView()
+        right_layout.addWidget(self.week_view, 1)
 
         # Lien cliquable direct
         help_link_lbl = QLabel('<a href="https://alj-escalade.fr/creneaux/" style="color: #2563EB; font-weight: bold; text-decoration: none;">🔗 Visiter alj-escalade.fr/creneaux/</a>')
@@ -285,32 +316,39 @@ class GroupsPage(QWidget):
         right_layout.addWidget(help_link_lbl)
 
         # Description
-        info_desc_lbl = QLabel("Cliquez sur l'image ou sur le lien pour ouvrir la page officielle des créneaux de la section.")
+        info_desc_lbl = QLabel("Vue hebdomadaire mise à jour en direct depuis les créneaux ci-contre "
+                               "(9h-22h, blocs colorés par type, encadrants). "
+                               "Le lien ouvre la page officielle des créneaux de la section.")
+        info_desc_lbl.setWordWrap(True)
         info_desc_lbl.setStyleSheet("font-size: 11px; color: #64748B; font-style: italic; line-height: 14px;")
         info_desc_lbl.setAlignment(Qt.AlignCenter)
-        info_desc_lbl.setWordWrap(True)
         right_layout.addWidget(info_desc_lbl)
 
         main_content_layout.addWidget(right_frame, stretch=2)
         layout.addLayout(main_content_layout)
-
-    def on_image_clicked(self, event):
-        """Ouvre le site officiel des créneaux dans le navigateur web par défaut."""
-        webbrowser.open("https://alj-escalade.fr/creneaux/")
 
     def load_planning(self):
         """Charge le planning de créneaux depuis la BDD SQLite."""
         try:
             from infrastructure.sqlite_repository import SqliteRepository
             self.planning_data = SqliteRepository.load_planning_data()
-            
+
             self.group_planning_data()
             self.refresh_table()
+            self.refresh_week_view()
         except Exception as e:
             QMessageBox.critical(
                 self, "Erreur de chargement",
                 f"Impossible de charger le planning depuis la BDD SQLite :\n{e}"
             )
+
+    def refresh_week_view(self):
+        """Actualise la vue semaine (panneau droit) avec le planning courant."""
+        try:
+            from domain.constants import get_active_season
+            self.week_view.set_planning(self.planning_data, get_active_season() or "")
+        except Exception as e:
+            print(f"⚠️ [CRENEAUX] Vue semaine indisponible : {e}")
 
     def group_planning_data(self):
         """Groupe l'ensemble des données plates de planning.json par Nom de Groupe unique."""
@@ -598,6 +636,41 @@ class GroupsPage(QWidget):
                 f"Impossible de se connecter au service de génération de QRCode. "
                 f"Veuillez vérifier votre connexion Internet.\n\nDétail : {e}"
             )
+
+    def on_export_planning_excel(self):
+        """Exporte le planning hebdomadaire en Excel (grille Lundi → Samedi, 9h-22h,
+        blocs colorés par type, encadrants — initiales si la place est insuffisante)."""
+        try:
+            from infrastructure.planning_excel_export import export_planning_excel
+            from domain.constants import get_active_season
+
+            self.flatten_groups_data()
+            saison = (get_active_season() or "").strip()
+            out_dir = os.path.join(ROOT_DIR, "exports")
+            os.makedirs(out_dir, exist_ok=True)
+            filename = f"planning_creneaux_{saison.replace('-', '_')}.xlsx" if saison else "planning_creneaux.xlsx"
+            path = os.path.join(out_dir, filename)
+            export_planning_excel(self.planning_data, saison, path)
+            QMessageBox.information(self, "Export réussi", f"Planning exporté :\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", f"Impossible de générer le planning Excel :\n{e}")
+
+    def on_export_planning_list_excel(self):
+        """Exporte le planning au format liste : une ligne par créneau, comme la BDD."""
+        try:
+            from infrastructure.planning_excel_export import export_planning_list_excel
+            from domain.constants import get_active_season
+
+            self.flatten_groups_data()
+            saison = (get_active_season() or "").strip()
+            out_dir = os.path.join(ROOT_DIR, "exports")
+            os.makedirs(out_dir, exist_ok=True)
+            filename = f"planning_liste_{saison.replace('-', '_')}.xlsx" if saison else "planning_liste.xlsx"
+            path = os.path.join(out_dir, filename)
+            export_planning_list_excel(self.planning_data, saison, path)
+            QMessageBox.information(self, "Export réussi", f"Planning (liste) exporté :\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", f"Impossible de générer la liste Excel :\n{e}")
 
     def save_planning(self):
         """Enregistre le planning actuel au format relationnel dans SQLite et l'exporte en JSON pour compatibilité."""

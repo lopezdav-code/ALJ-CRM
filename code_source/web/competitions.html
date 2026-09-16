@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS participants (
   competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
   adherent_id INTEGER NOT NULL REFERENCES adherents(id) ON DELETE CASCADE,
   selectionne INTEGER DEFAULT 0,
-  statut_paiement TEXT DEFAULT 'non_invite',
+  statut_paiement TEXT DEFAULT 'en_attente',
   date_synchro_helloasso TEXT DEFAULT '',
   montant_paye REAL DEFAULT 0.0,
   commande_helloasso TEXT DEFAULT '',
@@ -658,13 +658,10 @@ function renderParticipants() {
         </label>
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(p.nom)} ${esc(p.prenom)}</div>
-          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}</div>
+          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}</div>
         </div>
-        <select style="width:auto" onchange="setPaiement(${p.competition_id},${p.adherent_id},this.value)">
-          ${Object.entries(PAIEMENT_LABELS).map(([k, v]) => `<option value="${k}" ${p.statut_paiement === k ? "selected" : ""}>${v}</option>`).join("")}
-        </select>
-        <button class="btn btn-danger btn-mini" title="Retirer de la compétition"
-                onclick="deleteParticipant(${p.competition_id},${p.adherent_id},'${esc(p.nom)} ${esc(p.prenom)}')">🗑</button>
+        <span class="badge" style="background:${PAIEMENT_BADGE[p.statut_paiement] || "#94A3B8"}"
+              title="Statut de paiement (modifié par la synchro HelloAsso dans l'application de bureau)">${PAIEMENT_LABELS[p.statut_paiement] || esc(p.statut_paiement)}</span>
       </div>
     </div>`).join("")}`).join("")
     || `<div class="empty">Aucun compétiteur : utilisez « Charger le groupe Compétition » ou la recherche étendue.</div>`;
@@ -677,6 +674,8 @@ function loadPlanningGroups() {
   catch (e) { PLANNING_GROUPS = {}; }
 }
 function deleteParticipant(compId, adherentId, nomComplet) {
+  /* Retrait d'un compétiteur réservé à l'application de bureau (bouton corbeille
+     masqué sur la page web). Fonction conservée pour un usage futur. */
   if (!confirm(`Retirer « ${nomComplet} » de cette compétition ?\n(L'adhérent reste dans la base.)`)) return;
   ex("DELETE FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId]);
   renderParticipants();
@@ -687,16 +686,14 @@ function toggleSelection(compId, adherentId, checked) {
   if (row) {
     ex("UPDATE participants SET selectionne=? WHERE id=?", [checked ? 1 : 0, row.id]);
   } else {
-    ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,?, 'non_invite')",
+    ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,?, 'en_attente')",
       [compId, adherentId, checked ? 1 : 0]);
   }
   renderParticipants();
 }
-function setPaiement(compId, adherentId, statut) {
-  const row = q("SELECT id FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId])[0];
-  if (!row) return;
-  ex("UPDATE participants SET statut_paiement=? WHERE id=?", [statut, row.id]);
-}
+/* Statut de paiement : LECTURE SEULE sur la web — seul le rattachement HelloAsso
+   (synchro / correction manuelle dans l'application de bureau) passe le statut à « Payé ». */
+const PAIEMENT_BADGE = { paye: "#16A34A", en_attente: "#D97706", non_invite: "#94A3B8" };
 function loadCompetitionGroup() {
   const compId = currentCompId();
   if (!compId) return;
@@ -704,7 +701,7 @@ function loadCompetitionGroup() {
   let added = 0;
   for (const a of group) {
     const row = q("SELECT id, selectionne FROM participants WHERE competition_id=? AND adherent_id=?", [compId, a.id])[0];
-    if (!row) { ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'non_invite')", [compId, a.id]); added++; }
+    if (!row) { ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'en_attente')", [compId, a.id]); added++; }
     else if (!row.selectionne) { ex("UPDATE participants SET selectionne=1 WHERE id=?", [row.id]); added++; }
   }
   renderParticipants();
@@ -733,7 +730,7 @@ function renderSearchResults() {
 function addAdherent(compId, adherentId) {
   const row = q("SELECT id FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId])[0];
   if (row) ex("UPDATE participants SET selectionne=1 WHERE id=?", [row.id]);
-  else ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'non_invite')", [compId, adherentId]);
+  else ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'en_attente')", [compId, adherentId]);
   renderParticipants();
   toast("➕ Adhérent ajouté à la compétition.");
 }

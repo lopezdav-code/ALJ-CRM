@@ -232,6 +232,29 @@ SQLite **distincte** de la base d'adhérents :
 | `web/competitions.html` | Page web de gestion servie sur `/competitions` (téléchargement au chargement, écriture Drive **uniquement** au clic « 💾 Sauvegarder en BDD », cache IndexedDB, scope OAuth `drive` en écriture) |
 | `tests/test_competition_module.py` | Tests unitaires (dépôt, rapprochement, bilan) |
 
+### Onglet Créneaux — Vue semaine et Exports Excel (v2.2.7 → 2.2.10)
+
+- **Vue semaine vivante (v2.2.10)** : panneau droit de l'onglet Créneaux = `PlanningWeekView`
+  (`presentation/components/planning_week_view.py`, QGraphicsView) reprenant la
+  présentation de l'export Excel (mêmes couleurs, traits et encadrants). ⚠️ PySide6 :
+  conserver des références Python sur les `QGraphicsTextItem` (GC, liste `_text_items`).
+- Bouton **« 📅 Export planning »** de l'onglet « 🧗 Créneaux » (`groups.py`) →
+  `infrastructure/planning_excel_export.py` → `exports/planning_creneaux_{saison}.xlsx`.
+- Grille **Lundi → Samedi, 9h-22h** par pas de 30 min (libellés d'heures à gauche **et**
+  à droite) ; les créneaux qui se chevauchent sont répartis en **voies** par jour
+  (`assign_lanes`) et l'en-tête du jour fusionne ses voies.
+- Hiérarchie des traits : **séparateurs de jours = thick noir**, lignes d'**heures** et
+  cadre = medium sombre, lignes des **demi-heures** = thin clair, voies = thin.
+- Bloc fusionné par créneau, **coloré par type** (compétition = vert, perfectionnement =
+  rose, cours = bleu lavande, autonome = gris) ; libellé du groupe nettoyé de son
+  suffixe parenthésé horaire (« (Mercredi 09h30) » retiré, « (1) » distinctif conservé).
+- **Encadrants** notés sous le libellé : noms complets si la place le permet, sinon
+  **initiales** (« Camille DIDIER » → « C.D. ») — `encadrants_text` / `_initiales`.
+- Bouton **« 📋 Export liste »** → `export_planning_list_excel` →
+  `exports/planning_liste_{saison}.xlsx` : une ligne par créneau, au format de la BDD
+  (Jour, Groupe, Type, Horaires, Encadrants, Tarifs HelloAsso, Catégorie d'âge, bornes
+  de naissance), tri Lundi → Samedi puis heure de début, volets figés sur l'en-tête.
+
 ### Règles de conception
 
 1. **Anomalies HelloAsso** : le rapprochement est séparé de l'API et de la BDD
@@ -289,23 +312,29 @@ SQLite **distincte** de la base d'adhérents :
 10. **Pré-sélection du compétiteur (v2.2.2)** : dans la correction manuelle, le combo
    « Compétiteur à créditer » est présélectionné par n° de licence puis, à défaut, par
    **nom + prénom** du payeur (`match_adherent_by_name`, ordre des mots inversé accepté).
-11. **Page web alignée (v2.2.3, simplifiée en v2.2.6)** : `web/competitions.html`
+11. **Page web alignée (v2.2.3, simplifiée en v2.2.6/2.2.11)** : `web/competitions.html`
    servie sur `/competitions` suit le modèle desktop — champ « campagne par compétition »
    retiré (création/maj sans `helloasso_ref`), compétiteurs **regroupés par créneau**
    via un miroir `planning_groups` (groupe + tarif, rempli par
    `sync_adherents_from_main` depuis la table planning de database.db), n° de commande
-   affiché et **suppression de compétiteur** (confirmation). Écriture Drive inchangée :
-   uniquement au clic « 💾 Sauvegarder en BDD ». Les onglets web « HelloAsso » et
-   « Bilan » ont été supprimés (v2.2.6 : HelloAsso = campagne annuelle + miroir +
-   rattachement, Bilan croisé — restent **exclusifs à l'application de bureau**) ; chaque
-   carte d'épreuve porte un bouton « 👁 Voir détail » qui ouvre la liste des compétiteurs
-   (`openParticipants`).
+   affiché. Écriture Drive inchangée : uniquement au clic « 💾 Sauvegarder en BDD ».
+   Les onglets web « HelloAsso » et « Bilan » ont été supprimés (v2.2.6 : HelloAsso =
+   campagne annuelle + miroir + rattachement, Bilan croisé — restent **exclusifs à
+   l'application de bureau**) ; chaque carte d'épreuve porte un bouton « 👁 Voir détail »
+   qui ouvre la liste des compétiteurs (`openParticipants`). Le bouton corbeille de
+   retrait d'un compétiteur est **masqué sur la web** (v2.2.11) : réservé au bureau.
 12. **Pré-configuration web (v2.2.4)** : sur `/competitions` comme sur l'annuaire,
    l'écran de configuration est pré-rempli avec les identifiants du club en constantes
    (`DEFAULT_CLIENT_ID` et `DEFAULT_FILE_ID` = secret desktop
    `GOOGLE_DRIVE_COMPETITION_DB_ID`) ; une ancienne config locale sans ID fichier hérite
    de la constante, une config personnalisée reste respectée. L'accès au fichier reste
    contrôlé par les autorisations Drive.
+13. **Statut de paiement (v2.2.9)** : initialisé à **« En attente »** à la création d'un
+   compétiteur (`add_participant` / `set_selection` / inserts web — plus de
+   « Non invité » par défaut). Sur la page web, le statut est **en lecture seule**
+   (badge coloré) : seul le rattachement HelloAsso (synchro / correction manuelle du
+   bureau) passe le statut à « Payé ». Sur le desktop, le combo reste modifiable
+   (paiement chèque/espèces).
 
 ---
 

@@ -14,7 +14,7 @@ from paths import DATA_ROOT
 from domain.competition_models import (
     Competition,
     Participant,
-    PAIEMENT_NON_INVITE,
+    PAIEMENT_EN_ATTENTE,
 )
 
 DB_FILENAME = "database_Competition.db"
@@ -440,7 +440,7 @@ class CompetitionRepository:
             cur.execute(
                 """INSERT INTO participants (competition_id, adherent_id, selectionne,
                    statut_paiement) VALUES (?,?,?,?)""",
-                (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_NON_INVITE),
+                (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_EN_ATTENTE),
             )
             conn.commit()
             return cur.lastrowid
@@ -480,7 +480,7 @@ class CompetitionRepository:
                 cur.execute(
                     """INSERT INTO participants (competition_id, adherent_id, selectionne,
                        statut_paiement) VALUES (?,?,?,?)""",
-                    (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_NON_INVITE),
+                    (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_EN_ATTENTE),
                 )
             conn.commit()
             return True
