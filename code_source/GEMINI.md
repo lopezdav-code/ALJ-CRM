@@ -289,15 +289,17 @@ SQLite **distincte** de la base d'adhérents :
 10. **Pré-sélection du compétiteur (v2.2.2)** : dans la correction manuelle, le combo
    « Compétiteur à créditer » est présélectionné par n° de licence puis, à défaut, par
    **nom + prénom** du payeur (`match_adherent_by_name`, ordre des mots inversé accepté).
-11. **Page web alignée (v2.2.3)** : `web/competitions.html` servie sur `/competitions`
-   suit le modèle desktop — champ « campagne par compétition » retiré (création/maj
-   sans `helloasso_ref`), onglet global « 🔄 HelloAsso » **en lecture seule** (campagne
-   annuelle depuis `app_settings` + miroir `helloasso_items`/`item_links` : articles,
-   rattachements, source ; la synchro reste au bureau), compétiteurs **regroupés par
-   créneau** via un miroir `planning_groups` (groupe + tarif, rempli par
+11. **Page web alignée (v2.2.3, simplifiée en v2.2.6)** : `web/competitions.html`
+   servie sur `/competitions` suit le modèle desktop — champ « campagne par compétition »
+   retiré (création/maj sans `helloasso_ref`), compétiteurs **regroupés par créneau**
+   via un miroir `planning_groups` (groupe + tarif, rempli par
    `sync_adherents_from_main` depuis la table planning de database.db), n° de commande
    affiché et **suppression de compétiteur** (confirmation). Écriture Drive inchangée :
-   uniquement au clic « 💾 Sauvegarder en BDD ».
+   uniquement au clic « 💾 Sauvegarder en BDD ». Les onglets web « HelloAsso » et
+   « Bilan » ont été supprimés (v2.2.6 : HelloAsso = campagne annuelle + miroir +
+   rattachement, Bilan croisé — restent **exclusifs à l'application de bureau**) ; chaque
+   carte d'épreuve porte un bouton « 👁 Voir détail » qui ouvre la liste des compétiteurs
+   (`openParticipants`).
 12. **Pré-configuration web (v2.2.4)** : sur `/competitions` comme sur l'annuaire,
    l'écran de configuration est pré-rempli avec les identifiants du club en constantes
    (`DEFAULT_CLIENT_ID` et `DEFAULT_FILE_ID` = secret desktop

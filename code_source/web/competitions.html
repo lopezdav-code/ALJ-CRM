@@ -75,12 +75,6 @@
   .count-line { color: #64748B; font-size: 12px; margin: 6px 2px 10px; }
   .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 0; }
 
-  table.bilan { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; border-radius: 10px; overflow: hidden; }
-  table.bilan th, table.bilan td { border: 1px solid #E2E8F0; padding: 7px 8px; text-align: left; }
-  table.bilan th { background: #F1F5F9; color: #334155; font-size: 11px; }
-  .cell-paye { color: var(--green); font-weight: 700; }
-  .cell-attente { color: var(--amber); font-weight: 700; }
-
   nav {
     position: fixed; inset: auto 0 0 0; height: var(--nav-h); display: flex; z-index: 30;
     background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
@@ -125,6 +119,10 @@
       <p>L'identifiant du fichier <code>database_Competition.db</code> sur le Drive est
          <b>pré-rempli</b> avec celui du club (comme l'ID client OAuth) : modifiable ici si
          le fichier change — l'accès reste contrôlé par les autorisations Drive.</p>
+      <p>⚠️ Dans Google Cloud Console (API et services → Identifiants → ID client OAuth),
+         cette adresse doit être listée en <b>URI de redirection autorisée</b> (sinon
+         erreur 400 <code>redirect_uri_mismatch</code>) :<br>
+         <code id="redirect-hint"></code></p>
       <label class="fld">Identifiant client OAuth (Google)</label>
       <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
       <label class="fld">ID du fichier database_Competition.db sur Google Drive</label>
@@ -200,41 +198,13 @@
     </div>
   </section>
 
-  <!-- ================= Bilan de saison ================= -->
-  <section class="page" id="page-bilan">
-    <div class="card">
-      <label class="fld">Saison</label>
-      <select id="b-season"></select>
-      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">
-        Tableau croisé élèves × compétitions (participations cochées « Oui ») pour la saison sportive
-        choisie (septembre → août).</p>
-    </div>
-    <div id="b-table"></div>
-  </section>
-
-  <!-- ================= Campagne annuelle HelloAsso (global, lecture seule) ================= -->
-  <section class="page" id="page-helloasso">
-    <div class="card">
-      <div class="m-name">🔄 Campagne annuelle HelloAsso</div>
-      <div class="m-sub" id="h-campaign">— non configurée —</div>
-      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">
-        Un seul formulaire HelloAsso pour toutes les compétitions de la saison. La
-        <b>synchronisation</b> et le <b>rattachement manuel</b> des paiements se font dans
-        l'application de bureau (onglet Compétitions → HelloAsso) : cette page affiche le
-        miroir local issu de la dernière synchronisation. Les champs laissés vides sur
-        HelloAsso (licence, compétition) apparaissent vides.</p>
-    </div>
-    <div class="section-h">📄 Articles HelloAsso (miroir local)</div>
-    <div class="count-line" id="h-count">—</div>
-    <div id="h-table" style="overflow:auto"></div>
-  </section>
+  <!-- ================= Bilan de saison (application de bureau uniquement) ================= -->
+  <!-- HelloAsso (campagne annuelle, miroir) et Bilan restent gérés dans l'application de bureau -->
 </main>
 
 <nav>
   <button data-page="comps" class="active">🏆<br>Compétitions</button>
   <button data-page="participants">👥<br>Compétiteurs</button>
-  <button data-page="helloasso">🔄<br>HelloAsso</button>
-  <button data-page="bilan">📊<br>Bilan</button>
 </nav>
 
 <div id="toast"></div>
@@ -586,6 +556,9 @@ function renderComps() {
         </div>
         <span class="badge" style="background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
       </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants(${c.id})">👁 Voir détail — compétiteurs</button>
+      </div>
     </div>`).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
 
   // Sélecteur de l'onglet Compétiteurs + combo du formulaire d'édition
@@ -765,122 +738,23 @@ function addAdherent(compId, adherentId) {
   toast("➕ Adhérent ajouté à la compétition.");
 }
 
-/* ===================== Rendu : bilan ===================== */
-function seasonOfDate(dateIso) {
-  const raw = String(dateIso || "").trim();
-  const m = raw.match(/^(\d{4})-(\d{2})/);
-  if (!m) return "";
-  const y = parseInt(m[1], 10), mo = parseInt(m[2], 10);
-  const start = mo >= 8 ? y : y - 1;
-  return `${start}-${start + 1}`;
-}
-function renderBilan() {
-  const comps = listCompetitions().slice().sort((a, b) => String(a.date_competition).localeCompare(String(b.date_competition)));
-  const seasons = [...new Set(comps.map(c => seasonOfDate(c.date_competition)).filter(Boolean))].sort().reverse();
-  const sel = $("#b-season");
-  const prev = sel.value;
-  sel.innerHTML = seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("") || "<option>—</option>";
-  if (prev && seasons.includes(prev)) sel.value = prev;
-  const season = sel.value;
-
-  const target = $("#b-table");
-  if (!season) { target.innerHTML = `<div class="empty">Aucune compétition enregistrée.</div>`; return; }
-  const seasonComps = comps.filter(c => seasonOfDate(c.date_competition) === season);
-  const parts = q(`SELECT p.competition_id, p.adherent_id, p.statut_paiement
-                   FROM participants p WHERE p.selectionne = 1`);
-  const adherents = {};
-  for (const a of listAdherents()) adherents[a.id] = a;
-  const students = {};
-  for (const p of parts) {
-    const a = adherents[p.adherent_id];
-    if (!a) continue;
-    students[p.adherent_id] = a;
-  }
-  const cells = {};
-  for (const p of parts) cells[`${p.adherent_id}|${p.competition_id}`] = p.statut_paiement;
-
-  const compIds = new Set(seasonComps.map(c => c.id));
-  let html = `<div class="card" style="overflow:auto"><table class="bilan"><tr><th>Élève</th><th>Licence</th>`;
-  html += seasonComps.map(c => `<th>${esc(c.nom)}<br><span style="font-weight:400">${esc(c.date_competition || "")}</span></th>`).join("");
-  html += `</tr>`;
-  const names = Object.entries(students).sort((x, y) =>
-    `${x[1].nom} ${x[1].prenom}`.localeCompare(`${y[1].nom} ${y[1].prenom}`, "fr"));
-  for (const [aid, a] of names) {
-    html += `<tr><td><b>${esc(a.nom)} ${esc(a.prenom)}</b></td><td>${esc(a.num_licence || "—")}</td>`;
-    for (const c of seasonComps) {
-      if (!compIds.has(c.id)) continue;
-      const st = cells[`${aid}|${c.id}`];
-      const cls = st === "paye" ? "cell-paye" : st === "en_attente" ? "cell-attente" : "";
-      html += `<td class="${cls}">${st ? PAIEMENT_LABELS[st] || st : ""}</td>`;
-    }
-    html += `</tr>`;
-  }
-  html += `<tr><td><b>Total payés</b></td><td></td>`;
-  for (const c of seasonComps) {
-    const nb = parts.filter(p => p.competition_id === c.id && p.statut_paiement === "paye").length;
-    html += `<td class="cell-paye">${nb}</td>`;
-  }
-  html += `</tr></table></div>`;
-  target.innerHTML = html;
-}
-/* ===================== Rendu : campagne annuelle HelloAsso (miroir, lecture seule) ===================== */
-function renderHelloasso() {
-  // Campagne annuelle (app_settings) — configurer / synchroniser depuis le bureau
-  let campagne = "";
-  try { campagne = (q("SELECT value FROM app_settings WHERE key='HELLOASSO_ANNUAL_CAMPAIGN'")[0] || {}).value || ""; }
-  catch (e) { campagne = ""; }
-  $("#h-campaign").textContent = campagne ? `🔑 ${campagne}` : "— non configurée —";
-
-  const target = $("#h-table");
-  let rows = [];
-  try {
-    rows = q(`SELECT h.id_item, h.payer_nom, h.payer_prenom, h.montant, h.order_id,
-                     h.licence_saisie, h.competition_saisie, h.etat,
-                     l.source, c.nom AS competition_nom, a.nom AS adherent_nom, a.prenom AS adherent_prenom
-              FROM helloasso_items h
-              LEFT JOIN item_links l ON l.id_item = h.id_item
-              LEFT JOIN competitions c ON c.id = l.competition_id
-              LEFT JOIN adherents a ON a.id = l.adherent_id
-              ORDER BY h.date_item DESC, h.id_item DESC`);
-  } catch (e) { rows = []; }
-
-  const nbAttente = rows.filter(r => !r.competition_nom || !r.adherent_nom).length;
-  $("#h-count").textContent = rows.length
-    ? `${rows.length} article(s) · ${nbAttente} à rattacher · la synchro se fait dans l'application de bureau`
-    : "—";
-
-  if (!rows.length) { target.innerHTML = `<div class="empty">Aucun article : lancez la synchronisation depuis l'application de bureau.</div>`; return; }
-
-  let html = `<div class="card" style="overflow:auto"><table class="bilan"><tr>
-    <th>Payeur</th><th>Montant</th><th>N° commande</th><th>N° licence</th>
-    <th>« Compétition concernée »</th><th>Compétition rattachée</th><th>Adhérent rattaché</th><th>Source</th><th>État</th></tr>`;
-  for (const r of rows) {
-    const srcCls = r.source === "manuel" ? "cell-paye" : "";
-    html += `<tr>
-      <td><b>${esc(`${r.payer_nom || ""} ${r.payer_prenom || ""}`.trim())}</b></td>
-      <td>${Number(r.montant || 0).toFixed(2)} €</td>
-      <td>${esc(r.order_id || "")}</td>
-      <td>${esc(r.licence_saisie || "")}</td>
-      <td>${esc(r.competition_saisie || "")}</td>
-      <td>${esc(r.competition_nom || "")}</td>
-      <td>${esc(`${r.adherent_nom || ""} ${r.adherent_prenom || ""}`.trim())}</td>
-      <td class="${srcCls}">${esc(r.source || "—")}</td>
-      <td>${esc((r.etat || "").charAt(0).toUpperCase() + (r.etat || "").slice(1))}</td>
-    </tr>`;
-  }
-  html += `</table></div>`;
-  target.innerHTML = html;
+/* ===================== Navigation : détail d'une épreuve ===================== */
+function openParticipants(compId) {
+  const sel = $("#p-comp-select");
+  if (compId && sel.querySelector(`option[value="${compId}"]`)) sel.value = String(compId);
+  showPage("participants");
+  renderParticipants();
 }
 function renderAll() {
   renderComps();
-  renderBilan();
-  renderHelloasso();
 }
 
 /* ===================== Événements ===================== */
 function fillConfigForm() {
   $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
   $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
+  const hint = document.getElementById("redirect-hint");
+  if (hint) hint.textContent = redirectUri();
 }
 function wireEvents() {
   document.querySelectorAll("nav button").forEach(b =>
@@ -901,7 +775,6 @@ function wireEvents() {
   $("#p-comp-select").addEventListener("change", renderParticipants);
   $("#p-load-group").addEventListener("click", loadCompetitionGroup);
   $("#p-search").addEventListener("input", renderSearchResults);
-  $("#b-season").addEventListener("change", renderBilan);
   window.addEventListener("beforeunload", e => {
     if (dirty) { e.preventDefault(); e.returnValue = ""; }
   });
