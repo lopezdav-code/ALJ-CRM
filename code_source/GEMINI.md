@@ -298,6 +298,12 @@ SQLite **distincte** de la base d'adhérents :
    `sync_adherents_from_main` depuis la table planning de database.db), n° de commande
    affiché et **suppression de compétiteur** (confirmation). Écriture Drive inchangée :
    uniquement au clic « 💾 Sauvegarder en BDD ».
+12. **Pré-configuration web (v2.2.4)** : sur `/competitions` comme sur l'annuaire,
+   l'écran de configuration est pré-rempli avec les identifiants du club en constantes
+   (`DEFAULT_CLIENT_ID` et `DEFAULT_FILE_ID` = secret desktop
+   `GOOGLE_DRIVE_COMPETITION_DB_ID`) ; une ancienne config locale sans ID fichier hérite
+   de la constante, une config personnalisée reste respectée. L'accès au fichier reste
+   contrôlé par les autorisations Drive.
 
 ---
 

@@ -122,8 +122,9 @@
          la garde en <b>cache du navigateur</b> (IndexedDB) et permet de la modifier.
          Les modifications restent <b>locales</b> : elles ne sont renvoyées vers Google Drive
          qu'après un clic explicite sur le bouton <b>« 💾 Sauvegarder en BDD »</b>.</p>
-      <p>L'identifiant du fichier <code>database_Competition.db</code> sur le Drive est visible dans l'application
-         de bureau : onglet <b>Paramètres</b> → secret <code>GOOGLE_DRIVE_COMPETITION_DB_ID</code>.</p>
+      <p>L'identifiant du fichier <code>database_Competition.db</code> sur le Drive est
+         <b>pré-rempli</b> avec celui du club (comme l'ID client OAuth) : modifiable ici si
+         le fichier change — l'accès reste contrôlé par les autorisations Drive.</p>
       <label class="fld">Identifiant client OAuth (Google)</label>
       <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
       <label class="fld">ID du fichier database_Competition.db sur Google Drive</label>
@@ -251,11 +252,16 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
 const DEFAULT_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
+// ID du fichier database_Competition.db sur le Drive du club (pré-configuration ;
+// l'accès reste contrôlé par les autorisations Drive du fichier, modifiable via ⚙️).
+const DEFAULT_FILE_ID = "1TUvWtMKZmJJjNhAR4rmUXJYR-N3EJ8SA";
 
 let cfg = Object.assign(
-  { clientId: DEFAULT_CLIENT_ID, fileId: "" },
+  { clientId: DEFAULT_CLIENT_ID, fileId: DEFAULT_FILE_ID },
   JSON.parse(localStorage.getItem(CFG_KEY) || "{}")
 );
+// Repli : une ancienne configuration locale sans ID fichier hérite de la constante
+if (!cfg.fileId) cfg.fileId = DEFAULT_FILE_ID;
 
 let SQL = null;
 let db = null;          // SQL.Database en mémoire (lecture/écriture)
