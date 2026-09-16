@@ -1,5 +1,6 @@
 import html as _html
 import os
+import re
 from urllib.parse import quote
 
 from paths import CODE_ROOT
@@ -85,12 +86,22 @@ def build_signature_html(image_src_mode: str = "cid") -> str:
 def text_to_html(text: str) -> str:
     """Convertit le texte brut saisi par l'utilisateur en HTML sûr (échappement + sauts de ligne).
 
-    Les balises simples volontairement saisies (<b>, <i>, <u>, <br>) sont conservées.
+    Les balises simples volontairement saisies (<b>, <i>, <u>, <br>) sont conservées,
+    ainsi que les liens <a href="…">…</a> (schéma http/https/mailto uniquement —
+    tout autre schéma est neutralisé : seul le texte du lien est conservé).
     """
     escaped = _html.escape(str(text), quote=False)
     for tag in ("b", "i", "u"):
         escaped = escaped.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
     escaped = escaped.replace("&lt;br&gt;", "<br>").replace("&lt;br /&gt;", "<br>")
+
+    def _restore_link(match):
+        url, link_text = match.group(1), match.group(2)
+        if re.match(r"(?i)^(https?://|mailto:)", url):
+            return f'<a href="{url}" target="_blank" style="color:#2563EB;">{link_text}</a>'
+        return link_text  # schéma non autorisé : on garde le texte du lien seul
+
+    escaped = re.sub(r'&lt;a href="([^"]*)"&gt;(.*?)&lt;/a&gt;', _restore_link, escaped, flags=re.S)
     return escaped.replace("\r\n", "\n").replace("\n", "<br>")
 
 

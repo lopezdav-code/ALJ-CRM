@@ -246,7 +246,8 @@ SQLite **distincte** de la base d'adhérents :
 - Hiérarchie des traits : **séparateurs de jours = thick noir**, lignes d'**heures** et
   cadre = medium sombre, lignes des **demi-heures** = thin clair, voies = thin.
 - Bloc fusionné par créneau, **coloré par type** (compétition = vert, perfectionnement =
-  rose, cours = bleu lavande, autonome = gris) ; libellé du groupe nettoyé de son
+  rose, cours = bleu lavande, autonome = gris) sauf **« Autonome Bloc » = orange clair
+  pastel** (`fill_for_item`, priorité au nom du groupe) ; libellé du groupe nettoyé de son
   suffixe parenthésé horaire (« (Mercredi 09h30) » retiré, « (1) » distinctif conservé).
 - **Encadrants** notés sous le libellé : noms complets si la place le permet, sinon
   **initiales** (« Camille DIDIER » → « C.D. ») — `encadrants_text` / `_initiales`.
@@ -271,8 +272,16 @@ SQLite **distincte** de la base d'adhérents :
    besoin via `add_participant`) ou d'ignorer la ligne.
 3. **Communications** : le filtre de destination « 🏆 Compétition » de la page
    Communications cible les participants via n° de licence puis nom normalisé
-   (`normalize_name`) ; variables d'e-mail supportées : `{num_licence}` (toujours) et
-   `{no_competition}` (quand un filtre compétition est actif).
+   (`normalize_name`) ; variables d'e-mail supportées **dans le sujet ET le corps**
+   (moteur partagé `apply_template_variables` de `presentation/workers.py`, utilisé par
+   l'envoi réel ET l'aperçu « 🔍 Prévisualisation ») : `{num_licence}` (toujours) et,
+   avec un filtre compétition actif, `{no_competition}`, `{name_competition}` (nom de
+   l'épreuve) et `{montant_competition}` (`format_montant` : 15 → « 15 », 15.5 →
+   « 15,50 ») — laissées telles quelles si aucun filtre actif.
+   Le corps est édité avec une **barre d'outils** (G/I/S + « 🔗 Lien externe ») qui
+   insère des balises dans le texte brut ; `email_html.text_to_html` conserve
+   `<b>/<i>/<u>/<br>` **et les liens `<a href="…">`** (schémas http/https/mailto
+   uniquement — tout autre schéma est neutralisé, seul le texte du lien est gardé).
 4. **Page web** : ne jamais écrire automatiquement sur le Drive — l'écriture passe
    exclusivement par le bouton « 💾 Sauvegarder en BDD » ; un garde-fou
    `beforeunload` alerte si des modifications locales ne sont pas sauvegardées.

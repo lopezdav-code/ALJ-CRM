@@ -164,6 +164,36 @@ class GenerateAttestationsWorker(QThread):
             self.finished.emit(0, 0, 1)
 
 
+def apply_template_variables(text, member, competition_context: dict = None) -> str:
+    """Remplace les variables de personnalisation {…} d'un sujet ou corps d'e-mail.
+
+    - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
+    - {num_licence} : licence FFME du destinataire ;
+    - variables compétition (contexte du filtre actif) : {no_competition},
+      {name_competition}, {montant_competition} — laissées telles quelles si absentes
+      du contexte (aucun filtre compétition actif).
+
+    Fonction partagée par l'envoi réel (SendEmailCampaignWorker) et l'aperçu
+    (Communications) pour garantir un rendu identique.
+    """
+    if text is None:
+        return ""
+    ctx = competition_context or {}
+    out = str(text)
+    first = (getattr(member, "user_first_name", "") or "").strip().title()
+    last = (getattr(member, "user_last_name", "") or "").strip().upper()
+    out = out.replace("{Prénom}", first)
+    out = out.replace("{Nom}", last)
+    out = out.replace("{first_name}", first)
+    out = out.replace("{last_name}", last)
+    out = out.replace("{num_licence}", str(getattr(member, "licence_ffme", "") or "").strip())
+    for key in ("no_competition", "name_competition", "montant_competition"):
+        val = str(ctx.get(key) or "").strip()
+        if val:
+            out = out.replace("{" + key + "}", val)
+    return out
+
+
 class SendEmailCampaignWorker(QThread):
     """
     Worker asynchrone pour l'envoi d'e-mails par lots avec ou sans attestations jointes.
@@ -269,20 +299,11 @@ class SendEmailCampaignWorker(QThread):
                     continue
 
             # 2. Détection dynamique du groupe WhatsApp et récupération du lien/QRCode
-            msg_body = self.body
-            
-            # Personnaliser le corps du message avec le Prénom et le Nom de l'adhérent (Nouveau !)
-            # Support des deux syntaxes : {Prénom}/{Nom} (IHM) et {first_name}/{last_name} (modèles BDD)
-            msg_body = msg_body.replace("{Prénom}", m.user_first_name.strip().title())
-            msg_body = msg_body.replace("{Nom}", m.user_last_name.strip().upper())
-            msg_body = msg_body.replace("{first_name}", m.user_first_name.strip().title())
-            msg_body = msg_body.replace("{last_name}", m.user_last_name.strip().upper())
-            # Variables du module Compétitions (Nouveau !) :
-            # - {num_licence} : licence FFME de l'adhérent destinataire ;
-            # - {no_competition} : identifiant FFME de l'épreuve (filtre compétition actif uniquement).
-            msg_body = msg_body.replace("{num_licence}", str(getattr(m, "licence_ffme", "") or "").strip())
-            if self.competition_context.get("no_competition"):
-                msg_body = msg_body.replace("{no_competition}", str(self.competition_context["no_competition"]).strip())
+            # Personnalisation des variables du sujet et du corps (identique à l'aperçu) :
+            # {Prénom}/{Nom}/{first_name}/{last_name}, {num_licence} et variables
+            # compétition {no_competition}/{name_competition}/{montant_competition}.
+            subject_rendered = apply_template_variables(self.subject, m, self.competition_context)
+            msg_body = apply_template_variables(self.body, m, self.competition_context)
             qr_path = None
             qr_status_msg = "⚠️ QRCode non joint (Option désactivée)" if not self.attach_whatsapp else "⚠️ QRCode non joint (Aucun créneau correspondant)"
             
@@ -392,7 +413,7 @@ class SendEmailCampaignWorker(QThread):
                 # L'adresse et le nom d'expédition choisis dans l'IHM (template de mail) sont transmis ici.
                 EmailRepository.send_email(
                     to_email=email_dest,
-                    subject=self.subject,
+                    subject=subject_rendered,
                     body=plain_body,
                     attachment_path=attachments,
                     html_body=html_body,

@@ -12,7 +12,21 @@ if _src_dir not in sys.path:
 from infrastructure.planning_excel_export import (
     parse_horaire, clean_group_label, _initiales, encadrants_text,
     assign_lanes, export_planning_excel, export_planning_list_excel,
+    fill_for_item,
 )
+
+
+class TestFillForItem(unittest.TestCase):
+    def test_autonome_bloc_pastel_orange(self):
+        self.assertEqual(fill_for_item({"groupe": "Autonome Bloc", "type": "autonome"}), "FFD8A8")
+        self.assertEqual(fill_for_item({"groupe": "autonome  bloc", "type": "autonome"}), "FFD8A8")
+
+    def test_autonome_simple_gris(self):
+        self.assertEqual(fill_for_item({"groupe": "Autonome", "type": "autonome"}), "D9D9D9")
+
+    def test_par_type(self):
+        self.assertEqual(fill_for_item({"groupe": "Compétition - U11-U13", "type": "compétition"}), "D9EAD3")
+        self.assertEqual(fill_for_item({"groupe": "Perfectionnement - U13", "type": "perfectionnement"}), "F8C8DC")
 
 
 class TestParseHoraire(unittest.TestCase):

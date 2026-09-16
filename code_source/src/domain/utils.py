@@ -33,6 +33,19 @@ def normalize_key_part(s) -> str:
     s = normalize_string(s)
     return s.replace("-", "").replace(" ", "").replace(":", "")
 
+def format_montant(prix) -> str:
+    """Formate un montant en euros pour les e-mails : 15 -> « 15 », 15.5 -> « 15,50 »
+    (séparateur décimal français, centimes nuls omis). None / vide / invalide -> « »."""
+    if prix is None or (isinstance(prix, str) and not prix.strip()):
+        return ""
+    try:
+        p = round(float(prix), 2)
+    except (TypeError, ValueError):
+        return ""
+    txt = f"{p:.2f}".replace(".", ",")
+    return txt[:-3] if txt.endswith(",00") else txt
+
+
 def clean_city_name(city_raw) -> str:
     """
     Harmonise et nettoie les noms de villes pour éviter les doublons (ex: Villette d'Anthon).

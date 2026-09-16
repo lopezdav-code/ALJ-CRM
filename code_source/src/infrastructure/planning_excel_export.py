@@ -31,6 +31,17 @@ TYPE_FILLS = {
     "autonome": "D9D9D9",          # gris
 }
 DEFAULT_FILL = "EFEFEF"
+FILL_BLOC_AUTONOME = "FFD8A8"      # orange clair pastel (groupe « Autonome Bloc »)
+
+
+def fill_for_item(item):
+    """Couleur de fond d'un créneau : priorité au nom du groupe (« Autonome Bloc »
+    = orange clair pastel), sinon le type de groupe."""
+    from domain.utils import normalize_string
+    label = normalize_string(item.get("groupe") or "")
+    if "autonome" in label and "bloc" in label:
+        return FILL_BLOC_AUTONOME
+    return TYPE_FILLS.get(normalize_type(item.get("type")), DEFAULT_FILL)
 
 
 def parse_horaire(horaires):
@@ -104,11 +115,6 @@ def assign_lanes(slots):
     return out, len(lanes)
 
 
-def _day_fill(jour_item):
-    fill = TYPE_FILLS.get(normalize_type(jour_item.get("type")), DEFAULT_FILL)
-    return fill
-
-
 def normalize_type(type_value):
     t = str(type_value or "").strip().lower()
     return t if t in TYPE_FILLS else "cours"
@@ -133,7 +139,7 @@ def export_planning_excel(planning_data, saison, out_path):
         by_day[jour].append({
             "start": start, "end": end,
             "label": clean_group_label(item.get("groupe")) or str(item.get("groupe") or "Créneau"),
-            "fill": _day_fill(item),
+            "fill": fill_for_item(item),
             "encadrants": item.get("encadrants") or [],
         })
     if not any(by_day.values()):

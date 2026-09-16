@@ -1,15 +1,15 @@
 import os
 import json
 import datetime
+from PySide6.QtCore import Qt, QDate, QSize, QEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QTextEdit, QProgressBar, QFrame, QListWidget,
     QListWidgetItem, QSplitter, QComboBox, QCheckBox, QMessageBox,
     QRadioButton, QDialog, QDateEdit, QScrollArea, QSizePolicy,
-    QGridLayout
+    QGridLayout, QInputDialog
 )
-from PySide6.QtCore import Qt, QDate, QSize, QEvent
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QTextCursor
 from PIL import Image, ImageDraw
 
 from paths import CODE_ROOT
@@ -707,8 +707,37 @@ class CommunicationsPage(QWidget):
         body_head.addWidget(self.btn_variables)
         mc_layout.addLayout(body_head)
 
+        # Barre d'outils de mise en forme (insère des balises dans le texte brut) :
+        # Gras <b>, Italique <i>, Souligné <u>, Lien externe <a href>.
+        fmt_row = QHBoxLayout()
+        fmt_row.setSpacing(6)
+        fmt_lbl = QLabel("Mise en forme :")
+        fmt_lbl.setStyleSheet("color: #64748B; font-size: 12px;")
+        fmt_row.addWidget(fmt_lbl)
+        for label, tag, tip in (
+            ("<b>G</b>", "b", "Gras : entoure la sélection avec <b>…</b>"),
+            ("<i>I</i>", "i", "Italique : entoure la sélection avec <i>…</i>"),
+            ("<u>S</u>", "u", "Souligné : entoure la sélection avec <u>…</u>"),
+        ):
+            btn = QPushButton(label)
+            btn.setFixedSize(30, 26)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(tip)
+            btn.setStyleSheet(self.QSS_BTN_SECONDARY)
+            btn.clicked.connect(lambda _c, tg=tag: self._wrap_body_tag(tg))
+            fmt_row.addWidget(btn)
+        self.btn_body_link = QPushButton("🔗 Lien externe")
+        self.btn_body_link.setCursor(Qt.PointingHandCursor)
+        self.btn_body_link.setToolTip("Insère un lien cliquable vers un site externe (<a href=\"…\">…) à la position du curseur.")
+        self.btn_body_link.setStyleSheet(self.QSS_BTN_SECONDARY)
+        self.btn_body_link.clicked.connect(self._insert_body_link)
+        fmt_row.addWidget(self.btn_body_link)
+        fmt_row.addStretch()
+        mc_layout.addLayout(fmt_row)
+
         self.body_input = QTextEdit()
         self.body_input.setPlaceholderText("Saisissez le texte d accompagnement...")
+        self.body_input.setAcceptRichText(False)  # corps = texte brut + balises autorisées (<b>, <i>, <a>…)
         self.body_input.setPlainText(
             "Bonjour {first_name},\n\n"
             "Veuillez trouver ci-joint l attestation de paiement relative \u00e0 votre adh\u00e9sion au club d escalade "
@@ -1024,11 +1053,55 @@ class CommunicationsPage(QWidget):
             "- {Nom} ou {last_name} : nom de l adherent\n"
             "- {num_licence} : numero de licence FFME de l adherent\n\n"
             "Variables disponibles lorsqu un filtre Compet est actif (onglet Competitions) :\n\n"
-            "- {no_competition} : identifiant FFME de la competition selectionnee\n\n"
+            "- {no_competition} : identifiant FFME de la competition selectionnee\n"
+            "- {name_competition} : nom de la competition selectionnee\n"
+            "- {montant_competition} : tarif d inscription de la competition\n\n"
             "Variables du texte d invitation WhatsApp (lorsque l invitation est jointe) :\n\n"
             "- {group_name} : nom du groupe de creneau\n"
             "- {whatsapp_link} : lien d invitation WhatsApp du creneau"
         )
+
+    def _wrap_body_tag(self, tag: str):
+        """Entoure la sélection (ou insère une paire vide) avec la balise <tag>…</tag>.
+
+        Le corps reste du texte brut : les balises saisies (<b>, <i>, <u>, <a href>…)
+        sont rendues à l'envoi par text_to_html (email_html.py).
+        """
+        cursor = self.body_input.textCursor()
+        open_tag, close_tag = f"<{tag}>", f"</{tag}>"
+        if cursor.hasSelection():
+            selected = cursor.selectedText()
+            cursor.insertText(f"{open_tag}{selected}{close_tag}")
+        else:
+            cursor.insertText(f"{open_tag}{close_tag}")
+            cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.MoveAnchor,
+                                len(close_tag))
+            self.body_input.setTextCursor(cursor)
+        self.body_input.setFocus()
+
+    def _insert_body_link(self):
+        """Insère un lien cliquable <a href="…">…</a> vers un site externe.
+
+        Le texte du lien = la sélection courante si elle existe, sinon l'URL saisie.
+        """
+        cursor = self.body_input.textCursor()
+        selected = cursor.selectedText().strip()
+        url, ok = QInputDialog.getText(
+            self, "🔗 Lien vers un site externe",
+            "Adresse du lien (https://… ou mailto:) :",
+            text="https://"
+        )
+        if not ok:
+            return
+        url = url.strip()
+        if not url:
+            QMessageBox.warning(self, "Lien vide", "Veuillez saisir une adresse (ex. https://www.exemple.fr).")
+            return
+        if not url.lower().startswith(("http://", "https://", "mailto:")):
+            url = "https://" + url
+        link_text = selected or url
+        cursor.insertText(f'<a href="{url}">{link_text}</a>')
+        self.body_input.setFocus()
 
     def reset_filters(self):
         """Remet tous les filtres de destinataires a zero (reutilise les mecanismes existants)."""
@@ -1373,7 +1446,8 @@ class CommunicationsPage(QWidget):
         )
 
     def _current_competition_context(self):
-        """Contexte de variables dynamiques ({no_competition}…) si un filtre compétition est actif."""
+        """Contexte de variables dynamiques du filtre compétition actif :
+        {no_competition}, {name_competition}, {montant_competition}."""
         comp_id = self._selected_competition_id()
         if not comp_id:
             return None
@@ -1383,7 +1457,14 @@ class CommunicationsPage(QWidget):
             comp = None
         if not comp:
             return None
-        return {"competition_id": comp.id, "nom": comp.nom, "no_competition": comp.id_ffme}
+        from domain.utils import format_montant
+        return {
+            "competition_id": comp.id,
+            "nom": comp.nom,
+            "no_competition": comp.id_ffme,
+            "name_competition": comp.nom,
+            "montant_competition": format_montant(comp.prix),
+        }
 
     def focus_on_member(self, member):
         """Préfiltre la liste des destinataires sur l'adhérent choisi dans l'onglet
@@ -1806,12 +1887,13 @@ class CommunicationsPage(QWidget):
                 emails.append(em_strip)
         to_display = ", ".join(emails) if emails else "⚠️ Aucune adresse valide selon vos critères"
 
-        # 3. Personnalisation des variables (identique à SendEmailCampaignWorker)
-        msg_body = body
-        msg_body = msg_body.replace("{Prénom}", first_member.user_first_name.strip().title())
-        msg_body = msg_body.replace("{Nom}", first_member.user_last_name.strip().upper())
-        msg_body = msg_body.replace("{first_name}", first_member.user_first_name.strip().title())
-        msg_body = msg_body.replace("{last_name}", first_member.user_last_name.strip().upper())
+        # 3. Personnalisation des variables (identique à SendEmailCampaignWorker :
+        #    {Prénom}/{Nom}/{first_name}/{last_name}, {num_licence} et variables
+        #    compétition {no_competition}/{name_competition}/{montant_competition})
+        from presentation.workers import apply_template_variables
+        competition_context = self._current_competition_context()
+        msg_body = apply_template_variables(body, first_member, competition_context)
+        subject = apply_template_variables(subject, first_member, competition_context)
 
         # 4. Pièce jointe attestation + bloc WhatsApp / QRCode (identique à l'envoi réel)
         attachments_lines = []
@@ -2096,7 +2178,6 @@ class CommunicationsPage(QWidget):
 
     def on_new_template_clicked(self):
         """Demande un nom pour un nouveau template d'email, et l'enregistre."""
-        from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "Nouveau Modèle d'E-mail", "Entrez le nom de votre nouveau modèle d'e-mail :")
         if not ok or not name.strip():
             return

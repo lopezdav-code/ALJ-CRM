@@ -18,11 +18,9 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 
 from infrastructure.planning_excel_export import (
     DAYS, GRID_START, GRID_END, STEP,
-    assign_lanes, clean_group_label, encadrants_text, normalize_type, parse_horaire,
+    assign_lanes, clean_group_label, encadrants_text, fill_for_item, parse_horaire,
 )
 
-FILLS = {"compétition": "#D9EAD3", "perfectionnement": "#F8C8DC",
-         "cours": "#D9E1F2", "autonome": "#D9D9D9"}
 INK = "#1F4E79"
 
 
@@ -73,7 +71,8 @@ class PlanningWeekView(QGraphicsView):
             by_day[jour].append({
                 "start": start, "end": end,
                 "label": clean_group_label(item.get("groupe")) or "Créneau",
-                "fill": FILLS.get(normalize_type(item.get("type")), "#EFEFEF"),
+                # fill_for_item renvoie l'hex openpyxl SANS « # » : Qt exige le « # »
+                "fill": "#" + fill_for_item(item),
                 "encadrants": item.get("encadrants") or [],
             })
 
