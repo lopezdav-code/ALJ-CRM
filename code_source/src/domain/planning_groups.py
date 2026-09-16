@@ -90,6 +90,23 @@ def build_creneau_items(creneaux, include_autonome=True):
     return items
 
 
+def group_for_tarif(tarif_name: str, planning_data) -> str:
+    """Nom du groupe de créneau associé à un tarif HelloAsso ("" si non rapproché).
+
+    Comparaison insensible aux accents/majuscules/espaces superflus ; le planning
+    est la liste des créneaux (SqliteRepository.load_planning_data) portant chacun
+    un champ `groupe` et un payload `helloasso_tarifs`.
+    """
+    target = normalize_string(tarif_name)
+    if not target:
+        return ""
+    for item in planning_data or []:
+        for t in item.get("helloasso_tarifs") or []:
+            if normalize_string(t) == target:
+                return str(item.get("groupe") or "").strip()
+    return ""
+
+
 def prune_empty_sections(blocks):
     """Retire les rubriques (section / sub-section) sans aucun créneau exploitable
     en dessous : utile quand l'appelant filtre les créneaux dont le payload est vide.

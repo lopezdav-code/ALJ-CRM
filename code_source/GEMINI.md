@@ -192,6 +192,115 @@ Règles de conception (respecter impérativement) :
 
 ---
 
+## 🏆 Module Compétitions (v2.1.0) — Base dédiée `database_Competition.db`
+
+Module complet de gestion des compétitions FFME (création d'épreuves, sélection des
+compétiteurs, invitations, paiements HelloAsso, bilan de saison) appuyé sur une base
+SQLite **distincte** de la base d'adhérents :
+
+### Architecture
+
+- **Base dédiée** : `data/database_Competition.db` (même dossier de cache local que
+  `database.db`). Sa table `adherents` est un **instantané** initialisé / rafraîchi
+  depuis la base principale (vue `v_adherents_legacy`) via
+  `CompetitionRepository.sync_adherents_from_main()` — jamais de suppression lors de la
+  synchro, pour préserver l'historique des saisons passées.
+- **Schéma** : `competitions` (id, id_ffme, nom, date_competition, prix, statut
+  `en_preparation|en_cours|close`, helloasso_ref) / `participants` (id, competition_id,
+  adherent_id, selectionne, statut_paiement `non_invite|en_attente|paye`,
+  date_synchro_helloasso, montant_paye, commande_helloasso — migrée automatiquement à
+  l'ouverture des bases anciennes) / `adherents` (instantané) / `app_settings`
+  (dont `HELLOASSO_ANNUAL_CAMPAIGN`) / **`helloasso_items`** (miroir de la campagne
+  annuelle HelloAsso : id_item PK, order_id, payeur, montant, état, date, champs saisis
+  « licence » et « compétition concernée », raw_json — jamais édité à la main, upsert à
+  chaque synchro) / **`item_links`** (1 ligne par article → competition_id + adherent_id
+  NULLables, `source` = 'auto' recalculé à chaque synchro ou 'manuel' **jamais écrasé**).
+- **Google Drive** : même mécanisme que la base principale avec un ID de fichier dédié
+  (`GOOGLE_DRIVE_COMPETITION_DB_ID`), via `infrastructure/competition_drive_sync.py`
+  (téléchargement, mise à jour PATCH conservant l'ID, création automatique).
+
+### Fichiers clés
+
+| Fichier | Rôle |
+|---|---|
+| `src/domain/competition_models.py` | Modèles purs `Competition` / `Participant` + libellés de statuts |
+| `src/domain/competition_matching.py` | Rapprochement HelloAsso **pur** : parsing d'URL de campagne, croisement licence → nom, contrôle du n° d'épreuve (« Compétition concernée »), anomalies |
+| `src/domain/planning_groups.py` | Hiérarchie des créneaux + `group_for_tarif()` : rapprochement tarif → groupe de créneau (regroupement de la liste Compétiteurs) |
+| `src/infrastructure/competition_repository.py` | Dépôt SQLite dédié (CRUD, instantané adhérents, bilan croisé) |
+| `src/infrastructure/competition_drive_sync.py` | Synchro Drive de la base dédiée |
+| `src/presentation/pages/competitions.py` | Onglet desktop « 🏆 Compétitions » à deux niveaux : onglets **globaux** (🏆 Épreuves / 🔄 HelloAsso / 📊 Bilan) et détail d'épreuve avec ses onglets propres (📋 Détails — sans champ campagne —, 👥 Compétiteurs) |
+| `web/competitions.html` | Page web de gestion servie sur `/competitions` (téléchargement au chargement, écriture Drive **uniquement** au clic « 💾 Sauvegarder en BDD », cache IndexedDB, scope OAuth `drive` en écriture) |
+| `tests/test_competition_module.py` | Tests unitaires (dépôt, rapprochement, bilan) |
+
+### Règles de conception
+
+1. **Anomalies HelloAsso** : le rapprochement est séparé de l'API et de la BDD
+   (fonction pure `match_items_to_participants`) ; types d'anomalies : `paiement_inconnu`,
+   `paiement_sans_licence`, `licence_ecartee`, `ecart_tarif`, `doublon`, `remboursement`,
+   `paiement_non_finalise`, `paiement_absent`, `competition_manquante`, `competition_ecartee`.
+2. **Contrôle du n° d'épreuve** : le champ personnalisé « Compétition concernée » du
+   formulaire HelloAsso doit contenir le `id_ffme` de la compétition (communiqué dans
+   l'invitation via `{no_competition}`). Un paiement sans ce n° (vide ou non conforme)
+   n'est pas marqué « Payé » automatiquement : il part en `manual_review` et la boîte
+   `ManualCorrectionDialog` (affichant la valeur saisie sur HelloAsso) propose de choisir
+   la compétition cible (toutes les épreuves, pré-sélection = épreuve en cours) puis le
+   compétiteur à créditer parmi tous les adhérents (rattaché à la compétition cible si
+   besoin via `add_participant`) ou d'ignorer la ligne.
+3. **Communications** : le filtre de destination « 🏆 Compétition » de la page
+   Communications cible les participants via n° de licence puis nom normalisé
+   (`normalize_name`) ; variables d'e-mail supportées : `{num_licence}` (toujours) et
+   `{no_competition}` (quand un filtre compétition est actif).
+4. **Page web** : ne jamais écrire automatiquement sur le Drive — l'écriture passe
+   exclusivement par le bouton « 💾 Sauvegarder en BDD » ; un garde-fou
+   `beforeunload` alerte si des modifications locales ne sont pas sauvegardées.
+5. **QProgressDialog de la page Compétitions** : création **paresseuse** obligatoire
+   (`_ensure_progress`, jamais à l'init) — un `QProgressDialog` instancié au démarrage
+   est rendu visible par le minuteur interne armé par `setMinimumDuration` (fenêtre
+   fantôme « python » vide). Toujours titré et labellisé, `show()` explicite, worker
+   Drive sous try/except (sinon la fenêtre reste ouverte en cas de crash du thread).
+6. **Liste des compétiteurs** : la table de l'onglet Compétiteurs est regroupée par
+   **groupe de créneau du planning** (`group_for_tarif` via le payload `helloasso_tarifs`)
+   avec des lignes d'en-tête fusionnées sur toute la largeur ; les tarifs non rapprochés
+   (vides ou inconnus) vont dans la catégorie **« Non identifiés »** toujours en dernier.
+   Le filtre texte masque les groupes sans ligne visible (`_group_header_rows`).
+   Colonnes : Participe / Nom / Prénom (Nom et Prénom en `ResizeToContents`, largeurs
+   cohérentes) / Licence / **N° de commande** (renseigné par la synchro HelloAsso via
+   `order_by_adherent`) / Paiement / Synchro / bouton 🗑 de **retrait du compétiteur**
+   (`_on_delete_participant`, avec confirmation ; l'adhérent reste en base).
+7. **Onglet HelloAsso** : les articles de la campagne sont affichés en colonnes
+   (`summarize_items` : Payeur, Montant, N° de commande, N° de licence, « Compétition
+   concernée », Statut) — les n° de licence et de compétition non saisis restent **à vide**.
+8. **Campagne annuelle HelloAsso (v2.2.0)** : un seul formulaire pour la saison
+   (`app_settings.HELLOASSO_ANNUAL_CAMPAIGN`). `AnnualHelloAssoSyncWorker` : upsert du
+   miroir → `auto_link_items` (champ n° d'épreuve puis licence puis nom ; état payé
+   uniquement ; liens 'manuel' préservés) → `replace_auto_links` → 
+   `apply_links_to_participants` (cumul des montants, n° de commande joints, adhérent
+   rattaché à la compétition si besoin). Les articles sans rattachement complet
+   (`list_unlinked_items`) sont proposés dans `ManualCorrectionDialog` (corrections
+   avec `id_item` → liens 'manuel' durables).
+9. **Séparation global / épreuve (v2.2.1)** : la page Compétitions a deux niveaux
+   d'onglets — `global_tabs` (🏆 Épreuves | 🔄 HelloAsso | 📊 Bilan de saison) et, dans
+   l'onglet Épreuves, `comp_tabs` (📋 Détails | 👥 Compétiteurs). Le champ « Campagne
+   HelloAsso » a été retiré de Détails (campagne annuelle uniquement ; la colonne
+   `helloasso_ref` reste en base pour l'historique et n'est plus modifiable par l'IHM).
+   La synchro par compétition (`CompetitionHelloAssoSyncWorker`) et le rapport
+   d'anomalies (`AnomaliesDialog`) ont été retirés de l'IHM ; les fonctions de
+   rapprochement historiques restent dans `domain/competition_matching.py` (testées).
+10. **Pré-sélection du compétiteur (v2.2.2)** : dans la correction manuelle, le combo
+   « Compétiteur à créditer » est présélectionné par n° de licence puis, à défaut, par
+   **nom + prénom** du payeur (`match_adherent_by_name`, ordre des mots inversé accepté).
+11. **Page web alignée (v2.2.3)** : `web/competitions.html` servie sur `/competitions`
+   suit le modèle desktop — champ « campagne par compétition » retiré (création/maj
+   sans `helloasso_ref`), onglet global « 🔄 HelloAsso » **en lecture seule** (campagne
+   annuelle depuis `app_settings` + miroir `helloasso_items`/`item_links` : articles,
+   rattachements, source ; la synchro reste au bureau), compétiteurs **regroupés par
+   créneau** via un miroir `planning_groups` (groupe + tarif, rempli par
+   `sync_adherents_from_main` depuis la table planning de database.db), n° de commande
+   affiché et **suppression de compétiteur** (confirmation). Écriture Drive inchangée :
+   uniquement au clic « 💾 Sauvegarder en BDD ».
+
+---
+
 ## 🧪 Tests Unitaires
 
 Une couverture de tests unitaires est présente pour assurer le maintien de la stabilité de l'application.

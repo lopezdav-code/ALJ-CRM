@@ -174,7 +174,7 @@ class SendEmailCampaignWorker(QThread):
     # n'est pas thread-safe). L'IHM doit connecter ce signal avec Qt.BlockingQueuedConnection.
     pdf_generation_requested = Signal(dict)
 
-    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, add_signature: bool = False, sender_email: str = None, sender_name: str = None, parent=None):
+    def __init__(self, subject: str, body: str, members: list, attach_pdf: bool = True, attach_whatsapp: bool = True, use_primary_email: bool = True, use_secondary_email: bool = True, use_payer_email: bool = False, whatsapp_template: str = None, add_signature: bool = False, sender_email: str = None, sender_name: str = None, competition_context: dict = None, parent=None):
         super().__init__(parent)
         self.subject = subject
         self.body = body
@@ -188,6 +188,8 @@ class SendEmailCampaignWorker(QThread):
         self.add_signature = add_signature
         self.sender_email = (sender_email or "").strip() or None
         self.sender_name = (sender_name or "").strip() or None
+        # Variables dynamiques du module Compétitions : {"no_competition": ..., "nom": ...}
+        self.competition_context = competition_context or {}
         self.pdf_result = {"success": False, "error": ""}
 
     def run(self):
@@ -275,6 +277,12 @@ class SendEmailCampaignWorker(QThread):
             msg_body = msg_body.replace("{Nom}", m.user_last_name.strip().upper())
             msg_body = msg_body.replace("{first_name}", m.user_first_name.strip().title())
             msg_body = msg_body.replace("{last_name}", m.user_last_name.strip().upper())
+            # Variables du module Compétitions (Nouveau !) :
+            # - {num_licence} : licence FFME de l'adhérent destinataire ;
+            # - {no_competition} : identifiant FFME de l'épreuve (filtre compétition actif uniquement).
+            msg_body = msg_body.replace("{num_licence}", str(getattr(m, "licence_ffme", "") or "").strip())
+            if self.competition_context.get("no_competition"):
+                msg_body = msg_body.replace("{no_competition}", str(self.competition_context["no_competition"]).strip())
             qr_path = None
             qr_status_msg = "⚠️ QRCode non joint (Option désactivée)" if not self.attach_whatsapp else "⚠️ QRCode non joint (Aucun créneau correspondant)"
             

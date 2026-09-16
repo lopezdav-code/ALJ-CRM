@@ -42,6 +42,7 @@ class SettingsPage(QWidget):
             ("Saison active (ex: 2026-2027) :", "ACTIVE_SEASON", "2026-2027"),
             ("HelloAsso Client ID :", "HELLOASSO_CLIENT_ID", ""),
             ("Google Drive SQLite DB ID (Base d'adhérents) :", "GOOGLE_DRIVE_DB_ID", ""),
+            ("Google Drive SQLite DB ID (Base compétitions) :", "GOOGLE_DRIVE_COMPETITION_DB_ID", ""),
             ("Google Cloud Client ID :", "GMAIL_CLIENT_ID", ""),
             ("Adresse Expéditeur Gmail :", "GMAIL_USER_EMAIL", "")
         ]
@@ -71,8 +72,8 @@ class SettingsPage(QWidget):
             field_layout.addWidget(line_edit)
             self.inputs[key] = line_edit
 
-            # Ajouter le bouton "🌐 Ouvrir sur le Web" pour le champ Google Drive BDD
-            if key == "GOOGLE_DRIVE_DB_ID":
+            # Ajouter le bouton "🌐 Ouvrir sur le Web" pour les champs Google Drive BDD
+            if key in ("GOOGLE_DRIVE_DB_ID", "GOOGLE_DRIVE_COMPETITION_DB_ID"):
                 open_btn = QPushButton("🌐 Ouvrir sur le Web")
                 open_btn.setCursor(Qt.PointingHandCursor)
                 open_btn.setStyleSheet("""
@@ -95,8 +96,8 @@ class SettingsPage(QWidget):
             self.form_layout.addLayout(field_layout)
 
             # Label d'information sur le nom du fichier Google Drive BDD
-            if key == "GOOGLE_DRIVE_DB_ID":
-                name_lbl = QLabel("📂 Nom du fichier sur Google Drive : (ID vide ou non chargé)")
+            if key in ("GOOGLE_DRIVE_DB_ID", "GOOGLE_DRIVE_COMPETITION_DB_ID"):
+                name_lbl = QLabel(f"📂 Nom du fichier sur Google Drive : (ID vide ou non chargé) [{key}]")
                 name_lbl.setStyleSheet("font-size: 11px; font-style: italic; color: #64748B; margin-bottom: 5px;")
                 self.filename_labels[key] = name_lbl
                 self.form_layout.addWidget(name_lbl)
@@ -518,32 +519,34 @@ class SettingsPage(QWidget):
         self.db_status_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {db_color};")
 
     def load_drive_filenames(self):
-        """Récupère en arrière-plan le nom de la base SQLite sur Google Drive."""
+        """Récupère en arrière-plan les noms des bases SQLite (adhérents + compétitions) sur Google Drive."""
         import threading
         from infrastructure.google_drive_client import GoogleDriveClient
-        
-        db_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
-        
+
+        drive_keys = [k for k in ("GOOGLE_DRIVE_DB_ID", "GOOGLE_DRIVE_COMPETITION_DB_ID")
+                      if k in self.filename_labels]
+
         # Réinitialiser les affichages
-        if "GOOGLE_DRIVE_DB_ID" in self.filename_labels:
-            if db_id:
-                self.filename_labels["GOOGLE_DRIVE_DB_ID"].setText("📂 Nom du fichier sur Google Drive : (Chargement en cours...)")
+        for key in drive_keys:
+            drive_id = SecretStore.get_secret(key)
+            if drive_id:
+                self.filename_labels[key].setText("📂 Nom du fichier sur Google Drive : (Chargement en cours...)")
             else:
-                self.filename_labels["GOOGLE_DRIVE_DB_ID"].setText("📂 Nom du fichier sur Google Drive : (Aucun ID configuré)")
-                
-        if not db_id:
-            return
+                self.filename_labels[key].setText("📂 Nom du fichier sur Google Drive : (Aucun ID configuré)")
 
         def fetch_names():
-            if db_id:
+            for key in drive_keys:
+                drive_id = SecretStore.get_secret(key)
+                if not drive_id:
+                    continue
                 try:
-                    db_name = GoogleDriveClient.get_file_name(db_id)
+                    db_name = GoogleDriveClient.get_file_name(drive_id)
                     if db_name:
-                        self.filename_labels["GOOGLE_DRIVE_DB_ID"].setText(f"📂 Nom du fichier sur Google Drive : {db_name}")
+                        self.filename_labels[key].setText(f"📂 Nom du fichier sur Google Drive : {db_name}")
                     else:
-                        self.filename_labels["GOOGLE_DRIVE_DB_ID"].setText("📂 Nom du fichier sur Google Drive : (Fichier introuvable ou non partagé)")
+                        self.filename_labels[key].setText("📂 Nom du fichier sur Google Drive : (Fichier introuvable ou non partagé)")
                 except Exception:
-                    self.filename_labels["GOOGLE_DRIVE_DB_ID"].setText("📂 Nom du fichier sur Google Drive : (Erreur lors de la récupération)")
+                    self.filename_labels[key].setText("📂 Nom du fichier sur Google Drive : (Erreur lors de la récupération)")
 
         # Lancer dans un thread séparé pour ne pas figer l'IHM
         threading.Thread(target=fetch_names, daemon=True).start()

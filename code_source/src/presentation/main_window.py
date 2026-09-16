@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from presentation.pages.members import MembersPage
 from presentation.pages.documents import DocumentsPage
 from presentation.pages.communications import CommunicationsPage
+from presentation.pages.competitions import CompetitionsPage
 from presentation.pages.exports import ExportsPage
 from presentation.pages.ffme import ImportDataPage
 from presentation.pages.groups import GroupsPage
@@ -88,10 +89,11 @@ class MainWindow(QMainWindow):
             ("📦  Exports", 3),
             ("📥  Import Data", 4),
             ("🧗  Créneaux", 5),
-            ("🔧  Outils", 6),
-            ("⚙️  Paramètres", 7),
-            ("❓  Aide", 8),
-            ("📋  Logs", 9)
+            ("🏆  Compétitions", 6),
+            ("🔧  Outils", 7),
+            ("⚙️  Paramètres", 8),
+            ("❓  Aide", 9),
+            ("📋  Logs", 10)
         ]
 
         for text, index in nav_items:
@@ -195,16 +197,22 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(ExportsPage())         # Index 3 (Gmail Contact intégré)
         self.stacked_widget.addWidget(ImportDataPage())      # Index 4
         self.stacked_widget.addWidget(GroupsPage())          # Index 5
-        self.stacked_widget.addWidget(ReportsPage())         # Index 6 (La page Outils d'Analyses !)
-        self.stacked_widget.addWidget(SettingsPage())        # Index 7
-        self.stacked_widget.addWidget(HelpPage())            # Index 8
-        self.stacked_widget.addWidget(LogsPage())            # Index 9
+        self.stacked_widget.addWidget(CompetitionsPage())    # Index 6 (Module Compétitions !)
+        self.stacked_widget.addWidget(ReportsPage())         # Index 7 (La page Outils d'Analyses !)
+        self.stacked_widget.addWidget(SettingsPage())        # Index 8
+        self.stacked_widget.addWidget(HelpPage())            # Index 9
+        self.stacked_widget.addWidget(LogsPage())            # Index 10
 
         right_panel_layout.addWidget(self.stacked_widget)
 
         # Raccourci « enveloppe » : bouton ✉️ de la fiche adhérent vers Communication filtrée (Nouveau !)
         self.members_page = self.stacked_widget.widget(0)
         self.members_page.email_requested.connect(self.open_communications_for_member)
+
+        # Raccourci « invitation » : bouton ✉️ de la page Compétitions vers Communication
+        # filtrée sur les compétiteurs sélectionnés de l'épreuve (Nouveau !)
+        self.competitions_page = self.stacked_widget.widget(6)
+        self.competitions_page.email_requested.connect(self.open_communications_for_competition)
 
 
         # Pied de page unifié pour tout le site (Nouveau !)
@@ -249,11 +257,13 @@ class MainWindow(QMainWindow):
         self.drive_status.setText(status_text)
 
         # Actualiser les stats et listes si l'on revient sur l'accueil, adhérents ou logs
-        if index == 6 and hasattr(page, "load_and_calculate_stats"):
+        if index == 7 and hasattr(page, "load_and_calculate_stats"):
             page.load_and_calculate_stats(force_reload=force_reload)
         elif index == 0 and hasattr(page, "load_members_from_repository"):
             page.load_members_from_repository(force_reload=force_reload)
-        elif index == 9 and hasattr(page, "load_logs"):
+        elif index == 6 and hasattr(page, "refresh_page"):
+            page.refresh_page()
+        elif index == 10 and hasattr(page, "load_logs"):
             page.load_logs()
 
     def open_communications_for_member(self, member):
@@ -271,6 +281,15 @@ class MainWindow(QMainWindow):
             communications_page.focus_on_member(member)
 
         # Basculer l'affichage sur la page Communication (+ bouton de navigation coché)
+        self.nav_buttons[2].setChecked(True)
+        self.on_nav_changed(2)
+
+    def open_communications_for_competition(self, competition_id: int, competition_name: str = ""):
+        """Bouton ✉️ de la page Compétitions : bascule sur Communication avec le filtre
+        de destination « Compétition » activé et les compétiteurs pré-cochés."""
+        communications_page = self.stacked_widget.widget(2)
+        if hasattr(communications_page, "apply_competition_filter"):
+            communications_page.apply_competition_filter(competition_id, competition_name)
         self.nav_buttons[2].setChecked(True)
         self.on_nav_changed(2)
 
@@ -531,7 +550,7 @@ class MainWindow(QMainWindow):
             members_page = self.stacked_widget.widget(0)  # Index 0 (Adhérents)
             documents_page = self.stacked_widget.widget(1)  # Index 1 (Attestations)
             communications_page = self.stacked_widget.widget(2)  # Index 2 (Communications)
-            reports_page = self.stacked_widget.widget(6)  # Index 6 (Outils)
+            reports_page = self.stacked_widget.widget(7)  # Index 7 (Outils)
 
             # Injecter la liste de membres préchargée
             members_page.members_list = members_list

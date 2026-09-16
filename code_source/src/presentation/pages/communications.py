@@ -15,6 +15,9 @@ from PIL import Image, ImageDraw
 from paths import CODE_ROOT
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository, DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME
+from infrastructure.competition_repository import CompetitionRepository
+from domain.competition_models import LIBELLES_STATUT_PAIEMENT, LIBELLE_VERS_STATUT_PAIEMENT, PAIEMENT_NON_INVITE
+from domain.utils import normalize_name
 from infrastructure.schema_v2 import normalize_status
 from presentation.workers import SendEmailCampaignWorker
 from presentation.pages.members import (
@@ -389,6 +392,26 @@ class CommunicationsPage(QWidget):
         adv_row.addWidget(self.date_edit)
         adv_row.addStretch()
         filters_layout.addLayout(adv_row)
+
+        # Filtre « Compétition » (Nouveau !) : cible les compétiteurs sélectionnés d'une
+        # épreuve de database_Competition.db ; le filtre de paiement permet les relances.
+        comp_row = QHBoxLayout()
+        comp_row.setSpacing(6)
+        lbl_comp = QLabel("🏆 Compétition")
+        lbl_comp.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500; background: transparent;")
+        comp_row.addWidget(lbl_comp)
+        self.competition_filter = QComboBox()
+        self.competition_filter.setStyleSheet(self.get_combobox_style())
+        self.competition_filter.currentIndexChanged.connect(self.on_competition_filter_changed)
+        comp_row.addWidget(self.competition_filter, 1)
+        self.competition_paiement_filter = QComboBox()
+        self.competition_paiement_filter.addItems(["Tous les paiements"] + list(LIBELLES_STATUT_PAIEMENT.values()))
+        self.competition_paiement_filter.setEnabled(False)
+        self.competition_paiement_filter.setStyleSheet(self.get_combobox_style())
+        self.competition_paiement_filter.currentIndexChanged.connect(self.on_filters_changed)
+        comp_row.addWidget(self.competition_paiement_filter)
+        filters_layout.addLayout(comp_row)
+        self.load_competition_filters()
         dest_layout.addWidget(filters_frame)
         # Boutons de selection compacts
         sel_btns = QHBoxLayout()
@@ -998,7 +1021,10 @@ class CommunicationsPage(QWidget):
             "Variables disponibles",
             "Variables remplacees pour chaque destinataire lors de l envoi :\n\n"
             "- {Pr\u00e9nom} ou {first_name} : prenom de l adherent\n"
-            "- {Nom} ou {last_name} : nom de l adherent\n\n"
+            "- {Nom} ou {last_name} : nom de l adherent\n"
+            "- {num_licence} : numero de licence FFME de l adherent\n\n"
+            "Variables disponibles lorsqu un filtre Compet est actif (onglet Competitions) :\n\n"
+            "- {no_competition} : identifiant FFME de la competition selectionnee\n\n"
             "Variables du texte d invitation WhatsApp (lorsque l invitation est jointe) :\n\n"
             "- {group_name} : nom du groupe de creneau\n"
             "- {whatsapp_link} : lien d invitation WhatsApp du creneau"
@@ -1022,6 +1048,14 @@ class CommunicationsPage(QWidget):
         self.diploma_filter_checkbox.blockSignals(True)
         self.diploma_filter_checkbox.setChecked(False)
         self.diploma_filter_checkbox.blockSignals(False)
+        self.competition_filter.blockSignals(True)
+        self.competition_filter.setCurrentIndex(0)
+        self.competition_filter.blockSignals(False)
+        self.competition_paiement_filter.blockSignals(True)
+        self.competition_paiement_filter.setCurrentIndex(0)
+        self.competition_paiement_filter.setEnabled(False)
+        self.competition_paiement_filter.blockSignals(False)
+        self._competition_map_cache = None
         self.selected_tarifs = build_default_tarif_selection(self.members_list)
         self.selected_statuses = set(build_status_list(self.members_list)) - {CANCELLED_STATUS}
         self.update_tarif_button()
@@ -1247,6 +1281,110 @@ class CommunicationsPage(QWidget):
         """Filtrage textuel à la volée."""
         self.on_filters_changed()
 
+    # ------------------------------------------------------------------
+    # Filtre de destination « Compétition » (Nouveau !)
+    # ------------------------------------------------------------------
+    def load_competition_filters(self):
+        """Peuple la liste déroulante des compétitions depuis database_Competition.db."""
+        self.competition_filter.blockSignals(True)
+        self.competition_filter.clear()
+        self.competition_filter.addItem("(Aucun filtre compétition)", 0)
+        try:
+            for comp in CompetitionRepository.list_competitions():
+                date_txt = comp.date_competition[:10] if comp.date_competition else "sans date"
+                self.competition_filter.addItem(f"🏆 {comp.nom} ({date_txt})", comp.id)
+        except Exception as e:
+            print(f"⚠️ [COMMUNICATION] Chargement des compétitions impossible : {e}")
+        self.competition_filter.blockSignals(False)
+
+    def _selected_competition_id(self) -> int:
+        return self.competition_filter.currentData() or 0
+
+    def _competition_participants_map(self, competition_id: int) -> dict:
+        """Index des participants d'une compétition, par n° de licence puis par nom
+        normalisé (clés « L:123456 » / « N:dupont jean »), avec cache invalidé à chaque
+        changement de compétition."""
+        cache = getattr(self, "_competition_map_cache", None)
+        if cache and cache.get("competition_id") == competition_id:
+            return cache["map"]
+        mapping = {}
+        try:
+            for p in CompetitionRepository.list_participants(competition_id, selected_only=False):
+                entry = {
+                    "selectionne": p.selectionne,
+                    "statut_paiement": p.statut_paiement,
+                    "num_licence": p.num_licence,
+                }
+                lic = "".join(ch for ch in str(p.num_licence or "") if ch.isdigit())
+                if lic:
+                    mapping[f"L:{lic}"] = entry
+                nkey = normalize_name(f"{p.nom} {p.prenom}")
+                if nkey:
+                    mapping.setdefault(f"N:{nkey}", entry)
+        except Exception as e:
+            print(f"⚠️ [COMMUNICATION] Lecture des participants impossible : {e}")
+        self._competition_map_cache = {"competition_id": competition_id, "map": mapping}
+        return mapping
+
+    def _member_competition_entry(self, member, mapping: dict):
+        """Retrouve l'entrée participant d'un adhérent : par licence (prioritaire)
+        puis par nom normalisé (fallback pour les non licenciés)."""
+        lic = "".join(ch for ch in str(getattr(member, "licence_ffme", "") or "") if ch.isdigit())
+        if lic and f"L:{lic}" in mapping:
+            return mapping[f"L:{lic}"]
+        nkey = normalize_name(f"{member.user_last_name} {member.user_first_name}")
+        return mapping.get(f"N:{nkey}")
+
+    def on_competition_filter_changed(self):
+        """Active/désactive le filtre de paiement et invalide le cache participants."""
+        self._competition_map_cache = None
+        self.competition_paiement_filter.setEnabled(self._selected_competition_id() > 0)
+        self.on_filters_changed()
+
+    def apply_competition_filter(self, competition_id: int, competition_name: str = ""):
+        """Ouverture depuis la page Compétitions (bouton ✉️) : recharge la liste des
+        épreuves, sélectionne la compétition demandée et coche ses compétiteurs."""
+        self.load_competition_filters()
+        index = self.competition_filter.findData(int(competition_id))
+        if index < 0:
+            QMessageBox.warning(
+                self, "Compétition introuvable",
+                f"L'épreuve « {competition_name or competition_id} » n'existe plus dans la base des compétitions."
+            )
+            return
+        self.competition_filter.setCurrentIndex(index)  # déclenche on_filters_changed
+        # Pré-cocher les compétiteurs sélectionnés de l'épreuve (invitation / relance)
+        mapping = self._competition_participants_map(int(competition_id))
+        checked = 0
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            m = item.data(Qt.UserRole)
+            entry = self._member_competition_entry(m, mapping)
+            if entry and entry["selectionne"]:
+                item.setCheckState(Qt.Checked)
+                item.setHidden(False)
+                checked += 1
+        self.list_widget.blockSignals(False)
+        self.update_selection_count()
+        self.log_area.append(
+            f"🏆 [COMPÉTITION] Filtre actif : {competition_name or competition_id} — "
+            f"{checked} compétiteur(s) pré-coché(s)."
+        )
+
+    def _current_competition_context(self):
+        """Contexte de variables dynamiques ({no_competition}…) si un filtre compétition est actif."""
+        comp_id = self._selected_competition_id()
+        if not comp_id:
+            return None
+        try:
+            comp = CompetitionRepository.get_competition(comp_id)
+        except Exception:
+            comp = None
+        if not comp:
+            return None
+        return {"competition_id": comp.id, "nom": comp.nom, "no_competition": comp.id_ffme}
+
     def focus_on_member(self, member):
         """Préfiltre la liste des destinataires sur l'adhérent choisi dans l'onglet
         Adhérents (bouton ✉️ de la fiche) : la recherche est remplie avec son nom."""
@@ -1324,9 +1462,24 @@ class CommunicationsPage(QWidget):
                 m_date = parse_order_date(m.order_date)
                 match_date = m_date is not None and m_date >= filter_date
 
+            # 6. Filtre « Compétition » (Nouveau !) : participants de l'épreuve choisie,
+            #    éventuellement restreints à un statut de paiement (relances « en attente »).
+            match_competition = True
+            comp_id = self._selected_competition_id()
+            if comp_id:
+                mapping = self._competition_participants_map(comp_id)
+                entry = self._member_competition_entry(m, mapping)
+                match_competition = bool(entry and entry["selectionne"])
+                if match_competition:
+                    sel_lib = self.competition_paiement_filter.currentText()
+                    wanted = LIBELLE_VERS_STATUT_PAIEMENT.get(sel_lib)
+                    if wanted and wanted != PAIEMENT_NON_INVITE:
+                        match_competition = entry["statut_paiement"] == wanted
+
             # Masquer l'item s'il ne valide pas les critères
             item.setHidden(not (match_search and match_tarif and match_status and match_health
-                                and match_diploma and match_sent and match_date))
+                                and match_diploma and match_sent and match_date
+                                and match_competition))
             
         self.list_widget.blockSignals(False)
         self.update_selection_count()
@@ -1530,7 +1683,8 @@ class CommunicationsPage(QWidget):
             whatsapp_template=self.whatsapp_template_input.toPlainText(), # Nouveau !
             add_signature=self.signature_yes_radio.isChecked(),
             sender_email=self.get_current_sender_email(), # Adresse d'expédition (De) choisie (Nouveau !)
-            sender_name=self.get_current_sender_name()    # Nom d'affichage de l'expéditeur (Nouveau !)
+            sender_name=self.get_current_sender_name(),   # Nom d'affichage de l'expéditeur (Nouveau !)
+            competition_context=self._current_competition_context()  # Variables {no_competition}… (Nouveau !)
         )
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)

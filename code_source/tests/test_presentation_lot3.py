@@ -62,9 +62,10 @@ class TestPresentationLot3(unittest.TestCase):
         
         win = MainWindow()
         self.assertIsNotNone(win)
-        # 10 pages (Gmail Contact intégré dans l'onglet Exports)
-        self.assertEqual(win.stacked_widget.count(), 10)
-        self.assertEqual(len(win.nav_buttons), 10)
+        # 11 pages (Gmail Contact intégré dans l'onglet Exports ;
+        # module Compétitions ajouté en v2.1.0)
+        self.assertEqual(win.stacked_widget.count(), 11)
+        self.assertEqual(len(win.nav_buttons), 11)
 
     @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
     def test_main_window_drive_status_email(self):

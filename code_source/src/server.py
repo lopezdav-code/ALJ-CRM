@@ -833,9 +833,21 @@ def get_planning():
 # Google Drive après connexion Google, cache navigateur, filtres par créneaux).
 # Nécessaire pour l'authentification Google OAuth (origine http://localhost:8000).
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 _web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 if os.path.isdir(_web_dir):
     app.mount("/annuaire", StaticFiles(directory=_web_dir, html=True), name="annuaire")
+
+_competitions_page_path = os.path.join(_web_dir, "competitions.html")
+
+@app.get("/competitions", response_class=HTMLResponse)
+def get_competitions_page():
+    """Page web de gestion des compétitions : télécharge database_Competition.db
+    depuis Google Drive au chargement ; les modifications ne sont renvoyées vers
+    le Drive qu'après un clic explicite sur « Sauvegarder en BDD »."""
+    if os.path.exists(_competitions_page_path):
+        return FileResponse(_competitions_page_path, media_type="text/html")
+    return HTMLResponse("<h1>Page web/competitions.html introuvable</h1>", status_code=404)
 
 @app.post("/api/planning")
 def update_planning(planning_data: List[Dict[str, Any]] = Body(...)):
