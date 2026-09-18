@@ -705,11 +705,11 @@ class CompetitionsPage(QWidget):
         items_row.addWidget(self.btn_attach_items)
         layout.addLayout(items_row)
 
-        self.items_table = QTableWidget(0, 9)
+        self.items_table = QTableWidget(0, 10)
         self.items_table.setHorizontalHeaderLabels([
             "Payeur", "Montant", "N° de commande", "N° de licence",
-            "« Compétition concernée »", "Compétition rattachée", "Adhérent rattaché",
-            "Source", "État",
+            "« Compétition concernée »", "Numéro de la compétition",
+            "Compétition rattachée", "Adhérent rattaché", "Source", "État",
         ])
         items_header = self.items_table.horizontalHeader()
         items_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -717,10 +717,11 @@ class CompetitionsPage(QWidget):
         items_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        items_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        items_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         items_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.items_table, 1)
@@ -1128,6 +1129,7 @@ class CompetitionsPage(QWidget):
 
     def _refresh_mirror_table(self):
         """Affiche le miroir HelloAsso + rattachements (compétition, adhérent, source)."""
+        import json
         rows = CompetitionRepository.list_mirror_items()
         table = self.items_table
         table.setRowCount(len(rows))
@@ -1144,16 +1146,32 @@ class CompetitionsPage(QWidget):
             table.setItem(r, 2, QTableWidgetItem(str(it.get("order_id") or "")))
             table.setItem(r, 3, QTableWidgetItem(str(it.get("licence_saisie") or "")))
             table.setItem(r, 4, QTableWidgetItem(str(it.get("competition_saisie") or "")))
-            table.setItem(r, 5, QTableWidgetItem(str(it.get("competition_nom") or "")))
-            table.setItem(r, 6, QTableWidgetItem(
+            
+            # Extraction dynamique du numéro de compétition depuis le JSON brut
+            comp_num = ""
+            raw_json_str = it.get("raw_json")
+            if raw_json_str:
+                try:
+                    raw_data = json.loads(raw_json_str)
+                    for field in raw_data.get("customFields", []):
+                        name = str(field.get("name") or "").strip().lower()
+                        if "numero" in name and "competition" in name:
+                            comp_num = str(field.get("answer") or field.get("value") or "").strip()
+                            break
+                except Exception:
+                    pass
+            table.setItem(r, 5, QTableWidgetItem(comp_num))
+            
+            table.setItem(r, 6, QTableWidgetItem(str(it.get("competition_nom") or "")))
+            table.setItem(r, 7, QTableWidgetItem(
                 f"{it.get('adherent_nom') or ''} {it.get('adherent_prenom') or ''}".strip()))
             source = QTableWidgetItem(str(it.get("source") or "—"))
             if str(it.get("source")) == "manuel":
                 source.setForeground(QColor(COLOR_SUCCESS))
-            table.setItem(r, 7, source)
+            table.setItem(r, 8, source)
             etat = QTableWidgetItem(str(it.get("etat") or "").capitalize())
             etat.setForeground(QColor("#64748B"))
-            table.setItem(r, 8, etat)
+            table.setItem(r, 9, etat)
             table.setRowHeight(r, 26)
         self.btn_attach_items.setText(
             f"🔗  Rattacher les paiements en attente ({nb_attente})"

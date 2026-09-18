@@ -149,6 +149,9 @@ class TestCompetitionNumberCheck(unittest.TestCase):
         self.assertEqual(extract_competition_number(item), "EVT-2026-001")
         item2 = {"customFields": [{"name": "Competition concernee", "value": "EVT-2026-002"}]}
         self.assertEqual(extract_competition_number(item2), "EVT-2026-002")
+        # Test du nouveau champ d'identifiant précis ("Numéro de la compétition") (Nouveau !)
+        item3 = {"customFields": [{"name": "Numéro de la compétition", "answer": "18866"}]}
+        self.assertEqual(extract_competition_number(item3), "18866")
         # Champ absent ou autre champ : chaîne vide
         self.assertEqual(extract_competition_number({"customFields": []}), "")
         self.assertEqual(extract_competition_number({}), "")

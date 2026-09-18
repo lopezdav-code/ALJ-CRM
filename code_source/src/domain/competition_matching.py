@@ -85,12 +85,22 @@ def extract_licence(item: dict) -> str:
 
 
 def extract_competition_number(item: dict) -> str:
-    """Extrait la valeur du champ personnalisé « Compétition concernée » de l'item.
+    """Extrait la valeur du champ personnalisé « Numéro de la compétition » ou « Compétition concernée » de l'item.
 
     Ce champ est saisi par l'adhérent sur le formulaire HelloAsso (n° d'épreuve
     communiqué dans l'e-mail d'invitation via la variable {no_competition}).
     Comme partout dans le projet, la réponse peut résider dans `answer` ou `value`.
     """
+    # 1. On cherche d'abord le champ d'identifiant / numéro précis (ex: "Numéro de la compétition")
+    for field in item.get("customFields") or []:
+        name = normalize_string(field.get("name") or "")
+        if "numero" in name and "competition" in name:
+            val = field.get("answer") or field.get("value") or ""
+            txt = str(val).strip()
+            if txt:
+                return txt
+
+    # 2. Repli sur le champ historique "Compétition concernée"
     for field in item.get("customFields") or []:
         name = normalize_string(field.get("name") or "")
         if "competition" in name and "concerne" in name:
