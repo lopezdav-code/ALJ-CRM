@@ -170,8 +170,8 @@ def apply_template_variables(text, member, competition_context: dict = None) -> 
     - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
     - {num_licence} : licence FFME du destinataire ;
     - variables compétition (contexte du filtre actif) : {no_competition},
-      {name_competition}, {montant_competition} — laissées telles quelles si absentes
-      du contexte (aucun filtre compétition actif).
+      {name_competition}, {montant_competition}, {date_competition} — laissées telles quelles
+      si absentes du contexte (aucun filtre compétition actif).
 
     Fonction partagée par l'envoi réel (SendEmailCampaignWorker) et l'aperçu
     (Communications) pour garantir un rendu identique.
@@ -187,7 +187,7 @@ def apply_template_variables(text, member, competition_context: dict = None) -> 
     out = out.replace("{first_name}", first)
     out = out.replace("{last_name}", last)
     out = out.replace("{num_licence}", str(getattr(member, "licence_ffme", "") or "").strip())
-    for key in ("no_competition", "name_competition", "montant_competition"):
+    for key in ("no_competition", "name_competition", "montant_competition", "date_competition"):
         val = str(ctx.get(key) or "").strip()
         if val:
             out = out.replace("{" + key + "}", val)

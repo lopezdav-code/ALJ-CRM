@@ -234,6 +234,24 @@ class SqliteRepository:
                 INSERT INTO email_templates (name, subject, body, sender_email, sender_name) VALUES (?, ?, ?, ?, ?)
             """, default_templates)
             conn.commit()
+
+        # S'assurer de la présence du modèle d'email "Attestation échéance" (Nouveau !)
+        try:
+            cursor.execute("SELECT COUNT(*) FROM email_templates WHERE name = 'Attestation échéance' OR name = 'Attestation echéance' OR name = 'Attestation echeance'")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT INTO email_templates (name, subject, body, sender_email, sender_name)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    "Attestation échéance",
+                    "Attestation de paiement et d'échéance - Amicale Laïque de Jonage",
+                    "Bonjour {first_name},\n\nNous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage.\n\nSportivement,\nL'équipe ALJ Escalade",
+                    DEFAULT_SENDER_EMAIL,
+                    DEFAULT_SENDER_NAME
+                ))
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ [SQLITE] Impossible de s'assurer de la présence du modèle d'email 'Attestation échéance' : {e}")
         
         # Création de la table de réglages applicatifs (clé/valeur) : texte WhatsApp, etc. (Nouveau !)
         cursor.execute("""

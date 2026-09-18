@@ -165,6 +165,13 @@ class TestMemberEmailShortcut(unittest.TestCase):
         self.assertEqual(fake.nav_calls, [2])
         self.assertEqual(comm_page.search_input.text(), "DUPONT")
 
+    def test_detail_panel_has_attestation_button(self):
+        """Le panneau de détail possède le bouton 'Attestation'."""
+        from presentation.components.member_detail_panel import MemberDetailPanel
+        panel = MemberDetailPanel()
+        self.assertIsNotNone(panel.attestation_btn)
+        self.assertEqual(panel.attestation_btn.text(), "📄 Attestation")
+
 
 if __name__ == "__main__":
     unittest.main()

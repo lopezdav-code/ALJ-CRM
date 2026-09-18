@@ -1,10 +1,134 @@
 import datetime
+import os
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QScrollArea, QWidget, QLineEdit, QMessageBox
+    QScrollArea, QWidget, QLineEdit, QMessageBox, QDialog,
+    QFormLayout, QTextEdit, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor
 from domain.models import Member
+from paths import ROOT_DIR
+
+class AttestationConfirmationDialog(QDialog):
+    """
+    Boîte de dialogue de confirmation d'envoi d'attestation avec prévisualisation.
+    """
+    def __init__(self, sender: str, recipient: str, subject: str, body: str, attachment_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("✉️ Confirmation d'envoi d'attestation")
+        self.setMinimumWidth(550)
+        self.setMinimumHeight(450)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        # Titre / Description
+        desc = QLabel(
+            "Veuillez vérifier les informations de l'e-mail ci-dessous avant de procéder à l'envoi."
+        )
+        desc.setStyleSheet("color: #475569; font-size: 12px; font-weight: bold;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        
+        # Cadre d'en-tête (Expéditeur, Destinataire, Sujet, Pièce jointe)
+        form_frame = QFrame()
+        form_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
+        form = QFormLayout(form_frame)
+        form.setSpacing(8)
+        
+        # Styles de labels
+        lbl_style = "font-weight: bold; color: #475569;"
+        val_style = "color: #1E293B; font-size: 12px;"
+        
+        lbl_sender = QLabel("De :")
+        lbl_sender.setStyleSheet(lbl_style)
+        val_sender = QLabel(sender)
+        val_sender.setStyleSheet(val_style)
+        form.addRow(lbl_sender, val_sender)
+        
+        lbl_recipient = QLabel("À (Payeur) :")
+        lbl_recipient.setStyleSheet(lbl_style)
+        val_recipient = QLabel(recipient)
+        val_recipient.setStyleSheet(val_style)
+        form.addRow(lbl_recipient, val_recipient)
+        
+        lbl_subject = QLabel("Sujet :")
+        lbl_subject.setStyleSheet(lbl_style)
+        val_subject = QLabel(subject)
+        val_subject.setStyleSheet(val_style)
+        form.addRow(lbl_subject, val_subject)
+        
+        lbl_attachment = QLabel("Pièce jointe :")
+        lbl_attachment.setStyleSheet(lbl_style)
+        val_attachment = QLabel(f"📎 {attachment_name}")
+        val_attachment.setStyleSheet("color: #059669; font-weight: bold; font-size: 12px;")
+        form.addRow(lbl_attachment, val_attachment)
+        
+        layout.addWidget(form_frame)
+        
+        # Corps du message
+        lbl_body = QLabel("Aperçu du corps du message :")
+        lbl_body.setStyleSheet("font-weight: bold; color: #475569;")
+        layout.addWidget(lbl_body)
+        
+        self.body_edit = QTextEdit()
+        self.body_edit.setReadOnly(True)
+        self.body_edit.setText(body)
+        self.body_edit.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 8px;
+                background-color: #FFFFFF;
+                color: #1E293B;
+                font-family: Segoe UI, Arial;
+                font-size: 12px;
+            }
+        """)
+        layout.addWidget(self.body_edit)
+        
+        # Boutons OK (Envoyer) et Annuler
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        button_box.button(QDialogButtonBox.Ok).setText("Envoyer 📤")
+        button_box.button(QDialogButtonBox.Cancel).setText("Annuler")
+        
+        button_box.button(QDialogButtonBox.Ok).setStyleSheet("""
+            QPushButton {
+                background-color: #059669;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #047857;
+            }
+        """)
+        button_box.button(QDialogButtonBox.Cancel).setStyleSheet("""
+            QPushButton {
+                background-color: #F1F5F9;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 6px 16px;
+            }
+            QPushButton:hover {
+                background-color: #E2E8F0;
+            }
+        """)
+        
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
 
 class MemberDetailPanel(QFrame):
     """
@@ -88,6 +212,29 @@ class MemberDetailPanel(QFrame):
         """)
         self.email_btn.clicked.connect(self._on_email_requested)
         header_layout.addWidget(self.email_btn)
+
+        # Bouton Attestation : génère l'attestation PDF et l'envoie par e-mail au payeur (Nouveau !)
+        self.attestation_btn = QPushButton("📄 Attestation")
+        self.attestation_btn.setCursor(Qt.PointingHandCursor)
+        self.attestation_btn.setToolTip("Générer l'attestation et l'envoyer directement au payeur par e-mail")
+        self.attestation_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F1F5F9;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #475569;
+            }
+            QPushButton:hover {
+                background-color: #ECFDF5;
+                border-color: #A7F3D0;
+                color: #059669;
+            }
+        """)
+        self.attestation_btn.clicked.connect(self._on_send_attestation_clicked)
+        header_layout.addWidget(self.attestation_btn)
 
         close_btn = QPushButton("✖")
         close_btn.setCursor(Qt.PointingHandCursor)
@@ -275,6 +422,170 @@ class MemberDetailPanel(QFrame):
         avec la recherche filtrée sur l'adhérent courant."""
         if self.current_member is not None:
             self.email_requested.emit(self.current_member)
+
+    def _on_send_attestation_clicked(self):
+        """Bouton Attestation : génère l'attestation PDF et l'envoie par e-mail au payeur."""
+        member = self.current_member
+        if not member:
+            return
+
+        payer_email = (member.payer_email or "").strip()
+        if not payer_email:
+            QMessageBox.warning(
+                self,
+                "E-mail manquant",
+                "L'adresse e-mail du payeur n'est pas renseignée pour cet adhérent.\n"
+                "Impossible d'envoyer l'attestation."
+            )
+            return
+
+        # 1. Charger les modèles d'e-mails pour trouver "Attestation échéance"
+        from infrastructure.sqlite_repository import SqliteRepository
+        templates = SqliteRepository.get_email_templates()
+        template = None
+        for t in templates:
+            if t["name"].strip().lower() in ("attestation échéance", "attestation echéance", "attestation echeance"):
+                template = t
+                break
+
+        if not template:
+            # Si le modèle n'existe pas, on utilise les valeurs par défaut
+            template = {
+                "name": "Attestation échéance",
+                "subject": "Attestation de paiement et d'échéance - Amicale Laïque de Jonage",
+                "body": "Bonjour {first_name},\n\nNous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage.\n\nSportivement,\nL'équipe ALJ Escalade",
+                "sender_email": "inscription@alj-escalade.fr",
+                "sender_name": "Amicale Laïque Jonage - Inscriptions"
+            }
+
+        # 2. Remplacement des variables {Prénom}, {Nom}, {first_name}, {last_name}, {num_licence}
+        from presentation.workers import apply_template_variables
+        rendered_subject = apply_template_variables(template["subject"], member)
+        rendered_body = apply_template_variables(template["body"], member)
+
+        # Spécifier l'expéditeur demandé par la consigne : inscription@alj-escalade.fr
+        sender_email = "inscription@alj-escalade.fr"
+        sender_name = template.get("sender_name") or "Amicale Laïque Jonage - Inscriptions"
+
+        # Nom de fichier PDF généré
+        from attestation_generator import get_safe_filename
+        filename_docx = get_safe_filename(
+            member.user_last_name,
+            member.user_first_name,
+            member.order_ref
+        )
+        filename_pdf = filename_docx.replace(".docx", ".pdf")
+
+        # 3. Ouvrir la pop-up de confirmation avec résumé et aperçu de l'e-mail
+        dialog = AttestationConfirmationDialog(
+            sender=f"{sender_name} <{sender_email}>",
+            recipient=payer_email,
+            subject=rendered_subject,
+            body=rendered_body,
+            attachment_name=filename_pdf,
+            parent=self
+        )
+
+        if dialog.exec() == QDialog.Accepted:
+            # 4. Générer l'attestation PDF
+            # Construire le dictionnaire de membre attendu par generate_all_attestations
+            member_dict = {
+                "last_name": member.user_last_name,
+                "first_name": member.user_first_name,
+                "payer_last_name": member.payer_last_name,
+                "payer_first_name": member.payer_first_name,
+                "amount": member.amount,
+                "status": member.status,
+                "order_ref": member.order_ref,
+            }
+
+            from presentation.pdf_render_service import get_pdf_render_service
+            service = get_pdf_render_service()
+
+            # Afficher un curseur d'attente
+            self.setCursor(QCursor(Qt.WaitCursor))
+            try:
+                render_result = service.render_attestations([member_dict], output_format="pdf")
+                if not render_result["success"]:
+                    self.setCursor(Qt.ArrowCursor)
+                    QMessageBox.critical(
+                        self,
+                        "Erreur de génération",
+                        f"Échec de la génération de l'attestation PDF :\n{render_result['error']}"
+                    )
+                    return
+
+                # Chemin complet de l'attestation générée
+                from paths import ROOT_DIR
+                import os
+                attestation_path = os.path.join(ROOT_DIR, "exports", "attestation", filename_pdf)
+
+                if not os.path.exists(attestation_path):
+                    self.setCursor(Qt.ArrowCursor)
+                    QMessageBox.critical(
+                        self,
+                        "Fichier introuvable",
+                        f"L'attestation a été générée mais le fichier est introuvable à l'emplacement attendu :\n{attestation_path}"
+                    )
+                    return
+
+                # 5. Envoyer l'e-mail
+                from infrastructure.email_repository import EmailRepository
+                from email_html import build_email_html, build_signature_plain, get_inline_images
+                
+                # Construire le corps HTML de l'e-mail (on n'ajoute pas la signature au corps si le modèle est déjà personnalisé)
+                html_body = build_email_html(rendered_body, add_signature=True, image_src_mode="cid")
+                plain_body = rendered_body + "\n\n" + build_signature_plain()
+                inline_imgs = get_inline_images()
+
+                success = EmailRepository.send_email(
+                    to_email=payer_email,
+                    subject=rendered_subject,
+                    body=plain_body,
+                    attachment_path=attestation_path,
+                    html_body=html_body,
+                    inline_images=inline_imgs,
+                    from_email=sender_email,
+                    from_name=sender_name
+                )
+
+                if success:
+                    # Enregistrer la date d'envoi dans la base
+                    now_str = datetime.datetime.now().strftime("%d/%m/%Y")
+                    SqliteRepository.update_email_sent_date(
+                        order_ref=member.order_ref,
+                        last_name=member.user_last_name,
+                        first_name=member.user_first_name,
+                        date_str=now_str
+                    )
+                    
+                    # Mettre à jour l'objet local pour refléter l'envoi dans l'IHM
+                    member.email_sent_date = now_str
+                    
+                    self.setCursor(Qt.ArrowCursor)
+                    QMessageBox.information(
+                        self,
+                        "Envoi réussi",
+                        f"L'attestation a été générée et envoyée avec succès à {payer_email} !"
+                    )
+                    # Émettre le signal pour actualiser le tableau
+                    self.member_updated.emit()
+                else:
+                    self.setCursor(Qt.ArrowCursor)
+                    QMessageBox.critical(
+                        self,
+                        "Échec de l'envoi",
+                        "Une erreur est survenue lors de l'envoi de l'e-mail. Veuillez vérifier votre configuration d'envoi."
+                    )
+            except Exception as e:
+                self.setCursor(Qt.ArrowCursor)
+                QMessageBox.critical(
+                    self,
+                    "Erreur inattendue",
+                    f"Une erreur inattendue est survenue : {e}"
+                )
+            finally:
+                self.setCursor(Qt.ArrowCursor)
 
     def render_member_details(self):
         """Dessine dynamiquement le détail en consultation ou édition."""

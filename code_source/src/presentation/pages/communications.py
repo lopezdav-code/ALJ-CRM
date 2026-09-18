@@ -1445,9 +1445,15 @@ class CommunicationsPage(QWidget):
             f"{checked} compétiteur(s) pré-coché(s)."
         )
 
+        # Sélectionner le modèle de mail "Compétition - 1er Inscription" si disponible
+        tpl_idx = self.template_selector.findText("Compétition - 1er Inscription")
+        if tpl_idx >= 0:
+            self.template_selector.setCurrentIndex(tpl_idx)
+            self.log_area.append("✉️ [MODÈLE] Modèle « Compétition - 1er Inscription » sélectionné automatiquement.")
+
     def _current_competition_context(self):
         """Contexte de variables dynamiques du filtre compétition actif :
-        {no_competition}, {name_competition}, {montant_competition}."""
+        {no_competition}, {name_competition}, {montant_competition}, {date_competition}."""
         comp_id = self._selected_competition_id()
         if not comp_id:
             return None
@@ -1458,12 +1464,23 @@ class CommunicationsPage(QWidget):
         if not comp:
             return None
         from domain.utils import format_montant
+        
+        date_raw = str(comp.date_competition or "").strip()
+        date_formatted = ""
+        if date_raw:
+            parts = date_raw.split("-")
+            if len(parts) == 3:
+                date_formatted = f"{parts[2]}/{parts[1]}/{parts[0]}"
+            else:
+                date_formatted = date_raw
+
         return {
             "competition_id": comp.id,
             "nom": comp.nom,
             "no_competition": comp.id_ffme,
             "name_competition": comp.nom,
             "montant_competition": format_montant(comp.prix),
+            "date_competition": date_formatted,
         }
 
     def focus_on_member(self, member):

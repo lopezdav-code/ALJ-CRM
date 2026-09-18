@@ -69,6 +69,15 @@ class TestApplyTemplateVariables(unittest.TestCase):
         self.assertEqual(apply_template_variables(None, _member(), {}), "")
         self.assertEqual(apply_template_variables("", _member(), None), "")
 
+    def test_date_competition_replaced(self):
+        ctx = {
+            "no_competition": "18846",
+            "name_competition": "Coupe du Rhône 2027",
+            "date_competition": "15/10/2026"
+        }
+        out = apply_template_variables("Date : {date_competition}", _member(), ctx)
+        self.assertEqual(out, "Date : 15/10/2026")
+
 
 if __name__ == "__main__":
     unittest.main()
