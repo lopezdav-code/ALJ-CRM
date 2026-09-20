@@ -21,6 +21,18 @@ import sys
 import tempfile
 import zipfile
 
+# Configuration de l'encodage standard en UTF-8 pour éviter les plantages d'affichage d'émojis sur Windows/CI
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 DEFAULT_REPO = "lopezdav-code/ALJ-CRM"
 
 # Dossiers exclus du paquet de sources (tests/outils de dev/artefacts locaux)
