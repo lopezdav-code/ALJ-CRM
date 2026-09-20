@@ -53,8 +53,14 @@ class SecretStore:
                 pass
         
         # Enregistrement dans le .env pour assurer la persistance et la compatibilité historique
+        # Racine du pack portable si un .env y vit déjà (survit aux mises à jour qui
+        # ne remplacent que app/), sinon emplacement historique du code.
         try:
-            env_dir = ROOT_DIR if getattr(sys, 'frozen', False) else CODE_ROOT
+            root_env = os.path.join(ROOT_DIR, ".env")
+            if getattr(sys, 'frozen', False) or os.path.exists(root_env):
+                env_dir = ROOT_DIR
+            else:
+                env_dir = CODE_ROOT
             env_path = os.path.join(env_dir, ".env")
             lines = []
             if os.path.exists(env_path):

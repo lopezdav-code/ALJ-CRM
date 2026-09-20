@@ -83,4 +83,6 @@ jobs:
         path: |
           code_source/dist_release/*.zip
           code_source/dist_release/SHA256SUMS.txt
+          code_source/dist_release/Installateur-ALJ.bat
+          code_source/dist_release/Installateur-ALJ.ps1
         if-no-files-found: error

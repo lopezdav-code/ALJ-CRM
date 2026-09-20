@@ -199,6 +199,15 @@ def assemble(code_source_dir: str, out_dir: str, cache_dir: str,
         write_sha256_sums(zips, sums_path)
         print(f"✅ [PORTABLE] {sums_path}")
 
+    # 6. Installateur (copié à côté du zip : il extrait et configure le .env local)
+    installer_src = os.path.join(code_source_dir, "installer")
+    if os.path.isdir(installer_src):
+        for name in os.listdir(installer_src):
+            if name.startswith("Installateur-ALJ."):
+                shutil.copy2(os.path.join(installer_src, name),
+                             os.path.join(out_dir_abs, name))
+        print("✅ [PORTABLE] Installateur copié dans", out_dir_abs)
+
     shutil.rmtree(build_root, ignore_errors=True)
     return zip_path
 
