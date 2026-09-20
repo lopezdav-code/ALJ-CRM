@@ -16,7 +16,12 @@ from paths import CODE_ROOT
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository, DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME
 from infrastructure.competition_repository import CompetitionRepository
-from domain.competition_models import LIBELLES_STATUT_PAIEMENT, LIBELLE_VERS_STATUT_PAIEMENT, PAIEMENT_NON_INVITE
+from domain.competition_models import (
+    LIBELLES_STATUT_PAIEMENT,
+    LIBELLE_VERS_STATUT_PAIEMENT,
+    PAIEMENT_EN_ATTENTE,
+    PAIEMENT_NON_INVITE,
+)
 from domain.utils import normalize_name
 from infrastructure.schema_v2 import normalize_status
 from presentation.workers import SendEmailCampaignWorker
@@ -1414,9 +1419,14 @@ class CommunicationsPage(QWidget):
         self.competition_paiement_filter.setEnabled(self._selected_competition_id() > 0)
         self.on_filters_changed()
 
-    def apply_competition_filter(self, competition_id: int, competition_name: str = ""):
-        """Ouverture depuis la page Compétitions (bouton ✉️) : recharge la liste des
-        épreuves, sélectionne la compétition demandée et coche ses compétiteurs."""
+    def apply_competition_filter(self, competition_id: int, competition_name: str = "",
+                                 relance: bool = False):
+        """Ouverture depuis la page Compétitions (bouton ✉️ ou 🔔 relance) : recharge la
+        liste des épreuves, sélectionne la compétition demandée et coche ses compétiteurs.
+
+        - mode invitation : coche les compétiteurs sélectionnés de l'épreuve ;
+        - mode relance : ne coche que ceux dont le paiement est « En attente » et
+          sélectionne le modèle « Compétition - relance » si disponible."""
         self.load_competition_filters()
         index = self.competition_filter.findData(int(competition_id))
         if index < 0:
@@ -1435,21 +1445,35 @@ class CommunicationsPage(QWidget):
             m = item.data(Qt.UserRole)
             entry = self._member_competition_entry(m, mapping)
             if entry and entry["selectionne"]:
+                if relance and entry.get("statut_paiement") != PAIEMENT_EN_ATTENTE:
+                    continue
                 item.setCheckState(Qt.Checked)
                 item.setHidden(False)
                 checked += 1
         self.list_widget.blockSignals(False)
         self.update_selection_count()
-        self.log_area.append(
-            f"🏆 [COMPÉTITION] Filtre actif : {competition_name or competition_id} — "
-            f"{checked} compétiteur(s) pré-coché(s)."
-        )
+        if relance:
+            self.log_area.append(
+                f"🔔 [COMPÉTITION] Relance : {competition_name or competition_id} — "
+                f"{checked} compétiteur(s) « En attente » de paiement pré-coché(s)."
+            )
+        else:
+            self.log_area.append(
+                f"🏆 [COMPÉTITION] Filtre actif : {competition_name or competition_id} — "
+                f"{checked} compétiteur(s) pré-coché(s)."
+            )
 
-        # Sélectionner le modèle de mail "Compétition - 1er Inscription" si disponible
-        tpl_idx = self.template_selector.findText("Compétition - 1er Inscription")
+        # Sélectionner le modèle de mail dédié au mode (si disponible)
+        nom_modele = "Compétition - relance" if relance else "Compétition - 1er Inscription"
+        tpl_idx = self.template_selector.findText(nom_modele)
         if tpl_idx >= 0:
             self.template_selector.setCurrentIndex(tpl_idx)
-            self.log_area.append("✉️ [MODÈLE] Modèle « Compétition - 1er Inscription » sélectionné automatiquement.")
+            self.log_area.append(f"✉️ [MODÈLE] Modèle « {nom_modele} » sélectionné automatiquement.")
+        elif relance:
+            self.log_area.append(
+                "✉️ [MODÈLE] Modèle « Compétition - relance » introuvable : "
+                "sélectionnez manuellement le modèle souhaité."
+            )
 
     def _current_competition_context(self):
         """Contexte de variables dynamiques du filtre compétition actif :

@@ -213,6 +213,11 @@ class MainWindow(QMainWindow):
         # filtrée sur les compétiteurs sélectionnés de l'épreuve (Nouveau !)
         self.competitions_page = self.stacked_widget.widget(6)
         self.competitions_page.email_requested.connect(self.open_communications_for_competition)
+        # Raccourci « relance » : bouton 🔔 de la page Compétitions vers Communication
+        # filtrée sur les compétiteurs dont le paiement est « En attente »
+        self.competitions_page.relance_requested.connect(
+            lambda cid, nom: self.open_communications_for_competition(cid, nom, relance=True)
+        )
 
 
         # Pied de page unifié pour tout le site (Nouveau !)
@@ -284,12 +289,14 @@ class MainWindow(QMainWindow):
         self.nav_buttons[2].setChecked(True)
         self.on_nav_changed(2)
 
-    def open_communications_for_competition(self, competition_id: int, competition_name: str = ""):
-        """Bouton ✉️ de la page Compétitions : bascule sur Communication avec le filtre
-        de destination « Compétition » activé et les compétiteurs pré-cochés."""
+    def open_communications_for_competition(self, competition_id: int, competition_name: str = "",
+                                            relance: bool = False):
+        """Bouton ✉️ (ou 🔔 relance) de la page Compétitions : bascule sur Communication
+        avec le filtre de destination « Compétition » activé et les compétiteurs pré-cochés."""
         communications_page = self.stacked_widget.widget(2)
         if hasattr(communications_page, "apply_competition_filter"):
-            communications_page.apply_competition_filter(competition_id, competition_name)
+            communications_page.apply_competition_filter(competition_id, competition_name,
+                                                         relance=relance)
         self.nav_buttons[2].setChecked(True)
         self.on_nav_changed(2)
 

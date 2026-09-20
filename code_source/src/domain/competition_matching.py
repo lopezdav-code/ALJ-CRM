@@ -84,12 +84,17 @@ def extract_licence(item: dict) -> str:
     return ""
 
 
-def extract_competition_number(item: dict) -> str:
-    """Extrait la valeur du champ personnalisé « Numéro de la compétition » ou « Compétition concernée » de l'item.
+def extract_competition_number(item: dict, fallback: bool = True) -> str:
+    """Extrait la valeur du champ personnalisé « Numéro de la compétition » de l'item.
 
     Ce champ est saisi par l'adhérent sur le formulaire HelloAsso (n° d'épreuve
     communiqué dans l'e-mail d'invitation via la variable {no_competition}).
     Comme partout dans le projet, la réponse peut résider dans `answer` ou `value`.
+
+    - fallback=True (défaut) : si le champ n° est absent/vide, repli sur la valeur
+      de « Compétition concernée » (utile pour le rattachement) ;
+    - fallback=False : retourne uniquement la valeur du champ n° (affichage fidèle
+      à HelloAsso : rien n'est affiché si l'adhérent n'a rien saisi).
     """
     # 1. On cherche d'abord le champ d'identifiant / numéro précis (ex: "Numéro de la compétition")
     for field in item.get("customFields") or []:
@@ -101,6 +106,25 @@ def extract_competition_number(item: dict) -> str:
                 return txt
 
     # 2. Repli sur le champ historique "Compétition concernée"
+    if not fallback:
+        return ""
+    for field in item.get("customFields") or []:
+        name = normalize_string(field.get("name") or "")
+        if "competition" in name and "concerne" in name:
+            val = field.get("answer") or field.get("value") or ""
+            txt = str(val).strip()
+            if txt:
+                return txt
+    return ""
+
+
+def extract_competition_name(item: dict) -> str:
+    """Extrait la valeur du champ personnalisé « Compétition concernée » de l'item.
+
+    Champ texte libre où l'adhérent décrit la compétition visée (ex : « Coupe
+    régionale de bloc Ambérieu »). Comme partout dans le projet, la réponse peut
+    résider dans `answer` ou `value`.
+    """
     for field in item.get("customFields") or []:
         name = normalize_string(field.get("name") or "")
         if "competition" in name and "concerne" in name:

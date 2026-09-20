@@ -18,6 +18,7 @@ from domain.competition_matching import (
     parse_campaign_identifier,
     match_items_to_participants,
     extract_competition_number,
+    extract_competition_name,
     competition_number_ok,
     summarize_items,
 )
@@ -157,6 +158,35 @@ class TestCompetitionNumberCheck(unittest.TestCase):
         self.assertEqual(extract_competition_number({}), "")
         self.assertEqual(
             extract_competition_number({"customFields": [{"name": "Numéro de Licence FFME", "answer": "123"}]}),
+            ""
+        )
+        # Mode strict (fallback=False) : uniquement le champ n°, pas de repli sur
+        # « Compétition concernée » (affichage fidèle à HelloAsso)
+        item_noseul = {"customFields": [{"name": "Compétition concernée", "answer": "Championnat départemental de Bloc à Jonage"}]}
+        self.assertEqual(extract_competition_number(item_noseul), "Championnat départemental de Bloc à Jonage")
+        self.assertEqual(extract_competition_number(item_noseul, fallback=False), "")
+
+    def test_extract_competition_name(self):
+        # Champ réel du formulaire HelloAsso (avec accents) : doit être trouvé
+        item = {"customFields": [{"name": "Compétition concernée", "answer": "Coupe régionale de bloc Ambérieu"}]}
+        self.assertEqual(extract_competition_name(item), "Coupe régionale de bloc Ambérieu")
+        item2 = {"customFields": [{"name": "Competition concernee", "value": "Coupe du Rhône de bloc"}]}
+        self.assertEqual(extract_competition_name(item2), "Coupe du Rhône de bloc")
+        # Le champ « Numéro de la compétition » n'est PAS le nom de la compétition
+        item3 = {"customFields": [{"name": "Numéro de la compétition", "answer": "18866"}]}
+        self.assertEqual(extract_competition_name(item3), "")
+        # Les deux champs ensemble : chacun son extracteur
+        item4 = {"customFields": [
+            {"name": "Compétition concernée", "answer": "Coupe régionale de bloc Ambérieu"},
+            {"name": "Numéro de la compétition", "answer": "18866"},
+        ]}
+        self.assertEqual(extract_competition_name(item4), "Coupe régionale de bloc Ambérieu")
+        self.assertEqual(extract_competition_number(item4), "18866")
+        # Champ absent ou autre champ : chaîne vide
+        self.assertEqual(extract_competition_name({"customFields": []}), "")
+        self.assertEqual(extract_competition_name({}), "")
+        self.assertEqual(
+            extract_competition_name({"customFields": [{"name": "Numéro de Licence FFME", "answer": "123"}]}),
             ""
         )
 

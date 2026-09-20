@@ -33,6 +33,7 @@ from domain.competition_models import (
     LIBELLES_STATUT_COMPETITION,
     LIBELLES_STATUT_PAIEMENT,
     LIBELLE_VERS_STATUT_PAIEMENT,
+    PAIEMENT_EN_ATTENTE,
     PAIEMENT_NON_INVITE,
 )
 from infrastructure.competition_repository import CompetitionRepository
@@ -514,6 +515,9 @@ class CompetitionsPage(QWidget):
 
     # (competition_id, nom) : demande d'ouverture de Communication ciblée
     email_requested = Signal(int, str)
+    # (competition_id, nom) : demande d'ouverture de Communication ciblée « relance »
+    # (uniquement les compétiteurs avec un paiement « En attente »)
+    relance_requested = Signal(int, str)
 
     def __init__(self):
         super().__init__()
@@ -782,6 +786,16 @@ class CompetitionsPage(QWidget):
         self.btn_invite.setStyleSheet(self._btn_style("#7C3AED"))
         self.btn_invite.clicked.connect(self.on_prepare_invitations)
         btns.addWidget(self.btn_invite)
+
+        self.btn_relance = QPushButton("🔔  Relance")
+        self.btn_relance.setToolTip(
+            "Ouvre l'onglet Communication sur les compétiteurs sélectionnés dont "
+            "le paiement est « En attente » (modèle « Compétition - relance »)."
+        )
+        self.btn_relance.setCursor(Qt.PointingHandCursor)
+        self.btn_relance.setStyleSheet(self._btn_style("#D97706"))
+        self.btn_relance.clicked.connect(self.on_prepare_relance)
+        btns.addWidget(self.btn_relance)
         btns.addStretch()
 
         self.participants_count_lbl = QLabel("0 compétiteur sélectionné")
@@ -1361,6 +1375,24 @@ class CompetitionsPage(QWidget):
             return
         self.email_requested.emit(self.current_competition.id, self.current_competition.nom)
 
+    def on_prepare_relance(self):
+        """Bouton 🔔 Relance : comme « Préparer les invitations », mais ne pré-coche
+        que les compétiteurs sélectionnés dont le paiement est « En attente »."""
+        if not self.current_competition:
+            return
+        en_attente = [
+            p for p in CompetitionRepository.list_participants(self.current_competition.id)
+            if p.selectionne and p.statut_paiement == PAIEMENT_EN_ATTENTE
+        ]
+        if not en_attente:
+            QMessageBox.information(
+                self, "Aucune relance nécessaire",
+                "Aucun compétiteur sélectionné n'a un paiement « En attente » "
+                "pour cette épreuve."
+            )
+            return
+        self.relance_requested.emit(self.current_competition.id, self.current_competition.nom)
+
     # ------------------------------------------------------------------
     # HelloAsso
     # ------------------------------------------------------------------
@@ -1409,19 +1441,17 @@ class CompetitionsPage(QWidget):
             table.setItem(r, 4, QTableWidgetItem(str(it.get("order_id") or "")))
             table.setItem(r, 5, QTableWidgetItem(str(it.get("licence_saisie") or "")))
             
-            # Extraction dynamique du numéro et du nom de compétition depuis le JSON brut
+            # Extraction dynamique du nom (« Compétition concernée ») et du numéro
+            # (« Numéro de la compétition ») depuis le JSON brut, via les helpers
+            # du domaine (comparaison insensible aux accents / à la casse).
             comp_num = ""
             comp_name_val = ""
             raw_json_str = it.get("raw_json")
             if raw_json_str:
                 try:
                     raw_data = json.loads(raw_json_str)
-                    for field in raw_data.get("customFields", []):
-                        name = str(field.get("name") or "").strip().lower()
-                        if ("numero" in name or "n°" in name or "concerne" in name) and "competition" in name:
-                            comp_num = str(field.get("answer") or field.get("value") or "").strip()
-                        elif "nom" in name and "competition" in name:
-                            comp_name_val = str(field.get("answer") or field.get("value") or "").strip()
+                    comp_num = competition_matching.extract_competition_number(raw_data, fallback=False)
+                    comp_name_val = competition_matching.extract_competition_name(raw_data)
                 except Exception:
                     pass
             
@@ -1496,9 +1526,11 @@ class CompetitionsPage(QWidget):
             "payer": f"{r['payer_nom']} {r['payer_prenom']}".strip(),
             "montant": r["montant"],
             "order_ref": r["order_id"],
+            "licence": str(r["licence_saisie"] or ""),
             "valeur_champ": r["competition_saisie"],
             "adherent_id": r["adherent_id"],
-            "competition_id": r["competition_id"]
+            "competition_id": r["competition_id"],
+            "commentaire": str(r["commentaire"] or ""),
         }
         
         self._run_manual_corrections([review_item], current_competition=None)
