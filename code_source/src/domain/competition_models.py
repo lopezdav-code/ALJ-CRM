@@ -46,6 +46,9 @@ class Competition:
     helloasso_ref: str = ""          # slug ou URL de la campagne HelloAsso dédiée
     created_at: str = ""
     updated_at: str = ""
+    coach1_id: int = None
+    coach2_id: int = None
+    coach3_id: int = None
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +61,9 @@ class Competition:
             "helloasso_ref": self.helloasso_ref,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "coach1_id": self.coach1_id,
+            "coach2_id": self.coach2_id,
+            "coach3_id": self.coach3_id,
         }
 
     @classmethod
@@ -72,6 +78,9 @@ class Competition:
             helloasso_ref=str(row.get("helloasso_ref") or ""),
             created_at=str(row.get("created_at") or ""),
             updated_at=str(row.get("updated_at") or ""),
+            coach1_id=row.get("coach1_id"),
+            coach2_id=row.get("coach2_id"),
+            coach3_id=row.get("coach3_id"),
         )
 
 

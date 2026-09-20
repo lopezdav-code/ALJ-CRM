@@ -154,12 +154,33 @@
           <label class="fld">Tarif d'inscription (€)</label>
           <input type="number" id="f-prix" min="0" step="0.5" placeholder="10">
         </div>
-        <div>
+        <div style="display: none;">
           <label class="fld">Statut</label>
           <select id="f-statut">
             <option value="en_preparation">En préparation</option>
             <option value="en_cours">En cours</option>
             <option value="close">Clos</option>
+          </select>
+        </div>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top:2px">
+        <div>
+          <label class="fld">Coach 1</label>
+          <select id="f-coach1">
+            <option value="">Aucun</option>
+          </select>
+        </div>
+        <div>
+          <label class="fld">Coach 2</label>
+          <select id="f-coach2">
+            <option value="">Aucun</option>
+          </select>
+        </div>
+        <div>
+          <label class="fld">Coach 3</label>
+          <select id="f-coach3">
+            <option value="">Aucun</option>
           </select>
         </div>
       </div>
@@ -198,6 +219,48 @@
     </div>
   </section>
 
+  <!-- ================= Gestion des Coachs ================= -->
+  <section class="page" id="page-coaches">
+    <div class="card">
+      <div class="m-name" id="coach-form-title">➕ Nouveau coach</div>
+      <label class="fld">Nom du coach *</label>
+      <input type="text" id="f-coach-nom" placeholder="Ex : John DOE">
+      
+      <div class="btn-row" id="f-coach-btns" style="display:none">
+        <button class="btn btn-primary" id="f-coach-update">💾 Mettre à jour</button>
+        <button class="btn btn-danger" id="f-coach-delete">🗑 Supprimer</button>
+      </div>
+      <div class="btn-row" id="f-coach-btns-new">
+        <button class="btn btn-primary" id="f-coach-create">➕ Ajouter le coach</button>
+      </div>
+    </div>
+
+    <div class="section-h">🏃 Coachs enregistrés</div>
+    <div class="count-line" id="coaches-count">—</div>
+    <div id="coaches-list"></div>
+    
+    <div id="coach-competitions-section" style="display:none; margin-top: 15px;">
+      <div class="section-h" id="coach-competitions-h">🏆 Épreuves pour ce coach</div>
+      <div id="coach-competitions-list"></div>
+    </div>
+  </section>
+
+  <!-- ================= Balance des paiements ================= -->
+  <section class="page" id="page-balance">
+    <div class="card">
+      <div class="m-name">💶 Balance Financière des Athlètes</div>
+      <p class="m-sub">Suivi des inscriptions et règlements par compétiteur pour la saison.</p>
+      
+      <div style="margin-top: 10px;">
+        <input type="search" id="bal-search" placeholder="🔍 Rechercher un athlète (ex: Adele)…" style="width: 100%; border: 1px solid #CBD5E1; border-radius: 6px; padding: 8px;">
+      </div>
+    </div>
+
+    <div class="section-h">💰 États des soldes</div>
+    <div class="count-line" id="bal-count">—</div>
+    <div id="bal-list"></div>
+  </section>
+
   <!-- ================= Bilan de saison (application de bureau uniquement) ================= -->
   <!-- HelloAsso (campagne annuelle, miroir) et Bilan restent gérés dans l'application de bureau -->
 </main>
@@ -205,6 +268,8 @@
 <nav>
   <button data-page="comps" class="active">🏆<br>Compétitions</button>
   <button data-page="participants">👥<br>Compétiteurs</button>
+  <button data-page="coaches">🏃<br>Coachs</button>
+  <button data-page="balance">💶<br>Balance</button>
 </nav>
 
 <div id="toast"></div>
@@ -256,6 +321,9 @@ function showPage(name) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById("page-" + name).classList.add("active");
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === name));
+  if (name === "balance") {
+    renderBalancePage();
+  }
 }
 
 /* ===================== Cache IndexedDB (navigateur) ===================== */
@@ -348,6 +416,36 @@ CREATE TABLE IF NOT EXISTS item_links (
 function loadDbFromBytes(bytes) {
   db = new SQL.Database(new Uint8Array(bytes));
   db.run(SCHEMA_SQL);   // tolère un fichier plus ancien / partiel
+  
+  // Table des coachs
+  db.run(`
+    CREATE TABLE IF NOT EXISTS coaches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nom TEXT NOT NULL UNIQUE
+    );
+  `);
+  
+  // Initialisation avec les 3 coachs par défaut si vide
+  let coachCount = 0;
+  try {
+    const rows = q("SELECT COUNT(*) AS count FROM coaches");
+    if (rows && rows.length > 0) coachCount = rows[0].count;
+  } catch(e) {}
+  
+  if (coachCount === 0) {
+    db.run("INSERT INTO coaches (nom) VALUES ('Adrien BERGER')");
+    db.run("INSERT INTO coaches (nom) VALUES ('Stephane LORIDANT')");
+    db.run("INSERT INTO coaches (nom) VALUES ('Clement DE LIMA FERREIRA')");
+  }
+
+  // Migration : colonnes coach dans la table competitions (bases existantes)
+  try {
+    const cols = q("PRAGMA table_info(competitions)").map(r => r.name);
+    if (!cols.includes("coach1_id")) db.run("ALTER TABLE competitions ADD COLUMN coach1_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
+    if (!cols.includes("coach2_id")) db.run("ALTER TABLE competitions ADD COLUMN coach2_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
+    if (!cols.includes("coach3_id")) db.run("ALTER TABLE competitions ADD COLUMN coach3_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
+  } catch(e) { console.warn("Migration colonnes coaches :", e); }
+
   // Migration légère : colonne commande_helloasso (bases créées avant la v2.1.6)
   try {
     const cols = q("PRAGMA table_info(participants)").map(r => r.name);
@@ -537,6 +635,23 @@ const STATUT_LABELS = { en_preparation: "En préparation", en_cours: "En cours",
 const STATUT_COLORS = { en_preparation: "#64748B", en_cours: "#D97706", close: "#16A34A" };
 const PAIEMENT_LABELS = { non_invite: "Non invité", en_attente: "En attente", paye: "Payé" };
 
+function getCoachesMap() {
+  const coaches = q("SELECT * FROM coaches");
+  const map = {};
+  for (const c of coaches) {
+    map[c.id] = c.nom;
+  }
+  return map;
+}
+
+function populateCoachDropdowns() {
+  const coaches = q("SELECT * FROM coaches ORDER BY nom COLLATE NOCASE");
+  const options = '<option value="">Aucun</option>' + coaches.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join("");
+  $("#f-coach1").innerHTML = options;
+  $("#f-coach2").innerHTML = options;
+  $("#f-coach3").innerHTML = options;
+}
+
 function listCompetitions() {
   return q("SELECT * FROM competitions ORDER BY date_competition DESC, id DESC");
 }
@@ -546,20 +661,28 @@ function currentCompId() {
 }
 function renderComps() {
   const comps = listCompetitions();
+  const coachesMap = getCoachesMap();
   $("#comps-count").textContent = `${comps.length} compétition${comps.length > 1 ? "s" : ""}`;
-  $("#comps-list").innerHTML = comps.map(c => `
+  $("#comps-list").innerHTML = comps.map(c => {
+    const compCoaches = [c.coach1_id, c.coach2_id, c.coach3_id]
+      .map(id => coachesMap[id])
+      .filter(Boolean);
+    const coachesText = compCoaches.length > 0 ? `🏃 Coachs : ${compCoaches.join(", ")}` : "🏃 Aucun coach";
+    return `
     <div class="card" onclick="openEdit(${c.id})">
       <div class="row-flex">
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(c.nom)}</div>
           <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(c.date_competition || "sans date")} · 💶 ${Number(c.prix).toFixed(2)} €</div>
+          <div class="m-sub" style="margin-top:2px; color: #475569;">${esc(coachesText)}</div>
         </div>
-        <span class="badge" style="background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
+        <span class="badge" style="display: none; background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
       </div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants(${c.id})">👁 Voir détail — compétiteurs</button>
       </div>
-    </div>`).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
+    </div>`;
+  }).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
 
   // Sélecteur de l'onglet Compétiteurs + combo du formulaire d'édition
   const sel = $("#p-comp-select");
@@ -577,6 +700,10 @@ function openEdit(id) {
   $("#f-date").value = c.date_competition || "";
   $("#f-prix").value = c.prix || 0;
   $("#f-statut").value = c.statut || "en_preparation";
+  populateCoachDropdowns();
+  $("#f-coach1").value = c.coach1_id || "";
+  $("#f-coach2").value = c.coach2_id || "";
+  $("#f-coach3").value = c.coach3_id || "";
   $("#f-btns").style.display = "flex";
   $("#f-btns-new").style.display = "none";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -585,16 +712,23 @@ function resetCompForm() {
   editCompId = null;
   $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = "";
   $("#f-prix").value = ""; $("#f-statut").value = "en_preparation";
+  populateCoachDropdowns();
+  $("#f-coach1").value = "";
+  $("#f-coach2").value = "";
+  $("#f-coach3").value = "";
   $("#f-btns").style.display = "none";
   $("#f-btns-new").style.display = "flex";
 }
 function createCompetition() {
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
+  const c1 = $("#f-coach1").value ? parseInt($("#f-coach1").value, 10) : null;
+  const c2 = $("#f-coach2").value ? parseInt($("#f-coach2").value, 10) : null;
+  const c3 = $("#f-coach3").value ? parseInt($("#f-coach3").value, 10) : null;
   // NB : la campagne HelloAsso est annuelle (app_settings) — pas de champ par compétition
-  ex("INSERT INTO competitions (nom, id_ffme, date_competition, prix, statut, created_at, updated_at) VALUES (?,?,?,?,?,datetime('now'),datetime('now'))",
+  ex("INSERT INTO competitions (nom, id_ffme, date_competition, prix, statut, coach1_id, coach2_id, coach3_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
     [nom, $("#f-idffme").value.trim(), $("#f-date").value || "",
-     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value]);
+     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value, c1, c2, c3]);
   resetCompForm();
   renderComps();
   toast("✅ Compétition créée (localement — pensez à « 💾 Sauvegarder en BDD »).");
@@ -603,9 +737,12 @@ function updateCompetition() {
   if (!editCompId) return;
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
-  ex("UPDATE competitions SET nom=?, id_ffme=?, date_competition=?, prix=?, statut=?, updated_at=datetime('now') WHERE id=?",
+  const c1 = $("#f-coach1").value ? parseInt($("#f-coach1").value, 10) : null;
+  const c2 = $("#f-coach2").value ? parseInt($("#f-coach2").value, 10) : null;
+  const c3 = $("#f-coach3").value ? parseInt($("#f-coach3").value, 10) : null;
+  ex("UPDATE competitions SET nom=?, id_ffme=?, date_competition=?, prix=?, statut=?, coach1_id=?, coach2_id=?, coach3_id=?, updated_at=datetime('now') WHERE id=?",
     [nom, $("#f-idffme").value.trim(), $("#f-date").value || "",
-     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value, editCompId]);
+     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value, c1, c2, c3, editCompId]);
   renderComps();
   toast("✅ Compétition mise à jour (localement).");
 }
@@ -742,8 +879,194 @@ function openParticipants(compId) {
   showPage("participants");
   renderParticipants();
 }
+
+/* ===================== Rendu : coachs ===================== */
+let editCoachId = null;
+
+function renderCoachesPage() {
+  const coaches = q("SELECT * FROM coaches ORDER BY nom COLLATE NOCASE");
+  $("#coaches-count").textContent = `${coaches.length} coach${coaches.length > 1 ? "s" : ""}`;
+  
+  $("#coaches-list").innerHTML = coaches.map(c => `
+    <div class="card" onclick="openEditCoach(${c.id})">
+      <div class="row-flex" style="align-items: center; justify-content: space-between;">
+        <div class="m-name">${esc(c.nom)}</div>
+        <span style="font-size: 11px; color: var(--muted)">ID: ${c.id}</span>
+      </div>
+    </div>
+  `).join("") || `<div class="empty">Aucun coach enregistré.</div>`;
+  
+  populateCoachDropdowns();
+}
+
+function openEditCoach(id) {
+  const c = q("SELECT * FROM coaches WHERE id=?", [id])[0];
+  if (!c) return;
+  editCoachId = id;
+  $("#coach-form-title").textContent = "✏️ Modifier le coach";
+  $("#f-coach-nom").value = c.nom;
+  $("#f-coach-btns").style.display = "flex";
+  $("#f-coach-btns-new").style.display = "none";
+  
+  // Load competitions for this coach
+  const comps = q("SELECT * FROM competitions WHERE coach1_id=? OR coach2_id=? OR coach3_id=? ORDER BY date_competition DESC, id DESC", [id, id, id]);
+  $("#coach-competitions-section").style.display = "block";
+  $("#coach-competitions-h").textContent = `🏆 Épreuves pour ${esc(c.nom)} (${comps.length})`;
+  $("#coach-competitions-list").innerHTML = comps.map(comp => `
+    <div class="card" onclick="showPage('comps'); openEdit(${comp.id})">
+      <div class="m-name">${esc(comp.nom)}</div>
+      <div class="m-sub">🪪 ${esc(comp.id_ffme || "—")} · 📅 ${esc(comp.date_competition || "sans date")}</div>
+    </div>
+  `).join("") || `<div class="empty">Aucune épreuve assignée à ce coach.</div>`;
+}
+
+function resetCoachForm() {
+  editCoachId = null;
+  $("#coach-form-title").textContent = "➕ Nouveau coach";
+  $("#f-coach-nom").value = "";
+  $("#f-coach-btns").style.display = "none";
+  $("#f-coach-btns-new").style.display = "flex";
+  $("#coach-competitions-section").style.display = "none";
+}
+
+function createCoach() {
+  const nom = $("#f-coach-nom").value.trim();
+  if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
+  try {
+    ex("INSERT INTO coaches (nom) VALUES (?)", [nom]);
+    resetCoachForm();
+    renderCoachesPage();
+    renderComps();
+    toast("✅ Coach ajouté (localement).");
+  } catch(e) {
+    toast("⚠️ Ce coach existe déjà ou une erreur est survenue.");
+  }
+}
+
+function updateCoach() {
+  if (!editCoachId) return;
+  const nom = $("#f-coach-nom").value.trim();
+  if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
+  try {
+    ex("UPDATE coaches SET nom=? WHERE id=?", [nom, editCoachId]);
+    const coachId = editCoachId;
+    resetCoachForm();
+    renderCoachesPage();
+    renderComps();
+    openEditCoach(coachId); // refresh
+    toast("✅ Coach mis à jour (localement).");
+  } catch(e) {
+    toast("⚠️ Ce nom de coach est déjà utilisé.");
+  }
+}
+
+function deleteCoach() {
+  if (!editCoachId) return;
+  if (!confirm("Supprimer ce coach ? Il sera retiré de toutes les compétitions associées.")) return;
+  ex("DELETE FROM coaches WHERE id=?", [editCoachId]);
+  resetCoachForm();
+  renderCoachesPage();
+  renderComps();
+  toast("🗑 Coach supprimé (localement).");
+}
+
 function renderAll() {
   renderComps();
+  renderCoachesPage();
+  if ($("#page-balance").classList.contains("active")) {
+    renderBalancePage();
+  }
+}
+
+/* ===================== Rendu : balance financière ===================== */
+function renderBalancePage() {
+  if (!db) return;
+  const searchQuery = ($("#bal-search").value || "").trim().toLowerCase();
+  
+  // Query all adherents, their active competitions, and cumulative dues & payments
+  const query = `
+    SELECT 
+      a.id, a.nom, a.prenom, a.num_licence,
+      COUNT(p.id) AS nb_competitions,
+      SUM(CASE WHEN p.selectionne = 1 THEN c.prix ELSE 0 END) AS total_du,
+      SUM(CASE WHEN p.selectionne = 1 THEN p.montant_paye ELSE 0 END) AS total_paye
+    FROM adherents a
+    LEFT JOIN participants p ON p.adherent_id = a.id AND p.selectionne = 1
+    LEFT JOIN competitions c ON c.id = p.competition_id
+    GROUP BY a.id, a.nom, a.prenom, a.num_licence
+    ORDER BY a.nom COLLATE NOCASE, a.prenom COLLATE NOCASE
+  `;
+  const rows = q(query);
+  
+  const filtered = rows.filter(r => {
+    // If no competitions are linked and no search query, we can still list them or only list those with competitions or balance
+    if (!searchQuery && r.nb_competitions === 0) return false; // hide completely inactive athletes by default unless searching
+    if (!searchQuery) return true;
+    const fullName = normKey(`${r.nom} ${r.prenom}`);
+    const licence = normKey(r.num_licence || "");
+    const qNorm = normKey(searchQuery);
+    return fullName.includes(qNorm) || licence.includes(qNorm);
+  });
+
+  $("#bal-count").textContent = `${filtered.length} athlète${filtered.length > 1 ? "s" : ""} actif${filtered.length > 1 ? "s" : ""}`;
+
+  $("#bal-list").innerHTML = filtered.map(r => {
+    const du = parseFloat(r.total_du || 0);
+    const paye = parseFloat(r.total_paye || 0);
+    const solde = paye - du;
+    
+    let soldeText = "";
+    let style = "";
+    
+    if (solde < -0.01) {
+      soldeText = `⚠️ Non équilibré : reste dû ${Math.abs(solde).toFixed(2)} €`;
+      style = "color: #DC2626; font-weight: bold; background: #FEF2F2; border: 1px solid #FCA5A5; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block;";
+    } else if (solde > 0.01) {
+      soldeText = `Excédentaire (+${solde.toFixed(2)} €)`;
+      style = "color: #2563EB; font-weight: bold; background: #EFF6FF; border: 1px solid #BFDBFE; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block;";
+    } else {
+      soldeText = "✅ Équilibré (0.00 €)";
+      style = "color: #16A34A; font-weight: bold; background: #F0FDF4; border: 1px solid #BBF7D0; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block;";
+    }
+
+    // Detail of competitions for this athlete
+    const details = q(`
+      SELECT c.nom, c.prix, p.montant_paye, p.statut_paiement
+      FROM participants p
+      JOIN competitions c ON c.id = p.competition_id
+      WHERE p.adherent_id = ? AND p.selectionne = 1
+      ORDER BY c.date_competition DESC
+    `, [r.id]);
+
+    const detailsHtml = details.map(d => `
+      <div style="font-size: 12px; color: #475569; padding: 4px 0; border-bottom: 1px dashed #F1F5F9; display: flex; justify-content: space-between; align-items: center;">
+        <span>🏆 ${esc(d.nom)}</span>
+        <span>Dû: <b>${Number(d.prix).toFixed(2)} €</b> | Payé: <span style="color: ${d.statut_paiement === 'paye' ? '#16A34A' : '#D97706'}">${Number(d.montant_paye).toFixed(2)} €</span></span>
+      </div>
+    `).join("") || `<div style="font-size: 12px; color: #94A3B8; font-style: italic;">Aucune compétition active.</div>`;
+
+    return `
+      <div class="card">
+        <div class="row-flex" style="align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <div>
+            <div class="m-name" style="font-size: 16px;">${esc(r.nom)} ${esc(r.prenom)}</div>
+            <div class="m-sub">🪪 ${esc(r.num_licence || "sans licence")} · 🏃 ${r.nb_competitions} épreuve(s)</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="${style}">${esc(soldeText)}</div>
+          </div>
+        </div>
+        <div style="margin-top: 8px; background: #FAF5FF; padding: 8px; border-radius: 8px; border: 1px solid #F3E8FF;">
+          <div style="font-size: 11px; text-transform: uppercase; font-weight: bold; color: #7E22CE; margin-bottom: 4px;">Détail des règlements :</div>
+          ${detailsHtml}
+          <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; margin-top: 6px; padding-top: 4px; border-top: 1px solid #E9D5FF; color: #581C87;">
+            <span>TOTAL GÉNÉRAL</span>
+            <span>Dû: ${du.toFixed(2)} € | Payé: ${paye.toFixed(2)} €</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="empty">Aucun athlète ne correspond aux critères de recherche.</div>`;
 }
 
 /* ===================== Événements ===================== */
@@ -769,9 +1092,15 @@ function wireEvents() {
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);
+  
+  $("#f-coach-create").addEventListener("click", createCoach);
+  $("#f-coach-update").addEventListener("click", updateCoach);
+  $("#f-coach-delete").addEventListener("click", deleteCoach);
+  
   $("#p-comp-select").addEventListener("change", renderParticipants);
   $("#p-load-group").addEventListener("click", loadCompetitionGroup);
   $("#p-search").addEventListener("input", renderSearchResults);
+  $("#bal-search").addEventListener("input", renderBalancePage);
   window.addEventListener("beforeunload", e => {
     if (dirty) { e.preventDefault(); e.returnValue = ""; }
   });

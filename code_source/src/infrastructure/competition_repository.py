@@ -137,10 +137,35 @@ class CompetitionRepository:
                 updated_at     TEXT DEFAULT ''
             );
             """)
+            
+            # Table des coachs
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS coaches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL UNIQUE
+            );
+            """)
+            
+            # Initialisation avec les 3 coachs par défaut si vide
+            count = conn.execute("SELECT COUNT(*) FROM coaches").fetchone()[0]
+            if count == 0:
+                for coach in ["Adrien BERGER", "Stephane LORIDANT", "Clement DE LIMA FERREIRA"]:
+                    conn.execute("INSERT INTO coaches (nom) VALUES (?)", (coach,))
+
             # Migration légère : colonne commande_helloasso (bases existantes)
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(participants)").fetchall()}
             if "commande_helloasso" not in cols:
                 conn.execute("ALTER TABLE participants ADD COLUMN commande_helloasso TEXT DEFAULT ''")
+                
+            # Migration : colonnes coach dans la table competitions (bases existantes)
+            comp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(competitions)").fetchall()}
+            if "coach1_id" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN coach1_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL")
+            if "coach2_id" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN coach2_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL")
+            if "coach3_id" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN coach3_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL")
+                
             conn.commit()
         finally:
             conn.close()
@@ -354,18 +379,18 @@ class CompetitionRepository:
             if comp.id:
                 cur.execute(
                     """UPDATE competitions SET id_ffme=?, nom=?, date_competition=?, prix=?,
-                       statut=?, helloasso_ref=?, updated_at=? WHERE id=?""",
+                       statut=?, helloasso_ref=?, coach1_id=?, coach2_id=?, coach3_id=?, updated_at=? WHERE id=?""",
                     (comp.id_ffme, comp.nom, comp.date_competition, comp.prix,
-                     comp.statut, comp.helloasso_ref, now, comp.id),
+                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id, now, comp.id),
                 )
                 comp_id = comp.id
             else:
                 cur.execute(
                     """INSERT INTO competitions (id_ffme, nom, date_competition, prix,
-                       statut, helloasso_ref, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?)""",
+                       statut, helloasso_ref, coach1_id, coach2_id, coach3_id, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                     (comp.id_ffme, comp.nom, comp.date_competition, comp.prix,
-                     comp.statut, comp.helloasso_ref, now, now),
+                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id, now, now),
                 )
                 comp_id = cur.lastrowid
             conn.commit()
@@ -556,8 +581,8 @@ class CompetitionRepository:
                 "SELECT * FROM competitions ORDER BY date_competition ASC, id ASC"
             ).fetchall()]
             rows = [dict(r) for r in conn.execute(
-                """SELECT p.adherent_id, p.statut_paiement, p.selectionne,
-                          c.id AS competition_id, c.date_competition,
+                """SELECT p.adherent_id, p.statut_paiement, p.selectionne, p.montant_paye,
+                          c.id AS competition_id, c.date_competition, c.prix,
                           a.nom, a.prenom, a.num_licence, a.tarif
                    FROM participants p
                    JOIN competitions c ON c.id = p.competition_id
@@ -574,6 +599,7 @@ class CompetitionRepository:
             rows = [r for r in rows if r["competition_id"] in comp_ids]
 
         participants_map = {}
+        payments_map = {}
         students = {}
         for r in rows:
             key = r["adherent_id"]
@@ -582,10 +608,14 @@ class CompetitionRepository:
                 "num_licence": r["num_licence"], "tarif": r["tarif"],
             })
             participants_map[(key, r["competition_id"])] = r["statut_paiement"]
+            payments_map[(key, r["competition_id"])] = {
+                "montant_paye": float(r["montant_paye"] or 0.0),
+                "prix": float(r["prix"] or 0.0),
+            }
 
         seasons = sorted({cls.season_of_date(c.date_competition) for c in comps if c.date_competition}, reverse=True)
         return {"competitions": comps, "students": students,
-                "participations": participants_map, "seasons": seasons}
+                "participations": participants_map, "payments": payments_map, "seasons": seasons}
 
     # ------------------------------------------------------------------
     # Paramètres applicatifs (mémorisation des campagnes HelloAsso, etc.)
@@ -822,3 +852,71 @@ class CompetitionRepository:
                                            order_ref=", ".join(o for o in orders if o)):
                 applied += 1
         return applied
+
+    # ------------------------------------------------------------------
+    # CRUD Coachs
+    # ------------------------------------------------------------------
+    @classmethod
+    def list_coaches(cls) -> list:
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            rows = conn.execute("SELECT * FROM coaches ORDER BY nom COLLATE NOCASE").fetchall()
+        finally:
+            conn.close()
+        return [dict(r) for r in rows]
+
+    @classmethod
+    def get_coach(cls, coach_id: int) -> dict:
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            r = conn.execute("SELECT * FROM coaches WHERE id = ?", (coach_id,)).fetchone()
+        finally:
+            conn.close()
+        return dict(r) if r else None
+
+    @classmethod
+    def save_coach(cls, nom: str, coach_id: int = None) -> int:
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            cur = conn.cursor()
+            if coach_id:
+                cur.execute("UPDATE coaches SET nom = ? WHERE id = ?", (nom, coach_id))
+                ret_id = coach_id
+            else:
+                cur.execute("INSERT INTO coaches (nom) VALUES (?)", (nom,))
+                ret_id = cur.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+        return ret_id
+
+    @classmethod
+    def delete_coach(cls, coach_id: int) -> bool:
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM coaches WHERE id = ?", (coach_id,))
+            conn.commit()
+            success = cur.rowcount > 0
+        finally:
+            conn.close()
+        return success
+
+    @classmethod
+    def list_competitions_for_coach(cls, coach_id: int) -> list:
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM competitions 
+                   WHERE coach1_id = ? OR coach2_id = ? OR coach3_id = ?
+                   ORDER BY date_competition DESC, id DESC""",
+                (coach_id, coach_id, coach_id)
+            ).fetchall()
+        finally:
+            conn.close()
+        return [Competition.from_row(dict(r)) for r in rows]

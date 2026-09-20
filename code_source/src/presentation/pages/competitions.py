@@ -430,13 +430,14 @@ class CompetitionsPage(QWidget):
         # (setMinimumDuration) qui peut la rendre visible seule à l'ouverture.
         self.progress = None
 
-        # Deux niveaux : les onglets GLOBAUX (HelloAsso, bilan) sont indépendants
+        # Deux niveaux : les onglets GLOBAUX (HelloAsso, bilan, coachs) sont indépendants
         # des épreuves ; le détail d'une compétition ne contient que ses onglets
         # propres (Détails, Compétiteurs).
         self.global_tabs = QTabWidget()
         self.global_tabs.addTab(self._build_epreuves_tab(), "🏆 Épreuves")
         self.global_tabs.addTab(self._build_helloasso_tab(), "🔄 HelloAsso")
         self.global_tabs.addTab(self._build_bilan_tab(), "📊 Bilan de saison")
+        self.global_tabs.addTab(self._build_coachs_tab(), "🏃 Coachs")
         self.global_tabs.currentChanged.connect(self._on_global_tab_changed)
         layout.addWidget(self.global_tabs, 1)
 
@@ -560,6 +561,31 @@ class CompetitionsPage(QWidget):
         col4.addWidget(self.input_statut)
         row2.addLayout(col4, 1)
         form.addLayout(row2)
+
+        row_coaches = QHBoxLayout()
+        
+        col_coach1 = QVBoxLayout()
+        col_coach1.addWidget(field_label("Coach 1"))
+        self.input_coach1 = QComboBox()
+        self.input_coach1.setStyleSheet("QComboBox { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
+        col_coach1.addWidget(self.input_coach1)
+        row_coaches.addLayout(col_coach1, 1)
+
+        col_coach2 = QVBoxLayout()
+        col_coach2.addWidget(field_label("Coach 2"))
+        self.input_coach2 = QComboBox()
+        self.input_coach2.setStyleSheet("QComboBox { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
+        col_coach2.addWidget(self.input_coach2)
+        row_coaches.addLayout(col_coach2, 1)
+
+        col_coach3 = QVBoxLayout()
+        col_coach3.addWidget(field_label("Coach 3"))
+        self.input_coach3 = QComboBox()
+        self.input_coach3.setStyleSheet("QComboBox { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
+        col_coach3.addWidget(self.input_coach3)
+        row_coaches.addLayout(col_coach3, 1)
+        
+        form.addLayout(row_coaches)
 
         form.addStretch()
 
@@ -756,15 +782,42 @@ class CompetitionsPage(QWidget):
         layout.addLayout(row)
 
         self.bilan_hint = QLabel(
-            "Tableau croisé élèves × compétitions : chaque cellule indique l'état du paiement pour la saison choisie."
+            "Visualisez l'état d'inscription et financier de la saison choisie."
         )
         self.bilan_hint.setStyleSheet("color: #64748B; font-size: 12px; border: none;")
         layout.addWidget(self.bilan_hint)
 
+        # Tab Widget for cross table and financial balance
+        self.bilan_sub_tabs = QTabWidget()
+        
+        # Sub-tab 1: Cross table
+        tab1 = QWidget()
+        tab1_layout = QVBoxLayout(tab1)
+        tab1_layout.setContentsMargins(0, 10, 0, 0)
         self.bilan_table = QTableWidget(0, 0)
         self.bilan_table.verticalHeader().setVisible(False)
         self.bilan_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.bilan_table, 1)
+        tab1_layout.addWidget(self.bilan_table)
+        self.bilan_sub_tabs.addTab(tab1, "📋 Grille des participations")
+        
+        # Sub-tab 2: Financial balance
+        tab2 = QWidget()
+        tab2_layout = QVBoxLayout(tab2)
+        tab2_layout.setContentsMargins(0, 10, 0, 0)
+        self.balance_table = QTableWidget(0, 7)
+        self.balance_table.setHorizontalHeaderLabels([
+            "Athlète", "N° Licence", "Épreuves", "Montant Dû", "Montant Payé", "Solde", "Statut / Alerte"
+        ])
+        self.balance_table.verticalHeader().setVisible(False)
+        self.balance_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        balance_header = self.balance_table.horizontalHeader()
+        balance_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in range(1, 7):
+            balance_header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        tab2_layout.addWidget(self.balance_table)
+        self.bilan_sub_tabs.addTab(tab2, "💶 Balance des paiements")
+        
+        layout.addWidget(self.bilan_sub_tabs, 1)
         return frame
 
     # ------------------------------------------------------------------
@@ -849,6 +902,20 @@ class CompetitionsPage(QWidget):
             list(LIBELLES_STATUT_COMPETITION.keys()).index(c.statut)
             if c.statut in LIBELLES_STATUT_COMPETITION else 0
         )
+        
+        self._populate_coach_dropdowns()
+        
+        def select_coach(combo, coach_id):
+            for i in range(combo.count()):
+                if combo.itemData(i) == coach_id:
+                    combo.setCurrentIndex(i)
+                    return
+            combo.setCurrentIndex(0)
+            
+        select_coach(self.input_coach1, c.coach1_id)
+        select_coach(self.input_coach2, c.coach2_id)
+        select_coach(self.input_coach3, c.coach3_id)
+        
         self.details_hint.setText(f"Édition de « {c.nom} » (ID interne #{c.id}).")
 
     def _clear_form(self):
@@ -856,6 +923,12 @@ class CompetitionsPage(QWidget):
         self.input_id_ffme.clear()
         self.input_prix.setValue(0.0)
         self.input_statut.setCurrentIndex(0)
+        
+        self._populate_coach_dropdowns()
+        self.input_coach1.setCurrentIndex(0)
+        self.input_coach2.setCurrentIndex(0)
+        self.input_coach3.setCurrentIndex(0)
+        
         self.details_hint.setText("Sélectionnez une épreuve à gauche ou créez-en une nouvelle.")
 
     # ------------------------------------------------------------------
@@ -880,6 +953,9 @@ class CompetitionsPage(QWidget):
         comp.date_competition = f"{d.year():04d}-{d.month():02d}-{d.day():02d}"
         comp.prix = round(self.input_prix.value(), 2)
         comp.statut = list(LIBELLES_STATUT_COMPETITION.keys())[self.input_statut.currentIndex()]
+        comp.coach1_id = self.input_coach1.currentData()
+        comp.coach2_id = self.input_coach2.currentData()
+        comp.coach3_id = self.input_coach3.currentData()
         # NB : helloasso_ref n'est plus éditable ici — la campagne HelloAsso est
         # désormais annuelle et se configure dans l'onglet global « HelloAsso ».
         comp_id = CompetitionRepository.save_competition(comp)
@@ -1300,6 +1376,7 @@ class CompetitionsPage(QWidget):
             self.bilan_table.setColumnCount(1)
             self.bilan_table.setHorizontalHeaderLabels(["Aucune compétition enregistrée pour le moment"])
             self.bilan_table.setItem(0, 0, QTableWidgetItem("—"))
+            self.balance_table.setRowCount(0)
             return
 
         bilan = CompetitionRepository.get_bilan(season)
@@ -1351,6 +1428,56 @@ class CompetitionsPage(QWidget):
             self.bilan_table.setItem(row, ci, it)
         self.bilan_table.resizeColumnsToContents()
         self.bilan_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+
+        # Remplissage de la table balance_table
+        self.balance_table.setRowCount(len(students))
+        row_bal = 0
+        for adherent_id, stu in students.items():
+            nb_comp = 0
+            total_du = 0.0
+            total_paye = 0.0
+            
+            for c in comps:
+                pay_info = bilan.get("payments", {}).get((adherent_id, c.id))
+                if pay_info:
+                    nb_comp += 1
+                    total_du += pay_info["prix"]
+                    total_paye += pay_info["montant_paye"]
+                    
+            solde = total_paye - total_du
+            
+            name_item = QTableWidgetItem(f"{stu['nom']} {stu['prenom']}")
+            licence_item = QTableWidgetItem(stu.get("num_licence") or "—")
+            nb_item = QTableWidgetItem(str(nb_comp))
+            du_item = QTableWidgetItem(f"{total_du:.2f} €")
+            paye_item = QTableWidgetItem(f"{total_paye:.2f} €")
+            solde_item = QTableWidgetItem(f"{solde:.2f} €")
+            
+            # Formater le solde et statut d'alerte
+            if solde < -0.01:
+                status_item = QTableWidgetItem(f"⚠️ Non équilibré : reste {abs(solde):.2f} €")
+                status_item.setForeground(QColor(COLOR_ERROR))
+                solde_item.setForeground(QColor(COLOR_ERROR))
+            elif solde > 0.01:
+                status_item = QTableWidgetItem(f"Excédentaire (+{solde:.2f} €)")
+                status_item.setForeground(QColor(COLOR_ACTION))
+                solde_item.setForeground(QColor(COLOR_ACTION))
+            else:
+                status_item = QTableWidgetItem("✅ Équilibré")
+                status_item.setForeground(QColor(COLOR_SUCCESS))
+                solde_item.setForeground(QColor(COLOR_SUCCESS))
+                
+            for item in [name_item, licence_item, nb_item, du_item, paye_item, solde_item, status_item]:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                
+            self.balance_table.setItem(row_bal, 0, name_item)
+            self.balance_table.setItem(row_bal, 1, licence_item)
+            self.balance_table.setItem(row_bal, 2, nb_item)
+            self.balance_table.setItem(row_bal, 3, du_item)
+            self.balance_table.setItem(row_bal, 4, paye_item)
+            self.balance_table.setItem(row_bal, 5, solde_item)
+            self.balance_table.setItem(row_bal, 6, status_item)
+            row_bal += 1
 
     def on_export_bilan(self):
         season = self.bilan_season_combo.currentText() if self.bilan_season_combo.count() else ""
@@ -1420,6 +1547,170 @@ class CompetitionsPage(QWidget):
             self.current_competition = None
             self._refresh_bilan_seasons()
             self.reload_competitions_list()
+            self.reload_coaches_list()
             QMessageBox.information(self, "Google Drive", message)
         else:
             QMessageBox.critical(self, "Échec Google Drive", message)
+
+    # ------------------------------------------------------------------
+    # Gestion des Coachs
+    # ------------------------------------------------------------------
+    def _build_coachs_tab(self) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(15)
+
+        # Left panel: Coach management (List of coaches + add/edit form)
+        from PySide6.QtWidgets import QGroupBox
+        left_box = QGroupBox("Gestion des Coachs")
+        left_layout = QVBoxLayout(left_box)
+        left_layout.setSpacing(10)
+
+        # Form to add/edit coach
+        form_layout = QHBoxLayout()
+        self.coach_name_input = QLineEdit()
+        self.coach_name_input.setPlaceholderText("Nom du coach (ex : John DOE)")
+        self.coach_name_input.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
+        form_layout.addWidget(self.coach_name_input, 1)
+
+        self.btn_save_coach = QPushButton("➕ Ajouter")
+        self.btn_save_coach.setCursor(Qt.PointingHandCursor)
+        self.btn_save_coach.setStyleSheet(self._btn_style(COLOR_SUCCESS))
+        self.btn_save_coach.clicked.connect(self.on_save_coach)
+        form_layout.addWidget(self.btn_save_coach)
+
+        self.btn_delete_coach = QPushButton("🗑 Supprimer")
+        self.btn_delete_coach.setCursor(Qt.PointingHandCursor)
+        self.btn_delete_coach.setStyleSheet(self._btn_style(COLOR_ERROR))
+        self.btn_delete_coach.clicked.connect(self.on_delete_coach)
+        self.btn_delete_coach.setEnabled(False)
+        form_layout.addWidget(self.btn_delete_coach)
+        
+        left_layout.addLayout(form_layout)
+
+        # List of coaches
+        self.coaches_list = QListWidget()
+        self.coaches_list.setStyleSheet(
+            "QListWidget { border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; padding: 5px; }"
+            "QListWidget::item { padding: 8px; border-bottom: 1px solid #F1F5F9; }"
+            "QListWidget::item:selected { background: #EFF6FF; color: #1E3A8A; font-weight: bold; }"
+        )
+        self.coaches_list.currentRowChanged.connect(self.on_coach_selected)
+        left_layout.addWidget(self.coaches_list, 1)
+
+        layout.addWidget(left_box, 1)
+
+        # Right panel: Competitions for selected coach
+        right_box = QGroupBox("📊 Épreuves associées")
+        right_layout = QVBoxLayout(right_box)
+        right_layout.setSpacing(10)
+
+        self.coach_comps_lbl = QLabel("Sélectionnez un coach pour voir ses compétitions.")
+        self.coach_comps_lbl.setStyleSheet("color: #64748B; font-size: 12px; font-style: italic;")
+        right_layout.addWidget(self.coach_comps_lbl)
+
+        self.coach_comps_list = QListWidget()
+        self.coach_comps_list.setStyleSheet(
+            "QListWidget { border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; padding: 5px; }"
+            "QListWidget::item { padding: 8px; border-bottom: 1px solid #F1F5F9; }"
+        )
+        right_layout.addWidget(self.coach_comps_list, 1)
+
+        layout.addWidget(right_box, 1)
+        return container
+
+    def _populate_coach_dropdowns(self):
+        coaches = CompetitionRepository.list_coaches()
+        for combo in [self.input_coach1, self.input_coach2, self.input_coach3]:
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Aucun", None)
+            for c in coaches:
+                combo.addItem(c["nom"], c["id"])
+            combo.blockSignals(False)
+
+    def reload_coaches_list(self):
+        self.coaches_list.blockSignals(True)
+        self.coaches_list.clear()
+        coaches = CompetitionRepository.list_coaches()
+        for c in coaches:
+            item = QListWidgetItem(f"🏃  {c['nom']}")
+            item.setData(Qt.UserRole, c["id"])
+            self.coaches_list.addItem(item)
+        self.coaches_list.blockSignals(False)
+        self.coach_name_input.clear()
+        self.btn_save_coach.setText("➕ Ajouter")
+        self.btn_delete_coach.setEnabled(False)
+        self.coach_comps_list.clear()
+        self.coach_comps_lbl.setText("Sélectionnez un coach pour voir ses compétitions.")
+        self._populate_coach_dropdowns()
+
+    def on_coach_selected(self, row: int):
+        item = self.coaches_list.item(row)
+        if not item:
+            self.btn_delete_coach.setEnabled(False)
+            self.btn_save_coach.setText("➕ Ajouter")
+            self.coach_comps_list.clear()
+            self.coach_comps_lbl.setText("Sélectionnez un coach pour voir ses compétitions.")
+            return
+        
+        coach_id = item.data(Qt.UserRole)
+        coach = CompetitionRepository.get_coach(coach_id)
+        if coach:
+            self.coach_name_input.setText(coach["nom"])
+            self.btn_save_coach.setText("💾 Modifier")
+            self.btn_delete_coach.setEnabled(True)
+            
+            # Load competitions
+            self.coach_comps_list.clear()
+            comps = CompetitionRepository.list_competitions_for_coach(coach_id)
+            self.coach_comps_lbl.setText(f"Épreuves pour {coach['nom']} ({len(comps)}) :")
+            for c in comps:
+                date_txt = datetime.date.fromisoformat(c.date_competition).strftime("%d/%m/%Y") if c.date_competition else "sans date"
+                comp_item = QListWidgetItem(f"🏆 {c.nom}\n📅 {date_txt}")
+                self.coach_comps_list.addItem(comp_item)
+
+    def on_save_coach(self):
+        nom = self.coach_name_input.text().strip()
+        if not nom:
+            QMessageBox.warning(self, "Champ requis", "Le nom du coach est obligatoire.")
+            return
+        
+        row = self.coaches_list.currentRow()
+        item = self.coaches_list.item(row) if row >= 0 else None
+        
+        try:
+            if item:
+                coach_id = item.data(Qt.UserRole)
+                CompetitionRepository.save_coach(nom, coach_id)
+                QMessageBox.information(self, "Succès", f"Coach « {nom} » modifié avec succès.")
+            else:
+                CompetitionRepository.save_coach(nom)
+                QMessageBox.information(self, "Succès", f"Coach « {nom} » ajouté avec succès.")
+            self.reload_coaches_list()
+            self.reload_competitions_list()
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Une erreur est survenue (nom peut-être déjà utilisé) : {e}")
+
+    def on_delete_coach(self):
+        row = self.coaches_list.currentRow()
+        item = self.coaches_list.item(row)
+        if not item:
+            return
+        
+        coach_id = item.data(Qt.UserRole)
+        coach = CompetitionRepository.get_coach(coach_id)
+        if not coach:
+            return
+            
+        reply = QMessageBox.question(
+            self, "Confirmation",
+            f"Supprimer le coach « {coach['nom']} » ?\nIl sera retiré de toutes les compétitions associées.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            CompetitionRepository.delete_coach(coach_id)
+            self.reload_coaches_list()
+            self.reload_competitions_list()
+            QMessageBox.information(self, "Supprimé", "Le coach a été supprimé.")
