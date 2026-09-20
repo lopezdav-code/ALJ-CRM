@@ -1,5 +1,4 @@
 import datetime
-import os
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QScrollArea, QWidget, QLineEdit, QMessageBox, QDialog,
@@ -8,7 +7,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 from domain.models import Member
-from paths import ROOT_DIR
 
 class AttestationConfirmationDialog(QDialog):
     """

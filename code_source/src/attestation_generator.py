@@ -267,10 +267,14 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                     from PySide6.QtCore import QEventLoop, QUrl, QMarginsF
                     from PySide6.QtGui import QPageLayout, QPageSize
                     
-                    # Base URL pour résoudre logo.png (racine applicative en release, code_source en dev)
-                    logo_path = os.path.join(root_dir, "logo.png")
-                    if not os.path.exists(logo_path):
+                    # Base URL pour résoudre logo.png et doc/signature.jpg (racine applicative en release, code_source en dev)
+                    import sys
+                    if getattr(sys, 'frozen', False):
+                        logo_path = os.path.join(root_dir, "logo.png")
+                    else:
                         logo_path = os.path.join(CODE_ROOT, "logo.png")
+                        if not os.path.exists(logo_path):
+                            logo_path = os.path.join(root_dir, "logo.png")
                     base_url = QUrl.fromLocalFile(logo_path)
                     
                     loop = QEventLoop()
