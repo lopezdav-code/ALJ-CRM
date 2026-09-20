@@ -731,9 +731,9 @@ class CompetitionsPage(QWidget):
         items_row.addWidget(self.btn_attach_items)
         layout.addLayout(items_row)
 
-        self.items_table = QTableWidget(0, 10)
+        self.items_table = QTableWidget(0, 11)
         self.items_table.setHorizontalHeaderLabels([
-            "Payeur", "Montant", "N° de commande", "N° de licence",
+            "Payeur", "Montant", "Prix payé", "N° de commande", "N° de licence",
             "« Compétition concernée »", "Numéro de la compétition",
             "Compétition rattachée", "Adhérent rattaché", "Source", "État",
         ])
@@ -744,10 +744,11 @@ class CompetitionsPage(QWidget):
         items_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        items_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        items_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         items_header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.items_table, 1)
@@ -1216,12 +1217,23 @@ class CompetitionsPage(QWidget):
             if not linked_comp or not linked_adh:
                 nb_attente += 1
             table.setItem(r, 0, QTableWidgetItem(f"{it.get('payer_nom') or ''} {it.get('payer_prenom') or ''}".strip()))
+            
             montant = QTableWidgetItem(f"{float(it.get('montant') or 0):.2f} €")
             montant.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             table.setItem(r, 1, montant)
-            table.setItem(r, 2, QTableWidgetItem(str(it.get("order_id") or "")))
-            table.setItem(r, 3, QTableWidgetItem(str(it.get("licence_saisie") or "")))
-            table.setItem(r, 4, QTableWidgetItem(str(it.get("competition_saisie") or "")))
+            
+            px_paye_val = it.get("participant_montant_paye")
+            if px_paye_val is not None:
+                px_paye = QTableWidgetItem(f"{float(px_paye_val):.2f} €")
+            else:
+                px_paye = QTableWidgetItem("—")
+            px_paye.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            px_paye.setForeground(QColor(COLOR_SUCCESS if px_paye_val else "#64748B"))
+            table.setItem(r, 2, px_paye)
+            
+            table.setItem(r, 3, QTableWidgetItem(str(it.get("order_id") or "")))
+            table.setItem(r, 4, QTableWidgetItem(str(it.get("licence_saisie") or "")))
+            table.setItem(r, 5, QTableWidgetItem(str(it.get("competition_saisie") or "")))
             
             # Extraction dynamique du numéro de compétition depuis le JSON brut
             comp_num = ""
@@ -1236,18 +1248,18 @@ class CompetitionsPage(QWidget):
                             break
                 except Exception:
                     pass
-            table.setItem(r, 5, QTableWidgetItem(comp_num))
+            table.setItem(r, 6, QTableWidgetItem(comp_num))
             
-            table.setItem(r, 6, QTableWidgetItem(str(it.get("competition_nom") or "")))
-            table.setItem(r, 7, QTableWidgetItem(
+            table.setItem(r, 7, QTableWidgetItem(str(it.get("competition_nom") or "")))
+            table.setItem(r, 8, QTableWidgetItem(
                 f"{it.get('adherent_nom') or ''} {it.get('adherent_prenom') or ''}".strip()))
             source = QTableWidgetItem(str(it.get("source") or "—"))
             if str(it.get("source")) == "manuel":
                 source.setForeground(QColor(COLOR_SUCCESS))
-            table.setItem(r, 8, source)
+            table.setItem(r, 9, source)
             etat = QTableWidgetItem(str(it.get("etat") or "").capitalize())
             etat.setForeground(QColor("#64748B"))
-            table.setItem(r, 9, etat)
+            table.setItem(r, 10, etat)
             table.setRowHeight(r, 26)
         self.btn_attach_items.setText(
             f"🔗  Rattacher les paiements en attente ({nb_attente})"

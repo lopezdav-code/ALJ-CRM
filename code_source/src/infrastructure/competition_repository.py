@@ -764,13 +764,15 @@ class CompetitionRepository:
         try:
             rows = conn.execute(
                 """SELECT h.*, l.competition_id, l.adherent_id, l.source,
-                          c.nom AS competition_nom, a.nom AS adherent_nom,
-                          a.prenom AS adherent_prenom
-                   FROM helloasso_items h
-                   LEFT JOIN item_links l ON l.id_item = h.id_item
-                   LEFT JOIN competitions c ON c.id = l.competition_id
-                   LEFT JOIN adherents a ON a.id = l.adherent_id
-                   ORDER BY h.date_item DESC, h.id_item DESC"""
+                           c.nom AS competition_nom, a.nom AS adherent_nom,
+                           a.prenom AS adherent_prenom,
+                           p.montant_paye AS participant_montant_paye
+                    FROM helloasso_items h
+                    LEFT JOIN item_links l ON l.id_item = h.id_item
+                    LEFT JOIN competitions c ON c.id = l.competition_id
+                    LEFT JOIN adherents a ON a.id = l.adherent_id
+                    LEFT JOIN participants p ON p.competition_id = l.competition_id AND p.adherent_id = l.adherent_id
+                    ORDER BY h.date_item DESC, h.id_item DESC"""
             ).fetchall()
         finally:
             conn.close()
