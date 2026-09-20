@@ -858,6 +858,20 @@ class CompetitionsPage(QWidget):
         items_row.addWidget(self.btn_attach_items)
         layout.addLayout(items_row)
 
+        filter_row = QHBoxLayout()
+        self.filter_payer_input = QLineEdit()
+        self.filter_payer_input.setPlaceholderText("🔍 Filtrer par payeur…")
+        self.filter_payer_input.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px; }")
+        self.filter_payer_input.textChanged.connect(self.filter_helloasso_table)
+        filter_row.addWidget(self.filter_payer_input, 1)
+
+        self.filter_comp_input = QLineEdit()
+        self.filter_comp_input.setPlaceholderText("🔍 Filtrer par compétition (saisie ou rattachée)…")
+        self.filter_comp_input.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px; }")
+        self.filter_comp_input.textChanged.connect(self.filter_helloasso_table)
+        filter_row.addWidget(self.filter_comp_input, 1)
+        layout.addLayout(filter_row)
+
         self.items_table = QTableWidget(0, 11)
         self.items_table.setHorizontalHeaderLabels([
             "Payeur", "Montant", "Prix payé", "N° de commande", "N° de licence",
@@ -1400,6 +1414,29 @@ class CompetitionsPage(QWidget):
         self.btn_attach_items.setText(
             f"🔗  Rattacher les paiements en attente ({nb_attente})"
         )
+        self.filter_helloasso_table()
+
+    def filter_helloasso_table(self):
+        payer_query = normalize_string(self.filter_payer_input.text())
+        comp_query = normalize_string(self.filter_comp_input.text())
+        
+        table = self.items_table
+        for r in range(table.rowCount()):
+            payer_item = table.item(r, 0)
+            payer_text = normalize_string(payer_item.text() if payer_item else "")
+            
+            comp_saisie_item = table.item(r, 5)
+            comp_rattachee_item = table.item(r, 7)
+            comp_text = " ".join([
+                comp_saisie_item.text() if comp_saisie_item else "",
+                comp_rattachee_item.text() if comp_rattachee_item else ""
+            ])
+            comp_text_norm = normalize_string(comp_text)
+            
+            match_payer = not payer_query or (payer_query in payer_text)
+            match_comp = not comp_query or (comp_query in comp_text_norm)
+            
+            table.setRowHidden(r, not (match_payer and match_comp))
 
     def on_item_double_clicked(self, row: int, col: int):
         payer_item = self.items_table.item(row, 0)
