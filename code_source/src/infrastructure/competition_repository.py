@@ -158,6 +158,11 @@ class CompetitionRepository:
             if "commande_helloasso" not in cols:
                 conn.execute("ALTER TABLE participants ADD COLUMN commande_helloasso TEXT DEFAULT ''")
                 
+            # Migration légère : colonne commentaire dans la table helloasso_items (bases existantes)
+            hello_cols = {r["name"] for r in conn.execute("PRAGMA table_info(helloasso_items)").fetchall()}
+            if "commentaire" not in hello_cols:
+                conn.execute("ALTER TABLE helloasso_items ADD COLUMN commentaire TEXT DEFAULT ''")
+                
             # Migration : colonnes coach dans la table competitions (bases existantes)
             comp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(competitions)").fetchall()}
             if "coach1_id" not in comp_cols:
