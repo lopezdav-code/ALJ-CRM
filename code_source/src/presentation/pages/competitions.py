@@ -894,7 +894,7 @@ class CompetitionsPage(QWidget):
         self.items_table = QTableWidget(0, 12)
         self.items_table.setHorizontalHeaderLabels([
             "Payeur", "Montant", "Prix payé", "Commentaire", "N° de commande", "N° de licence",
-            "« Compétition concernée »", "Numéro de la compétition",
+            "Compétition (Nom saisi)", "Compétition (N° saisi)",
             "Compétition rattachée", "Adhérent rattaché", "Source", "État",
         ])
         items_header = self.items_table.horizontalHeader()
@@ -1408,21 +1408,26 @@ class CompetitionsPage(QWidget):
             
             table.setItem(r, 4, QTableWidgetItem(str(it.get("order_id") or "")))
             table.setItem(r, 5, QTableWidgetItem(str(it.get("licence_saisie") or "")))
-            table.setItem(r, 6, QTableWidgetItem(str(it.get("competition_saisie") or "")))
             
-            # Extraction dynamique du numéro de compétition depuis le JSON brut
+            # Extraction dynamique du numéro et du nom de compétition depuis le JSON brut
             comp_num = ""
+            comp_name_val = ""
             raw_json_str = it.get("raw_json")
             if raw_json_str:
                 try:
                     raw_data = json.loads(raw_json_str)
                     for field in raw_data.get("customFields", []):
                         name = str(field.get("name") or "").strip().lower()
-                        if "numero" in name and "competition" in name:
+                        if ("numero" in name or "n°" in name) and "competition" in name:
                             comp_num = str(field.get("answer") or field.get("value") or "").strip()
-                            break
+                        elif ("nom" in name or "concerne" in name) and "competition" in name:
+                            comp_name_val = str(field.get("answer") or field.get("value") or "").strip()
                 except Exception:
                     pass
+            
+            # Fallback historique s'il n'y a pas de champ "Nom de la compétition" explicite
+            final_comp_name = comp_name_val or str(it.get("competition_saisie") or "")
+            table.setItem(r, 6, QTableWidgetItem(final_comp_name))
             table.setItem(r, 7, QTableWidgetItem(comp_num))
             
             table.setItem(r, 8, QTableWidgetItem(str(it.get("competition_nom") or "")))
