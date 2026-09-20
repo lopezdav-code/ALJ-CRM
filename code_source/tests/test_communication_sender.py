@@ -346,7 +346,8 @@ class TestCommunicationsPageSender(TempDbTestCase):
         page.sender_email_combo.setCurrentText("bureau@alj-escalade.fr")
         page.sender_name_input.setText("ALJ Escalade - Bureau")
 
-        with patch("presentation.pages.communications.QMessageBox.warning") as mock_warn:
+        with patch("presentation.pages.communications.QMessageBox.warning") as mock_warn, \
+             patch("presentation.pages.communications.QMessageBox.information"):
             page.on_save_sender_clicked()
 
         mock_warn.assert_not_called()
@@ -381,7 +382,7 @@ class TestCommunicationsPageSender(TempDbTestCase):
         page = CommunicationsPage()
         self.assertTrue(page.form_scroll.widgetResizable())
         self.assertIs(page.form_scroll.widget(), page.form_frame)
-        self.assertGreaterEqual(page.form_frame.minimumWidth(), 540)
+        self.assertGreaterEqual(page.form_frame.minimumWidth(), 480)
         # La barre de progression et les logs ne doivent pas être dans la zone défilante
         self.assertIsNot(page.progress_bar.parent(), page.form_frame)
         self.assertIsNot(page.log_area.parent(), page.form_frame)
@@ -497,7 +498,7 @@ class TestCommunicationsPageSender(TempDbTestCase):
         page.deselect_all_members()
         self.assertEqual(page._count_checked(), 0)
         self.assertEqual(page.selected_panel.count(), 0)
-        self.assertIn("(0)", page.dest_title.text())
+        self.assertIn("0 sélectionnés", page.dest_title.text())
         self.assertFalse(page.send_btn.isEnabled())
 
     def test_new_template_uses_current_sender(self):

@@ -42,7 +42,15 @@ jobs:
       working-directory: code_source
       env:
         QT_QPA_PLATFORM: offscreen
-      run: python -m pytest
+      # Les fichiers de tests Qt créent des widgets PySide6 : exécutés dans des
+      # processus séparés pour éviter les crashs natifs liés à l'état Qt résiduel
+      # d'un fichier de tests à l'autre (0xC0000409 en suite complète).
+      run: |
+        python -m pytest tests --ignore=tests/test_app_smoke.py --ignore=tests/test_communication_sender.py --ignore=tests/test_member_email_shortcut.py --ignore=tests/test_presentation_lot3.py --ignore=tests/test_presentation_lot4.py --ignore=tests/test_presentation_lot5.py --ignore=tests/test_tarif_update.py &&
+        python -m pytest tests/test_app_smoke.py tests/test_member_email_shortcut.py tests/test_tarif_update.py tests/test_presentation_lot3.py &&
+        python -m pytest tests/test_communication_sender.py &&
+        python -m pytest tests/test_presentation_lot4.py &&
+        python -m pytest tests/test_presentation_lot5.py
 
     - name: Build source package (alj_source_vX.zip + SHA256SUMS.txt)
       working-directory: code_source
