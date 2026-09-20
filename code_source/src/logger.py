@@ -25,6 +25,10 @@ def setup_logging():
     if _configured:
         return
     global _ORIGINAL_STDOUT, _ORIGINAL_STDERR
+    # En mode portable / pythonw, il n'y a aucune console : sys.__stdout__ et
+    # sys.stdout valent None. On ne branche alors QUE le fichier de log — un
+    # StreamHandler sur un flux None ferait planter chaque écriture et boucler
+    # logging.handleError (qui réécrit sur le stderr intercepté).
     _ORIGINAL_STDOUT = sys.__stdout__ or sys.stdout
     _ORIGINAL_STDERR = sys.__stderr__ or sys.stderr
 
@@ -36,9 +40,10 @@ def setup_logging():
     fh.setFormatter(fmt)
     root.addHandler(fh)
 
-    ch = logging.StreamHandler(_ORIGINAL_STDOUT)
-    ch.setFormatter(fmt)
-    root.addHandler(ch)
+    if _ORIGINAL_STDOUT is not None:
+        ch = logging.StreamHandler(_ORIGINAL_STDOUT)
+        ch.setFormatter(fmt)
+        root.addHandler(ch)
 
     root.propagate = False
     _configured = True
@@ -59,8 +64,9 @@ class PrintToLogInterceptor:
 
     def write(self, s):
         try:
-            self._console.write(s)
-            self._console.flush()
+            if self._console is not None:
+                self._console.write(s)
+                self._console.flush()
         except Exception:
             pass
         try:
