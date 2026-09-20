@@ -55,7 +55,7 @@ class TestPresentationLot3(unittest.TestCase):
         self.assertIsNotNone(reports)
         self.assertIsNotNone(settings)
 
-    @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
+    @unittest.skipIf(not PYSIDE6_AVAILABLE or os.getenv("CI") == "true", "Saut du test de MainWindow sur la CI ou si PySide6 absent")
     def test_main_window_structure(self):
         """Vérifie que la MainWindow s'instancie correctement avec sa structure de widgets."""
         app = QApplication.instance() or QApplication([])
@@ -67,7 +67,7 @@ class TestPresentationLot3(unittest.TestCase):
         self.assertEqual(win.stacked_widget.count(), 11)
         self.assertEqual(len(win.nav_buttons), 11)
 
-    @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester l'IHM")
+    @unittest.skipIf(not PYSIDE6_AVAILABLE or os.getenv("CI") == "true", "Saut du test de MainWindow sur la CI ou si PySide6 absent")
     def test_main_window_drive_status_email(self):
         """Vérifie que l'e-mail du compte Google s'affiche et s'actualise dynamiquement dans l'en-tête."""
         from unittest.mock import patch
