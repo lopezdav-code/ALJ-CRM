@@ -201,6 +201,129 @@ class AddAdherentsDialog(QDialog):
             self.accept()
 
 
+class AthleteBilanDetailDialog(QDialog):
+    """Boîte de dialogue affichant le détail des participations et règlements d'un athlète."""
+
+    def __init__(self, adherent_id: int, season: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Détail financier de l'athlète")
+        self.resize(620, 480)
+        self.adherent_id = adherent_id
+        self.season = season
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Récupération des données
+        bilan = CompetitionRepository.get_bilan(self.season)
+        stu = bilan["students"].get(self.adherent_id)
+        if not stu:
+            layout.addWidget(QLabel("Athlète introuvable."))
+            return
+
+        # Titre / En-tête
+        title_lbl = QLabel(f"🏃  {stu['nom']} {stu['prenom']}")
+        title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #1E3A8A;")
+        layout.addWidget(title_lbl)
+
+        info_lbl = QLabel(f"🪪 Licence : {stu.get('num_licence') or 'sans licence'}   ·   🏷️ Tarif : {stu.get('tarif') or '—'}")
+        info_lbl.setStyleSheet("color: #475569; font-size: 12px;")
+        layout.addWidget(info_lbl)
+
+        layout.addWidget(QLabel("<b>📋 Épreuves rattachées pour la saison :</b>"))
+
+        # Table des compétitions
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Épreuve", "Tarif épreuve", "Montant payé", "Statut paiement"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        
+        layout.addWidget(self.table, 1)
+
+        comps = bilan["competitions"]
+        parts = bilan["participations"]
+        payments = bilan["payments"]
+
+        active_comps = []
+        for c in comps:
+            statut = parts.get((self.adherent_id, c.id))
+            if statut:
+                pay_info = payments.get((self.adherent_id, c.id), {"montant_paye": 0.0, "prix": 0.0})
+                active_comps.append((c, statut, pay_info))
+
+        self.table.setRowCount(len(active_comps))
+        total_du = 0.0
+        total_paye = 0.0
+
+        for r, (c, statut, pay_info) in enumerate(active_comps):
+            total_du += pay_info["prix"]
+            total_paye += pay_info["montant_paye"]
+
+            comp_it = QTableWidgetItem(c.nom)
+            prix_it = QTableWidgetItem(f"{pay_info['prix']:.2f} €")
+            prix_it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            
+            paye_it = QTableWidgetItem(f"{pay_info['montant_paye']:.2f} €")
+            paye_it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            
+            statut_it = QTableWidgetItem(LIBELLES_STATUT_PAIEMENT.get(statut, statut))
+            if statut == "paye":
+                statut_it.setForeground(QColor(COLOR_SUCCESS))
+            else:
+                statut_it.setForeground(QColor(COLOR_WARNING))
+
+            for item in [comp_it, prix_it, paye_it, statut_it]:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
+            self.table.setItem(r, 0, comp_it)
+            self.table.setItem(r, 1, prix_it)
+            self.table.setItem(r, 2, paye_it)
+            self.table.setItem(r, 3, statut_it)
+
+        # Encadré de synthèse financière
+        solde = total_paye - total_du
+        summary_frame = QFrame()
+        summary_frame.setStyleSheet(
+            "QFrame { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }"
+        )
+        summary_layout = QVBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(12, 10, 12, 12)
+        summary_layout.setSpacing(6)
+
+        du_lbl = QLabel(f"Total dû pour la saison : <b>{total_du:.2f} €</b>")
+        paye_lbl = QLabel(f"Total payé sur HelloAsso : <b>{total_paye:.2f} €</b>")
+        
+        solde_lbl = QLabel()
+        if solde < -0.01:
+            solde_lbl.setText(f"Solde : <span style='color:{COLOR_ERROR}; font-weight:bold;'>⚠️ Non équilibré : reste dû {abs(solde):.2f} €</span>")
+        elif solde > 0.01:
+            solde_lbl.setText(f"Solde : <span style='color:{COLOR_ACTION}; font-weight:bold;'>Excédentaire (+{solde:.2f} €)</span>")
+        else:
+            solde_lbl.setText(f"Solde : <span style='color:{COLOR_SUCCESS}; font-weight:bold;'>✅ Équilibré (0.00 €)</span>")
+
+        for lbl in [du_lbl, paye_lbl, solde_lbl]:
+            lbl.setStyleSheet("border: none; font-size: 13px;")
+            summary_layout.addWidget(lbl)
+
+        layout.addWidget(summary_frame)
+
+        # Bouton fermer
+        btn_close = QPushButton("Fermer")
+        btn_close.setStyleSheet("QPushButton { font-weight: bold; padding: 6px 12px; }")
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close, 0, Qt.AlignRight)
+
+
 class ManualCorrectionDialog(QDialog):
     """Correction / rattachement manuel des paiements HelloAsso.
 
@@ -818,6 +941,10 @@ class CompetitionsPage(QWidget):
         tab2_layout.addWidget(self.balance_table)
         self.bilan_sub_tabs.addTab(tab2, "💶 Balance des paiements")
         
+        # Connection des clics
+        self.bilan_table.cellDoubleClicked.connect(self.on_bilan_row_clicked)
+        self.balance_table.cellDoubleClicked.connect(self.on_balance_row_clicked)
+        
         layout.addWidget(self.bilan_sub_tabs, 1)
         return frame
 
@@ -1411,6 +1538,7 @@ class CompetitionsPage(QWidget):
         row = 0
         for adherent_id, stu in students.items():
             nom_it = QTableWidgetItem(f"{stu['nom']} {stu['prenom']}")
+            nom_it.setData(Qt.UserRole, adherent_id)
             nom_it.setFlags(nom_it.flags() & ~Qt.ItemIsEditable)
             self.bilan_table.setItem(row, 0, nom_it)
             lic_it = QTableWidgetItem(stu.get("num_licence") or "—")
@@ -1459,6 +1587,7 @@ class CompetitionsPage(QWidget):
             solde = total_paye - total_du
             
             name_item = QTableWidgetItem(f"{stu['nom']} {stu['prenom']}")
+            name_item.setData(Qt.UserRole, adherent_id)
             licence_item = QTableWidgetItem(stu.get("num_licence") or "—")
             nb_item = QTableWidgetItem(str(nb_comp))
             du_item = QTableWidgetItem(f"{total_du:.2f} €")
@@ -1514,6 +1643,36 @@ class CompetitionsPage(QWidget):
                 row += [LIBELLES_STATUT_PAIEMENT.get(parts.get((adherent_id, c.id), ""), "") for c in comps]
                 writer.writerow(row)
         QMessageBox.information(self, "Export réussi", f"Bilan exporté :\n{path}")
+
+    def on_bilan_row_clicked(self, row: int, col: int):
+        item = self.bilan_table.item(row, 0)
+        if not item:
+            return
+        adherent_id = item.data(Qt.UserRole)
+        if adherent_id is None:
+            return # ligne de totaux ou en-tête
+        
+        season = self.bilan_season_combo.currentText()
+        if not season:
+            return
+            
+        dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        dlg.exec()
+
+    def on_balance_row_clicked(self, row: int, col: int):
+        item = self.balance_table.item(row, 0)
+        if not item:
+            return
+        adherent_id = item.data(Qt.UserRole)
+        if adherent_id is None:
+            return
+        
+        season = self.bilan_season_combo.currentText()
+        if not season:
+            return
+            
+        dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Google Drive
