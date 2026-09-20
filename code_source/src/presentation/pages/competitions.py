@@ -894,7 +894,7 @@ class CompetitionsPage(QWidget):
         self.items_table = QTableWidget(0, 12)
         self.items_table.setHorizontalHeaderLabels([
             "Payeur", "Montant", "Prix payé", "Commentaire", "N° de commande", "N° de licence",
-            "Compétition (Nom saisi)", "Compétition (N° saisi)",
+            "Compétition concernée", "Numéro de la compétition",
             "Compétition rattachée", "Adhérent rattaché", "Source", "État",
         ])
         items_header = self.items_table.horizontalHeader()
