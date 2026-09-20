@@ -603,6 +603,30 @@ class TestAutoLinkAndMirror(unittest.TestCase):
         u30 = [u for u in unlinked if u["id_item"] == 30][0]
         self.assertEqual(u30["adherent_id"], 1)
 
+    def test_item_comments_persistence(self):
+        # Initialise un miroir
+        items = [self._item(40, licence="123456", competition="EVT-2026-001")]
+        self.repo.sync_helloasso_mirror(items, [{"id": 40}], "slug")
+        
+        # Le commentaire par défaut doit être vide
+        unlinked = self.repo.list_unlinked_items()
+        u40 = [u for u in unlinked if u["id_item"] == 40][0]
+        self.assertEqual(u40["commentaire"], "")
+
+        # Enregistre un commentaire
+        self.assertTrue(self.repo.save_item_comment(40, "Commentaire de test"))
+        
+        # Le commentaire doit être retrouvé dans list_unlinked_items
+        unlinked = self.repo.list_unlinked_items()
+        u40_after = [u for u in unlinked if u["id_item"] == 40][0]
+        self.assertEqual(u40_after["commentaire"], "Commentaire de test")
+
+        # Nouvelle synchro HelloAsso : le commentaire doit survivre
+        self.repo.sync_helloasso_mirror(items, [{"id": 40}], "slug")
+        unlinked_post_sync = self.repo.list_unlinked_items()
+        u40_post_sync = [u for u in unlinked_post_sync if u["id_item"] == 40][0]
+        self.assertEqual(u40_post_sync["commentaire"], "Commentaire de test")
+
 
 class TestMatchAdherentByName(unittest.TestCase):
     """Pré-sélection du compétiteur par nom + prénom (ordre inversé accepté)."""

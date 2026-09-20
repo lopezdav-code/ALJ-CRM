@@ -333,18 +333,20 @@ class ManualCorrectionDialog(QDialog):
     club (rattaché à la compétition cible si besoin) — ou d'ignorer la ligne.
     Les lignes peuvent porter un `id_item` (miroir HelloAsso) : la correction est
     alors mémorisée comme lien durable dans item_links.
+    Permet également d'associer un commentaire persistant à l'article.
     """
 
     def __init__(self, manual_review: list, current_competition=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Correction manuelle — n° de compétition HelloAsso")
-        self.resize(1060, 560)
-        # corrections : [(id_item|None, competition_id, adherent_id, montant)]
+        self.resize(1160, 560)
+        # corrections : [{"id_item", "competition_id", "adherent_id", "montant", "commentaire"}]
         self.corrections = []
         self._review = manual_review
         self.current_competition = current_competition
         self._comp_combos = []
         self._part_combos = []
+        self._comment_edits = []
 
         layout = QVBoxLayout(self)
         head = QLabel(
@@ -352,16 +354,17 @@ class ManualCorrectionDialog(QDialog):
             "« Compétition concernée » du formulaire HelloAsso.\n"
             "Choisissez la compétition concernée puis le compétiteur à créditer (marqué « Payé »), "
             "ou laissez « — Ignorer — ».\n"
-            "Le compétiteur est présélectionné automatiquement : n° de licence, sinon nom + prénom du payeur."
+            "Vous pouvez également saisir un commentaire persistant pour expliquer le statut ou un changement."
         )
         head.setWordWrap(True)
         head.setStyleSheet("font-size: 13px; font-weight: bold; color: #1E293B;")
         layout.addWidget(head)
 
-        table = QTableWidget(len(manual_review), 6)
+        table = QTableWidget(len(manual_review), 7)
         table.setHorizontalHeaderLabels([
             "Payeur", "Montant", "Commande",
             "« Compétition concernée » (saisi sur HelloAsso)", "Compétition", "Compétiteur à créditer",
+            "Commentaire",
         ])
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -370,8 +373,10 @@ class ManualCorrectionDialog(QDialog):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
         table.setColumnWidth(4, 250)
         table.setColumnWidth(5, 220)
+        table.setColumnWidth(6, 200)
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
@@ -415,8 +420,17 @@ class ManualCorrectionDialog(QDialog):
             )
             table.setCellWidget(r, 4, combo_comp)
             table.setCellWidget(r, 5, combo_part)
+            
+            # Colonne « Commentaire » (QLineEdit éditable)
+            edit_comment = QLineEdit()
+            edit_comment.setText(str(rev.get("commentaire") or ""))
+            edit_comment.setPlaceholderText("Ajouter une note…")
+            edit_comment.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px; }")
+            table.setCellWidget(r, 6, edit_comment)
+            
             self._comp_combos.append(combo_comp)
             self._part_combos.append(combo_part)
+            self._comment_edits.append(edit_comment)
             table.setRowHeight(r, 36)
         self._table = table
         layout.addWidget(table, 1)
@@ -481,9 +495,14 @@ class ManualCorrectionDialog(QDialog):
         for r, rev in enumerate(self._review):
             comp_id = self._comp_combos[r].currentData()
             adherent_id = self._part_combos[r].currentData() if comp_id is not None else None
-            if comp_id is not None and adherent_id is not None:
-                self.corrections.append((rev.get("id_item"), int(comp_id),
-                                         int(adherent_id), float(rev.get("montant") or 0.0)))
+            comment = self._comment_edits[r].text().strip()
+            self.corrections.append({
+                "id_item": rev.get("id_item"),
+                "competition_id": int(comp_id) if comp_id is not None else None,
+                "adherent_id": int(adherent_id) if adherent_id is not None else None,
+                "montant": float(rev.get("montant") or 0.0),
+                "commentaire": comment
+            })
         self.accept()
 
 
@@ -872,9 +891,9 @@ class CompetitionsPage(QWidget):
         filter_row.addWidget(self.filter_comp_input, 1)
         layout.addLayout(filter_row)
 
-        self.items_table = QTableWidget(0, 11)
+        self.items_table = QTableWidget(0, 12)
         self.items_table.setHorizontalHeaderLabels([
-            "Payeur", "Montant", "Prix payé", "N° de commande", "N° de licence",
+            "Payeur", "Montant", "Prix payé", "Commentaire", "N° de commande", "N° de licence",
             "« Compétition concernée »", "Numéro de la compétition",
             "Compétition rattachée", "Adhérent rattaché", "Source", "État",
         ])
@@ -886,10 +905,11 @@ class CompetitionsPage(QWidget):
         items_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        items_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
-        items_header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
         items_header.setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         items_header.setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
+        items_header.setSectionResizeMode(11, QHeaderView.ResizeMode.ResizeToContents)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.items_table.setToolTip("Double-cliquez sur une ligne pour modifier son rattachement à une compétition ou un athlète.")
@@ -1381,9 +1401,14 @@ class CompetitionsPage(QWidget):
             px_paye.setForeground(QColor(COLOR_SUCCESS if px_paye_val else "#64748B"))
             table.setItem(r, 2, px_paye)
             
-            table.setItem(r, 3, QTableWidgetItem(str(it.get("order_id") or "")))
-            table.setItem(r, 4, QTableWidgetItem(str(it.get("licence_saisie") or "")))
-            table.setItem(r, 5, QTableWidgetItem(str(it.get("competition_saisie") or "")))
+            # Col 3: Commentaire
+            comment_item = QTableWidgetItem(str(it.get("commentaire") or ""))
+            comment_item.setForeground(QColor("#475569"))
+            table.setItem(r, 3, comment_item)
+            
+            table.setItem(r, 4, QTableWidgetItem(str(it.get("order_id") or "")))
+            table.setItem(r, 5, QTableWidgetItem(str(it.get("licence_saisie") or "")))
+            table.setItem(r, 6, QTableWidgetItem(str(it.get("competition_saisie") or "")))
             
             # Extraction dynamique du numéro de compétition depuis le JSON brut
             comp_num = ""
@@ -1398,18 +1423,18 @@ class CompetitionsPage(QWidget):
                             break
                 except Exception:
                     pass
-            table.setItem(r, 6, QTableWidgetItem(comp_num))
+            table.setItem(r, 7, QTableWidgetItem(comp_num))
             
-            table.setItem(r, 7, QTableWidgetItem(str(it.get("competition_nom") or "")))
-            table.setItem(r, 8, QTableWidgetItem(
+            table.setItem(r, 8, QTableWidgetItem(str(it.get("competition_nom") or "")))
+            table.setItem(r, 9, QTableWidgetItem(
                 f"{it.get('adherent_nom') or ''} {it.get('adherent_prenom') or ''}".strip()))
             source = QTableWidgetItem(str(it.get("source") or "—"))
             if str(it.get("source")) == "manuel":
                 source.setForeground(QColor(COLOR_SUCCESS))
-            table.setItem(r, 9, source)
+            table.setItem(r, 10, source)
             etat = QTableWidgetItem(str(it.get("etat") or "").capitalize())
             etat.setForeground(QColor("#64748B"))
-            table.setItem(r, 10, etat)
+            table.setItem(r, 11, etat)
             table.setRowHeight(r, 26)
         self.btn_attach_items.setText(
             f"🔗  Rattacher les paiements en attente ({nb_attente})"
@@ -1425,8 +1450,8 @@ class CompetitionsPage(QWidget):
             payer_item = table.item(r, 0)
             payer_text = normalize_string(payer_item.text() if payer_item else "")
             
-            comp_saisie_item = table.item(r, 5)
-            comp_rattachee_item = table.item(r, 7)
+            comp_saisie_item = table.item(r, 6)
+            comp_rattachee_item = table.item(r, 8)
             comp_text = " ".join([
                 comp_saisie_item.text() if comp_saisie_item else "",
                 comp_rattachee_item.text() if comp_rattachee_item else ""
@@ -1556,8 +1581,27 @@ class CompetitionsPage(QWidget):
         dlg = ManualCorrectionDialog(manual_review, current_competition, self)
         if not dlg.exec() or not dlg.corrections:
             return
-        for id_item, comp_id, adherent_id, _montant in dlg.corrections:
-            CompetitionRepository.set_item_link(id_item, comp_id, adherent_id, source="manuel")
+        for corr in dlg.corrections:
+            id_item = corr["id_item"]
+            comp_id = corr["competition_id"]
+            adherent_id = corr["adherent_id"]
+            comment = corr["commentaire"]
+            
+            # Enregistrer le commentaire persistant
+            CompetitionRepository.save_item_comment(id_item, comment)
+            
+            # Mettre à jour ou supprimer le lien de rattachement
+            if comp_id is None:
+                # Suppression de la liaison existante si l'utilisateur a choisi "Ignorer"
+                conn = CompetitionRepository.get_connection()
+                try:
+                    conn.execute("DELETE FROM item_links WHERE id_item = ?", (id_item,))
+                    conn.commit()
+                finally:
+                    conn.close()
+            else:
+                CompetitionRepository.set_item_link(id_item, comp_id, adherent_id, source="manuel")
+                
         # Report de TOUS les liens (y compris les corrections qui viennent d'être saisies)
         reported = CompetitionRepository.apply_links_to_participants()
         self._refresh_mirror_table()

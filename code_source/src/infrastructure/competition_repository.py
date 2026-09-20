@@ -124,7 +124,8 @@ class CompetitionRepository:
                 competition_saisie TEXT DEFAULT '',
                 campagne_slug      TEXT DEFAULT '',
                 raw_json           TEXT DEFAULT '',
-                synced_at          TEXT DEFAULT ''
+                synced_at          TEXT DEFAULT '',
+                commentaire        TEXT DEFAULT ''
             );
 
             /* Liens locaux corrigibles : 1 ligne par article -> (compétition, adhérent).
@@ -817,6 +818,7 @@ class CompetitionRepository:
                 "valeur_champ": str(r["competition_saisie"] or ""),
                 "adherent_id": preselect,
                 "participant": "",
+                "commentaire": str(r["commentaire"] or ""),
             })
         return result
 
@@ -922,3 +924,16 @@ class CompetitionRepository:
         finally:
             conn.close()
         return [Competition.from_row(dict(r)) for r in rows]
+
+    @classmethod
+    def save_item_comment(cls, id_item: int, comment: str) -> bool:
+        """Enregistre un commentaire persistant sur une ligne de paiement HelloAsso."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            conn.execute("UPDATE helloasso_items SET commentaire = ? WHERE id_item = ?", (comment, id_item))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+        return False
