@@ -403,6 +403,10 @@ class ManualCorrectionDialog(QDialog):
                 idx = combo_comp.findData(current_competition.id)
                 if idx > 0:
                     combo_comp.setCurrentIndex(idx)
+            elif rev.get("competition_id") is not None:
+                idx = combo_comp.findData(rev.get("competition_id"))
+                if idx > 0:
+                    combo_comp.setCurrentIndex(idx)
             combo_part = QComboBox()
             self._fill_participant_combo(combo_part, combo_comp.currentData(),
                                          rev.get("adherent_id"), rev.get("payer") or "")
@@ -874,6 +878,8 @@ class CompetitionsPage(QWidget):
         items_header.setSectionResizeMode(10, QHeaderView.ResizeMode.ResizeToContents)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.items_table.setToolTip("Double-cliquez sur une ligne pour modifier son rattachement à une compétition ou un athlète.")
+        self.items_table.cellDoubleClicked.connect(self.on_item_double_clicked)
         layout.addWidget(self.items_table, 1)
         return frame
 
@@ -1343,7 +1349,10 @@ class CompetitionsPage(QWidget):
             linked_adh = it.get("adherent_id") is not None
             if not linked_comp or not linked_adh:
                 nb_attente += 1
-            table.setItem(r, 0, QTableWidgetItem(f"{it.get('payer_nom') or ''} {it.get('payer_prenom') or ''}".strip()))
+                
+            payer_item = QTableWidgetItem(f"{it.get('payer_nom') or ''} {it.get('payer_prenom') or ''}".strip())
+            payer_item.setData(Qt.UserRole, it.get('id_item'))
+            table.setItem(r, 0, payer_item)
             
             montant = QTableWidgetItem(f"{float(it.get('montant') or 0):.2f} €")
             montant.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1391,6 +1400,43 @@ class CompetitionsPage(QWidget):
         self.btn_attach_items.setText(
             f"🔗  Rattacher les paiements en attente ({nb_attente})"
         )
+
+    def on_item_double_clicked(self, row: int, col: int):
+        payer_item = self.items_table.item(row, 0)
+        if not payer_item:
+            return
+        id_item = payer_item.data(Qt.UserRole)
+        if id_item is None:
+            return
+            
+        # Récupère l'article spécifique pour correction manuelle
+        conn = CompetitionRepository.get_connection()
+        try:
+            r = conn.execute(
+                """SELECT h.*, l.competition_id, l.adherent_id
+                   FROM helloasso_items h
+                   LEFT JOIN item_links l ON l.id_item = h.id_item
+                   WHERE h.id_item = ?""",
+                (id_item,)
+            ).fetchone()
+        finally:
+            conn.close()
+            
+        if not r:
+            return
+            
+        r = dict(r)
+        review_item = {
+            "id_item": r["id_item"],
+            "payer": f"{r['payer_nom']} {r['payer_prenom']}".strip(),
+            "montant": r["montant"],
+            "order_ref": r["order_id"],
+            "valeur_champ": r["competition_saisie"],
+            "adherent_id": r["adherent_id"],
+            "competition_id": r["competition_id"]
+        }
+        
+        self._run_manual_corrections([review_item], current_competition=None)
 
     def on_save_annual_campaign(self):
         slug = self.annual_campaign_input.text().strip()
