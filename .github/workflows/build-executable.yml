@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write # Nécessaire pour créer la release via GITHUB_TOKEN
 
     steps:
     - name: Checkout Repository
