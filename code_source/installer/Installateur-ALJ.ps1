@@ -1,7 +1,8 @@
 ﻿# Installateur ALJ Escalade Manager
 # ==============================================================================
 # Assistant d'installation du pack portable :
-#   1. Choix du dossier d'installation + détection du zip ALJ_Portable_v*.zip
+#   1. Choix du dossier d'installation + zip ALJ_Portable_v*.zip local,
+#      sinon téléchargement automatique depuis la dernière release GitHub
 #   2. Saisie des accès obligatoires (HelloAsso, Google Drive, Gmail)
 #   3. Extraction, écriture du .env local, raccourci bureau, lancement
 # Le .env est créé SUR le poste de l'utilisateur : aucun secret n'est distribué
@@ -9,7 +10,7 @@
 # ==============================================================================
 param(
     [string]$Dossier,      # mode silencieux : dossier d'installation cible
-    [string]$Zip,          # mode silencieux : chemin du zip (sinon détection auto)
+    [string]$Zip,          # mode silencieux : chemin du zip (sinon détection auto/téléchargement)
     [switch]$Silent        # sans interface : lit ALJCFG_<CLE> dans l'environnement
 )
 
@@ -18,6 +19,7 @@ Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
 $script:InstallerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:GitHubRepo = "lopezdav-code/ALJ-CRM"
 
 # --- Accès demandés à l'utilisateur -------------------------------------------
 # label affiché | clé .env | masqué ? | obligatoire ?
@@ -45,6 +47,61 @@ function Find-PortableZip {
         (Get-ChildItem -LiteralPath $Dossier -Filter "ALJ_Portable_v*.zip" -File -ErrorAction SilentlyContinue)
     ) | Where-Object { $_ }
     return ($candidats | Sort-Object Name -Descending | Select-Object -First 1)
+}
+
+function Save-PortableZipDepuisGitHub {
+    # Télécharge le pack portable depuis la dernière release GitHub (publique)
+    # et vérifie son empreinte SHA256 (SHA256SUMS.txt de la release).
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue" # accélère fortement Invoke-WebRequest
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$script:GitHubRepo/releases/latest" -UseBasicParsing
+        $asset = $release.assets | Where-Object { $_.name -like "ALJ_Portable_*.zip" } | Select-Object -First 1
+        if (-not $asset) {
+            Write-Log "❌ Aucun pack ALJ_Portable_*.zip trouvé dans la dernière release GitHub."
+            return $null
+        }
+        $dossier = Join-Path $env:TEMP "ALJ_Install"
+        New-Item -ItemType Directory -Force -Path $dossier | Out-Null
+        $dest = Join-Path $dossier $asset.name
+        if (Test-Path -LiteralPath $dest) {
+            Write-Log "♻️ Pack déjà téléchargé : $($asset.name)"
+        } else {
+            Write-Log "⬇️ Téléchargement de $($asset.name) ($([Math]::Round($asset.size / 1MB, 1)) Mo)... cela peut prendre plusieurs minutes."
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest -UseBasicParsing
+            Write-Log "✅ Téléchargement terminé : $dest"
+        }
+        # Vérification de l'intégrité (SHA256SUMS.txt de la release)
+        $sumsAsset = $release.assets | Where-Object { $_.name -eq "SHA256SUMS.txt" } | Select-Object -First 1
+        if ($sumsAsset) {
+            try {
+                $resp = Invoke-WebRequest -Uri $sumsAsset.browser_download_url -UseBasicParsing
+                $sums = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }
+                $attendu = ($sums -split "`r?`n" | Where-Object {
+                        $_ -match "^\s*([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($asset.name))\s*$"
+                    } | ForEach-Object { $Matches[1] } | Select-Object -First 1)
+                if ($attendu) {
+                    $reel = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+                    if ($reel -ne $attendu) {
+                        Write-Log "❌ Empreinte SHA256 invalide : le pack téléchargé est corrompu."
+                        return $null
+                    }
+                    Write-Log "✅ Intégrité du pack vérifiée (SHA256)."
+                } else {
+                    Write-Log "⚠️ Pack absent de SHA256SUMS.txt : intégrité non vérifiée."
+                }
+            } catch {
+                Write-Log "⚠️ Vérification SHA256 impossible : $($_.Exception.Message)"
+            }
+        }
+        return Get-Item -LiteralPath $dest
+    } catch {
+        Write-Log "❌ Échec du téléchargement depuis GitHub : $($_.Exception.Message)"
+        return $null
+    } finally {
+        $ProgressPreference = $oldProgress
+    }
 }
 
 function Write-Log {
@@ -91,10 +148,14 @@ function Install-ALJ {
         Find-PortableZip -Dossier $DossierChoisi
     }
     if (-not $zip) {
-        if ($Silent) { Write-Error "Aucun fichier ALJ_Portable_v*.zip trouvé." }
+        Write-Log "🔍 Aucun pack local trouvé : téléchargement depuis GitHub..."
+        $zip = Save-PortableZipDepuisGitHub
+    }
+    if (-not $zip) {
+        if ($Silent) { Write-Error "Aucun fichier ALJ_Portable_v*.zip trouvé ni téléchargeable." }
         else {
             [System.Windows.Forms.MessageBox]::Show(
-                "Aucun fichier ALJ_Portable_v*.zip trouvé.`nPlacez-le à côté de l'installateur ou indiquez-le dans le dossier choisi.",
+                "Aucun fichier ALJ_Portable_v*.zip trouvé et le téléchargement depuis GitHub a échoué.`nVérifiez la connexion Internet ou placez le zip à côté de l'installateur.",
                 "Archive introuvable", "OK", "Warning") | Out-Null
         }
         return $false
