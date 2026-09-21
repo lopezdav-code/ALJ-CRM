@@ -70,6 +70,8 @@ jobs:
           code_source/dist_release/alj_source_*.zip
           code_source/dist_release/ALJ_Portable_*.zip
           code_source/dist_release/SHA256SUMS.txt
+          code_source/dist_release/Installateur-ALJ.bat
+          code_source/dist_release/Installateur-ALJ.ps1
         name: Release ${{ github.ref_name }}
         draft: false
         prerelease: false
