@@ -14,7 +14,6 @@ if _script_dir not in sys.path:
 
 # Importer les modules locaux
 try:
-    from paths import CODE_ROOT, ROOT_DIR, DATA_ROOT
     from infrastructure.secret_store import SecretStore
     from infrastructure.google_drive_client import GoogleDriveClient
     from infrastructure.sqlite_repository import SqliteRepository
