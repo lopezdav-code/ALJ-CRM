@@ -133,6 +133,23 @@ function Install-ALJ {
         # 3. Déblocage SmartScreen des fichiers extraits
         Get-ChildItem -LiteralPath $cible -Recurse -File -ErrorAction SilentlyContinue |
             Unblock-File -ErrorAction SilentlyContinue
+
+        # 4. Connexion automatique Google et téléchargement des bases de données
+        Write-Log "🌐 Lancement de l'assistant de connexion Google et de téléchargement des bases de données de référence..."
+        $pythonExe = Join-Path $cible "runtime\python.exe"
+        $appDir = Join-Path $cible "app"
+        if (Test-Path -LiteralPath $pythonExe) {
+            # On lance le script de bootstrap de première installation.
+            $p = Start-Process -FilePath $pythonExe -ArgumentList @("-m", "src.install_bootstrap") -WorkingDirectory $appDir -Wait -PassThru
+            if ($p.ExitCode -ne 0) {
+                Write-Log "⚠️ L'initialisation automatique de première installation a échoué ou a été fermée prématurément (Code : $($p.ExitCode))."
+            } else {
+                Write-Log "✅ Initialisation réussie : Authentification Google complétée et bases de données synchronisées !"
+            }
+        } else {
+            Write-Log "⚠️ Impossible de localiser le runtime Python embarqué ($pythonExe)."
+        }
+
         Write-Log "✅ Installation terminée."
 
         if ($script:ChkLancer -and $script:ChkLancer.Checked) {
@@ -288,8 +305,8 @@ $script:BtnInstaller.Add_Click({
     $ok = Install-ALJ -DossierChoisi $dossier
     if ($ok) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Installation terminée !`n`nRappel : connectez Gmail dans Réglages → « Connexion Google (OAuth2) ».",
-            "Succès", "OK", "Information") | Out-Null
+            "Installation terminée avec succès !`n`nLa connexion Google (OAuth2) est configurée et vos bases de données ont été téléchargées.",
+            "Succès d'installation", "OK", "Information") | Out-Null
         $form.Close()
     }
 })

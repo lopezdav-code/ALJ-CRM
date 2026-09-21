@@ -33,6 +33,7 @@ C:\Users\a138672\OneDrive - Worldline\Desktop\Import Export Script\code_source\
     ├── presence_sheet_generator.py                              # Génération des fiches de présence d'un cours depuis un template et "planning.json"
     ├── urgency_contact_generator.py                             # Génération d'une fiche globale A4 des contacts d'urgence triée par nom
     ├── attestation_generator.py                                 # Génération d'attestations de paiement (génère .docx et exporte en .pdf via MS Word)
+    ├── install_bootstrap.py                                     # [BOOTSTRAP] Authentification Google & téléchargement automatique des BDD d'adhérents et de compétitions
     └── server.py                                                # Serveur FastAPI pour exposer les données vers un tableau de bord (Port local)
 ```
 

@@ -2,20 +2,14 @@
 
 ## Première installation (5 minutes)
 
-1. Télécharger **`ALJ_Portable_vX.Y.Z.zip`** depuis la page
-   [Releases du projet](https://github.com/lopezdav-code/ALJ-CRM/releases)
-   (dernière release, section *Assets*).
-2. Extraire le dossier **`ALJ`** où vous voulez : sur le disque dur, sur une clé USB...
-   (clic droit → *Extraire tout*).
-3. Double-cliquer sur **`Lancer-ALJ.bat`**.
+1. Télécharger **`ALJ_Portable_vX.Y.Z.zip`** depuis la page [Releases du projet](https://github.com/lopezdav-code/ALJ-CRM/releases) (dernière release, section *Assets*).
+2. Placer à côté l'assistant d'installation (le dossier `installer/` contenant `Installateur-ALJ.bat` et `Installateur-ALJ.ps1`).
+3. Double-cliquer sur **`Installateur-ALJ.bat`**.
+4. Renseigner les clés d'accès dans l'assistant graphique : le programme va s'extraire automatiquement, puis lancer l'assistant de connexion Google (OAuth2) dans votre navigateur pour synchroniser et télécharger immédiatement vos deux bases de données de référence (`database.db` et `database_Competition.db`).
 
-Au premier lancement :
-- l'application démarre directement (tout est embarqué, aucune installation) ;
-- pour l'envoi d'e-mails / Google Drive, cliquer sur *Paramètres* dans l'application
-  et suivre l'assistant de connexion Google (1 clic, propre à chaque ordinateur).
+Un raccourci est automatiquement créé sur votre bureau ! Double-cliquez dessus pour lancer l'application.
 
-> Si Windows affiche « Windows a protégé votre PC », cliquer
-> **Informations complémentaires → Exécuter quand même** (application non signée).
+> Si Windows affiche « Windows a protégé votre PC », cliquer **Informations complémentaires → Exécuter quand même** (application non signée).
 
 ## Mises à jour automatiques
 
