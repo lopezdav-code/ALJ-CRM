@@ -292,7 +292,7 @@ foreach ($c in $script:Champs) {
     $form.Controls.Add($lbl)
 
     $inp = New-Object System.Windows.Forms.TextBox
-    $inp.Location = New-Object System.Drawing.Point(385, $y - 2)
+    $inp.Location = New-Object System.Drawing.Point(385, ($y - 2))
     $inp.Size = New-Object System.Drawing.Size(233, 24)
     if ($c[2]) { $inp.UseSystemPasswordChar = $true }
     $script:Inputs[$c[1]] = $inp
@@ -304,7 +304,7 @@ foreach ($c in $script:Champs) {
 $note = New-Object System.Windows.Forms.Label
 $note.Text = "La connexion Gmail (jeton OAuth2) se fait ensuite dans l'application : Réglages → « Connexion Google (OAuth2) »."
 $note.ForeColor = [System.Drawing.Color]::DimGray
-$note.Location = New-Object System.Drawing.Point(20, $y + 2)
+$note.Location = New-Object System.Drawing.Point(20, ($y + 2))
 $note.Size = New-Object System.Drawing.Size(590, 34)
 $form.Controls.Add($note)
 $y += 40
@@ -330,7 +330,7 @@ $form.Controls.Add($script:ChkLancer)
 
 $script:BtnInstaller = New-Object System.Windows.Forms.Button
 $script:BtnInstaller.Text = "Installer"
-$script:BtnInstaller.Location = New-Object System.Drawing.Point(460, $y - 4)
+$script:BtnInstaller.Location = New-Object System.Drawing.Point(460, ($y - 4))
 $script:BtnInstaller.Size = New-Object System.Drawing.Size(158, 34)
 $script:BtnInstaller.BackColor = [System.Drawing.Color]::FromArgb(16, 185, 129)
 $script:BtnInstaller.ForeColor = [System.Drawing.Color]::White
