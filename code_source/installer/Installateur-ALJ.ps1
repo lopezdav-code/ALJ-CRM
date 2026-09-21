@@ -52,6 +52,8 @@ function Find-PortableZip {
 function Save-PortableZipDepuisGitHub {
     # Télécharge le pack portable depuis la dernière release GitHub (publique)
     # et vérifie son empreinte SHA256 (SHA256SUMS.txt de la release).
+    # Un pack en cache n'est réutilisé que si son empreinte correspond à la
+    # release courante (sinon il est supprimé et retéléchargé).
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $oldProgress = $ProgressPreference
     $ProgressPreference = "SilentlyContinue" # accélère fortement Invoke-WebRequest
@@ -62,17 +64,8 @@ function Save-PortableZipDepuisGitHub {
             Write-Log "❌ Aucun pack ALJ_Portable_*.zip trouvé dans la dernière release GitHub."
             return $null
         }
-        $dossier = Join-Path $env:TEMP "ALJ_Install"
-        New-Item -ItemType Directory -Force -Path $dossier | Out-Null
-        $dest = Join-Path $dossier $asset.name
-        if (Test-Path -LiteralPath $dest) {
-            Write-Log "♻️ Pack déjà téléchargé : $($asset.name)"
-        } else {
-            Write-Log "⬇️ Téléchargement de $($asset.name) ($([Math]::Round($asset.size / 1MB, 1)) Mo)... cela peut prendre plusieurs minutes."
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest -UseBasicParsing
-            Write-Log "✅ Téléchargement terminé : $dest"
-        }
-        # Vérification de l'intégrité (SHA256SUMS.txt de la release)
+        # Empreinte attendue (SHA256SUMS.txt de la release courante)
+        $attendu = $null
         $sumsAsset = $release.assets | Where-Object { $_.name -eq "SHA256SUMS.txt" } | Select-Object -First 1
         if ($sumsAsset) {
             try {
@@ -81,19 +74,39 @@ function Save-PortableZipDepuisGitHub {
                 $attendu = ($sums -split "`r?`n" | Where-Object {
                         $_ -match "^\s*([0-9a-fA-F]{64})\s+\*?$([regex]::Escape($asset.name))\s*$"
                     } | ForEach-Object { $Matches[1] } | Select-Object -First 1)
-                if ($attendu) {
-                    $reel = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
-                    if ($reel -ne $attendu) {
-                        Write-Log "❌ Empreinte SHA256 invalide : le pack téléchargé est corrompu."
-                        return $null
-                    }
-                    Write-Log "✅ Intégrité du pack vérifiée (SHA256)."
-                } else {
-                    Write-Log "⚠️ Pack absent de SHA256SUMS.txt : intégrité non vérifiée."
-                }
             } catch {
-                Write-Log "⚠️ Vérification SHA256 impossible : $($_.Exception.Message)"
+                Write-Log "⚠️ SHA256SUMS.txt indisponible : $($_.Exception.Message)"
             }
+        }
+        $dossier = Join-Path $env:TEMP "ALJ_Install"
+        New-Item -ItemType Directory -Force -Path $dossier | Out-Null
+        $dest = Join-Path $dossier $asset.name
+        # Cache : réutilisé uniquement si son empreinte correspond à la release courante
+        if (Test-Path -LiteralPath $dest) {
+            $okCache = $false
+            if ($attendu) {
+                try { $okCache = ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash -eq $attendu) } catch { $okCache = $false }
+            }
+            if ($okCache) {
+                Write-Log "♻️ Pack déjà téléchargé (intégrité vérifiée) : $($asset.name)"
+                return Get-Item -LiteralPath $dest
+            }
+            Write-Log "⚠️ Pack en cache obsolète : nouveau téléchargement."
+            Remove-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+        }
+        Write-Log "⬇️ Téléchargement de $($asset.name) ($([Math]::Round($asset.size / 1MB, 1)) Mo)... cela peut prendre plusieurs minutes."
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest -UseBasicParsing
+        Write-Log "✅ Téléchargement terminé."
+        if ($attendu) {
+            $reel = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+            if ($reel -ne $attendu) {
+                Remove-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+                Write-Log "❌ Empreinte SHA256 invalide après téléchargement : le pack est corrompu."
+                return $null
+            }
+            Write-Log "✅ Intégrité du pack vérifiée (SHA256)."
+        } else {
+            Write-Log "⚠️ Intégrité non vérifiée (SHA256SUMS.txt indisponible)."
         }
         return Get-Item -LiteralPath $dest
     } catch {
