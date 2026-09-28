@@ -14,8 +14,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from domain.constants import get_active_season
-env_slug = os.getenv("CAMPAIGN_SLUG")
-TARGET_SLUG = env_slug.strip() if env_slug and env_slug.strip() else f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade"
+from infrastructure.secret_store import SecretStore
+
+
+def get_target_slug():
+    """Slug de la campagne d'adhésion : lu à chaque appel pour prendre en compte
+    les modifications faites dans la page Paramètres sans redémarrer l'application."""
+    slug = (SecretStore.get_secret("CAMPAIGN_SLUG") or "").strip()
+    if not slug:
+        slug = f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade-2"
+    if "helloasso.com" in slug.lower():
+        slug = [s for s in slug.split("/") if s.strip()][-1]
+    return slug
 
 app = FastAPI(title="Admin Escalade API")
 
@@ -62,13 +72,14 @@ def get_dashboard_data(background_tasks: BackgroundTasks = None, force_refresh: 
     print("-> Interrogation de l'API HelloAsso...")
     
     campaigns = get_campaigns()
-    target_camp = next((c for c in campaigns if c.get('formSlug') == TARGET_SLUG), None)
+    target_slug = get_target_slug()
+    target_camp = next((c for c in campaigns if c.get('formSlug') == target_slug), None)
     
     if not target_camp:
         return {"error": "Campagne introuvable"}
         
     c_type = target_camp.get('formType')
-    items = get_items(c_type, TARGET_SLUG)
+    items = get_items(c_type, target_slug)
     
     inscrits = [i for i in items if i.get('type') in ('Registration', 'Membership')]
     

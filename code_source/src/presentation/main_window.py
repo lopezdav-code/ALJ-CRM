@@ -374,7 +374,7 @@ class MainWindow(QMainWindow):
     def start_sync_workflow(self):
         """Déclenche la synchronisation HelloAsso & Google Drive en arrière-plan."""
         drive_file_id = SecretStore.get_secret("GOOGLE_DRIVE_FILE_ID")
-        campaign_slug = SecretStore.get_secret("CAMPAIGN_SLUG") or f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade"
+        campaign_slug = SecretStore.get_secret("CAMPAIGN_SLUG") or f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade-2"
 
         print("🔄 [MAIN] Lancement du worker de synchronisation HelloAsso...")
 

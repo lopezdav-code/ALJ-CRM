@@ -93,7 +93,7 @@ HELLOASSO_ORG_SLUG=amicale-laique-de-jonage # Identifiant de l'association
 
 # Spécification de la campagne de référence
 CAMPAIGN_TYPE=Membership
-CAMPAIGN_SLUG=adhesion-escalade-2026-2027-amicale-laique-escalade
+CAMPAIGN_SLUG=adhesion-escalade-2026-2027-amicale-laique-escalade-2
 
 # Synchronisation du tableur central Google Drive
 GOOGLE_DRIVE_FILE_ID=identifiant_unique_du_fichier_excel_sur_drive
