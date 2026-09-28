@@ -328,6 +328,13 @@ class MainWindow(QMainWindow):
             members_page = self.stacked_widget.widget(0)
             if hasattr(members_page, "load_members_from_repository") and self.stacked_widget.currentIndex() != 0:
                 members_page.load_members_from_repository(force_reload=True)
+
+            # Invalider aussi les caches des onglets Communications (2) et Documents (1)
+            for idx in (1, 2):
+                page = self.stacked_widget.widget(idx)
+                if hasattr(page, "load_members"):
+                    page.load_members()
+
             self.on_nav_changed(self.stacked_widget.currentIndex(), force_reload=True)
         else:
             QMessageBox.critical(
@@ -507,6 +514,14 @@ class MainWindow(QMainWindow):
             members_page = self.stacked_widget.widget(0)
             if hasattr(members_page, "load_members_from_repository") and self.stacked_widget.currentIndex() != 0:
                 members_page.load_members_from_repository(force_reload=True)
+
+            # Les onglets Communications (2) et Documents (1) gardent eux aussi un
+            # cache mémoire chargé au démarrage : les recharger pour que les
+            # nouveaux adhérents apparaissent sans redémarrer l'application.
+            for idx in (1, 2):
+                page = self.stacked_widget.widget(idx)
+                if hasattr(page, "load_members"):
+                    page.load_members()
 
             self.on_nav_changed(self.stacked_widget.currentIndex(), force_reload=True)
         else:
