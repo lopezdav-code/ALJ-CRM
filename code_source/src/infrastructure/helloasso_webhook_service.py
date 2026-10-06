@@ -29,6 +29,10 @@ from domain.competition_matching import (
 )
 from infrastructure.competition_repository import CompetitionRepository
 
+# Type helper pour tuple (défini AVANT la classe : les annotations sont évaluées
+# à l'import en Python <= 3.13, une définition en fin de fichier lèverait NameError)
+Tuple_Items = tuple[str, List[Dict[str, Any]]]
+
 
 class HelloAssoWebhookService:
     """Service de gestion des webhooks HelloAsso."""
@@ -219,7 +223,3 @@ class HelloAssoWebhookService:
             "anomalies": anomalies,
             "timestamp": now_str
         }
-
-
-# Type helper pour tuple
-Tuple_Items = tuple[str, List[Dict[str, Any]]]
