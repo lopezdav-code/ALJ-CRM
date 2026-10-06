@@ -47,6 +47,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // 5. Référentiel des coachs (gestion des entraîneurs)
+    match /coaches/{coachId} {
+      allow read: if isAuthenticated();
+      allow write: if isCoach();
+    }
+
     // 4. Modèles d'e-mails : Lecture par les coachs, modification par les admins
     match /email_templates/{templateId} {
       allow read: if isCoach();

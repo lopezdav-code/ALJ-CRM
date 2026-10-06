@@ -490,7 +490,7 @@ function stopListeners() {
 function onSnapshotArrived(name) {
   snapshotsReady++;
   lastSyncAt = new Date();
-  if (snapshotsReady === 3) {
+  if (snapshotsReady >= 3) {
     setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate(lastSyncAt.toISOString()));
     renderAll();
     if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
@@ -500,12 +500,17 @@ function onSnapshotArrived(name) {
 }
 function onSnapshotError(name, err) {
   console.error("Firestore " + name + " :", err);
+  snapshotsReady++; // une collection en échec ne bloque pas le rendu des autres
   if (err.code === "permission-denied") {
-    setSyncInfo("🔒 Accès refusé par les règles Firestore");
-    toast("🔒 Accès refusé : votre compte doit être coach ou admin (voir Paramètres du bureau).", 9000);
+    setSyncInfo("🔒 Accès refusé par les règles Firestore (" + name + ")");
+    toast("🔒 Lecture « " + name + " » refusée : votre compte doit être coach ou admin.", 9000);
   } else {
     setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
     toast("❌ Firestore : " + (err.message || err), 9000);
+  }
+  if (snapshotsReady >= 3) {
+    renderAll();
+    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
   }
 }
 
