@@ -404,15 +404,41 @@ function showPage(name) {
 function setSyncInfo(msg) { $("#sync-info").textContent = msg; }
 
 /* ===================== Authentification Firebase ===================== */
-const googleProvider = new firebase.auth.GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: "select_account" });
+/* Flux : OAuth Google implicite (même origine, client 796572126711) puis
+   signInWithCredential — évite la redirection via firebaseapp.com dont le
+   stockage inter-sites est bloqué (Firefox ETP, navigation privée, PWA). */
+const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const OAUTH_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com";
+const OAUTH_SCOPES = "openid email profile";
 
 function login() {
-  // Redirection (plus fiable que la popup en PWA installée sur smartphone)
-  auth.signInWithRedirect(googleProvider).catch(e => showAuthError(e));
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    b => b.toString(16).padStart(2, "0")).join("");
+  sessionStorage.setItem("alj_oauth_state", state);
+  const url = OAUTH_AUTH_URL
+    + "?client_id=" + encodeURIComponent(OAUTH_CLIENT_ID)
+    + "&redirect_uri=" + encodeURIComponent(location.origin + location.pathname)
+    + "&response_type=token"
+    + "&scope=" + encodeURIComponent(OAUTH_SCOPES)
+    + "&state=" + state
+    + "&prompt=select_account";
+  location.assign(url);
 }
 function logout() {
   auth.signOut().catch(() => {});
+}
+function readOauthFragment() {
+  if (!location.hash || location.hash.length < 2) return null;
+  const params = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname + location.search);
+  if (params.get("error")) throw new Error("Connexion Google refusée : " + params.get("error"));
+  const token = params.get("access_token");
+  if (!token) return null;
+  const state = params.get("state");
+  const expected = sessionStorage.getItem("alj_oauth_state");
+  sessionStorage.removeItem("alj_oauth_state");
+  if (!state || state !== expected) throw new Error("Session de connexion invalide — cliquez à nouveau sur « Se connecter ».");
+  return token;
 }
 function showAuthError(e) {
   console.error(e);
@@ -1308,8 +1334,18 @@ function wireEvents() {
   try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
   catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 
-  // Retour de la redirection Google (sign-in) : onAuthStateChanged prend le relais
-  auth.getRedirectResult().catch(showAuthError);
+  // Retour de Google après la redirection OAuth : access_token dans le fragment (#…)
+  // → connexion Firebase avec le credential Google (pas de domaine tiers impliqué)
+  try {
+    const oauthToken = readOauthFragment();
+    if (oauthToken) {
+      setSyncInfo("Connexion Firebase…");
+      const credential = firebase.auth.GoogleAuthProvider.credential(null, oauthToken);
+      await auth.signInWithCredential(credential);
+    }
+  } catch (e) {
+    showAuthError(e);
+  }
 })();
 </script>
 </body>
