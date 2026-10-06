@@ -1,0 +1,2 @@
+# Conserver les retours à la ligne Linux (LF) pour les scripts shell
+*.sh text eol=lf
