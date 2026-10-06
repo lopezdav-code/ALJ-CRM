@@ -216,13 +216,15 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 // Valeurs pré-chargées pour le club (modifiables via ⚙️) :
 // l'ID client OAuth est public par conception ; l'accès au fichier database.db
 // reste contrôlé par les autorisations de partage Drive du fichier.
-const DEFAULT_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
+const DEFAULT_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com";
+const LEGACY_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
 const DEFAULT_FILE_ID = "1ctJi08b33sr5l5WZjflExGbALo3Au8U7";
 
 let cfg = Object.assign(
   { clientId: DEFAULT_CLIENT_ID, fileId: DEFAULT_FILE_ID },
   JSON.parse(localStorage.getItem(CFG_KEY) || "{}")
 );
+if (cfg.clientId === LEGACY_CLIENT_ID) cfg.clientId = DEFAULT_CLIENT_ID;
 let filters = Object.assign(
   { status: "", season: "2026-2027", groups: {}, others: {} },
   JSON.parse(localStorage.getItem(FILTER_KEY) || "{}")

@@ -368,7 +368,8 @@ const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
-const DEFAULT_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
+const DEFAULT_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com";
+const LEGACY_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
 // ID du fichier database_Competition.db sur le Drive du club (pré-configuration ;
 // l'accès reste contrôlé par les autorisations Drive du fichier, modifiable via ⚙️).
 const DEFAULT_FILE_ID = "1TUvWtMKZmJJjNhAR4rmUXJYR-N3EJ8SA";
@@ -379,6 +380,7 @@ let cfg = Object.assign(
 );
 // Repli : une ancienne configuration locale sans ID fichier hérite de la constante
 if (!cfg.fileId) cfg.fileId = DEFAULT_FILE_ID;
+if (cfg.clientId === LEGACY_CLIENT_ID) cfg.clientId = DEFAULT_CLIENT_ID;
 
 let SQL = null;
 let db = null;          // SQL.Database en mémoire (lecture/écriture)
