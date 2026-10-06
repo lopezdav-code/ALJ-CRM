@@ -24,7 +24,7 @@ fi
 
 CURRENT_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
 if [ -z "$CURRENT_PROJECT" ] || [ "$CURRENT_PROJECT" = "(unset)" ]; then
-    CURRENT_PROJECT="alj-2027"
+    CURRENT_PROJECT="smart-amplifier-510811-n6"
 fi
 
 echo "Configuration détectée :"

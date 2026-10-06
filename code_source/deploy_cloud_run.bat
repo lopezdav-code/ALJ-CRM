@@ -29,10 +29,10 @@ echo 🔍 Récupération du projet Google Cloud actif...
 for /f "tokens=*" %%i in ('gcloud config get-value project 2^>nul') do set CURRENT_PROJECT=%%i
 
 if "%CURRENT_PROJECT%"=="" (
-    set CURRENT_PROJECT=alj-2027
+    set CURRENT_PROJECT=smart-amplifier-510811-n6
 )
 if "%CURRENT_PROJECT%"=="(unset)" (
-    set CURRENT_PROJECT=alj-2027
+    set CURRENT_PROJECT=smart-amplifier-510811-n6
 )
 
 echo.

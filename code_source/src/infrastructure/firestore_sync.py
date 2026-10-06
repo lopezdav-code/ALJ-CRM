@@ -27,7 +27,7 @@ from infrastructure.competition_repository import CompetitionRepository
 from infrastructure.secret_store import SecretStore
 from infrastructure.google_drive_client import GoogleDriveClient
 
-DEFAULT_PROJECT_ID = "alj-2027"
+DEFAULT_PROJECT_ID = "smart-amplifier-510811-n6"
 FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
 
 
