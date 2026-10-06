@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Vérifie si l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Vérifie si l'utilisateur est administrateur (custom claim ou domaine du club)
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.email.matches('.*@alj-escalade\\.fr$')
+      );
+    }
+
+    // Vérifie si l'utilisateur est entraîneur / coach
+    function isCoach() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        request.auth.token.coach == true
+      );
+    }
+
+    // 1. Compétitions : Lecture pour utilisateurs connectés, gestion pour les coachs
+    match /competitions/{competitionId} {
+      allow read: if isAuthenticated();
+      allow write: if isCoach();
+
+      // Sous-collection Participants : sélection et pointage de paiement
+      match /participants/{participantId} {
+        allow read: if isAuthenticated();
+        allow write: if isCoach();
+      }
+    }
+
+    // 2. Annuaire des adhérents : Consultation autorisée, mise à jour réservée aux admins
+    match /adherents/{adherentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 3. Planning et créneaux du club
+    match /planning/{creneauId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 4. Modèles d'e-mails : Lecture par les coachs, modification par les admins
+    match /email_templates/{templateId} {
+      allow read: if isCoach();
+      allow write: if isAdmin();
+    }
+  }
+}

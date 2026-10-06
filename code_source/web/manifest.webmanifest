@@ -1,0 +1,19 @@
+{
+  "name": "ALJ Escalade — Compétitions",
+  "short_name": "ALJ Escalade",
+  "description": "Application mobile de gestion des compétitions, pointage et communication de l'Amicale Laïque de Jonage Escalade",
+  "start_url": "/competitions",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F1F5F9",
+  "theme_color": "#1E293B",
+  "icons": [
+    {
+      "src": "/annuaire/logo.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

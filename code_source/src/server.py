@@ -1,10 +1,18 @@
 import os
+import sys
 import json
 import time
-from fastapi import FastAPI, Body, BackgroundTasks
-from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
+import datetime
 from typing import List, Dict, Any
+
+# S'assurer que le dossier src est dans sys.path (exécution directe, docker ou package)
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+from fastapi import FastAPI, Body, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # Importer les fonctions de notre script existant
 from helloasso_api import get_campaigns, get_items
@@ -13,7 +21,7 @@ from infrastructure.sqlite_repository import SqliteRepository
 from dotenv import load_dotenv
 load_dotenv()
 
-from domain.constants import get_active_season
+from domain.constants import get_active_season, APP_VERSION
 from infrastructure.secret_store import SecretStore
 
 
@@ -851,6 +859,49 @@ if os.path.isdir(_web_dir):
 
 _competitions_page_path = os.path.join(_web_dir, "competitions.html")
 
+@app.get("/manifest.webmanifest")
+def get_manifest():
+    """Manifeste PWA pour installation sur smartphone."""
+    p = os.path.join(_web_dir, "manifest.webmanifest")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="application/manifest+json")
+    return HTMLResponse("Not found", status_code=404)
+
+@app.get("/sw.js")
+def get_sw():
+    """Service Worker PWA pour cache hors-ligne."""
+    p = os.path.join(_web_dir, "sw.js")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="application/javascript")
+    return HTMLResponse("Not found", status_code=404)
+
+@app.get("/health")
+def health_check():
+    """Vérification de santé (Cloud Run probes, uptime, monitoring)."""
+    return {
+        "status": "healthy",
+        "service": "alj-escalade-api",
+        "version": APP_VERSION,
+        "season": get_active_season(),
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
+
+@app.get("/")
+def root_route():
+    """Point d'entrée racine : redirige vers la PWA Mobile des compétitions."""
+    if os.path.exists(_competitions_page_path):
+        return RedirectResponse(url="/competitions", status_code=302)
+    return {
+        "service": "ALJ Escalade Cloud API",
+        "version": APP_VERSION,
+        "docs_url": "/docs",
+        "health_url": "/health",
+        "competitions_url": "/competitions",
+        "annuaire_url": "/annuaire"
+    }
+
+
 @app.get("/competitions", response_class=HTMLResponse)
 def get_competitions_page():
     """Page web de gestion des compétitions : télécharge database_Competition.db
@@ -869,7 +920,111 @@ def update_planning(planning_data: List[Dict[str, Any]] = Body(...)):
     except Exception as e:
         return {"error": str(e)}
 
+
+# --------------------------------------------------------------------------
+# Micro-service Cloud & Mobile : Webhooks HelloAsso & Envoi d'Emails
+# --------------------------------------------------------------------------
+from infrastructure.helloasso_webhook_service import HelloAssoWebhookService
+from infrastructure.email_dispatch_service import EmailDispatchService
+
+
+@app.get("/webhooks/helloasso")
+def webhook_helloasso_ping():
+    """Répond aux vérifications de connectivité HelloAsso (ping HTTP 200)."""
+    return {
+        "status": "active",
+        "endpoint": "helloasso-webhook-receiver",
+        "supported_events": ["Payment", "Order"],
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
+
+@app.post("/webhooks/helloasso")
+async def webhook_helloasso(payload: Dict[str, Any] = Body(...)):
+    """Point de terminaison Webhook pour les notifications HelloAsso (Payment & Order).
+    Réconcilie en temps réel le paiement avec les participants de la compétition.
+    """
+    try:
+        result = HelloAssoWebhookService.process_webhook(payload)
+        return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/email-templates")
+def get_email_templates():
+    """Retourne la liste des modèles d'e-mails configurés."""
+    try:
+        return {"status": "success", "templates": EmailDispatchService.list_templates()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/preview-email")
+def preview_email(data: Dict[str, Any] = Body(...)):
+    """Génère un aperçu fidèle d'un e-mail personnalisé pour un destinataire et une compétition."""
+    try:
+        preview_data = EmailDispatchService.preview(
+            template_name=data.get("template_name"),
+            subject=data.get("subject"),
+            body=data.get("body"),
+            recipient=data.get("recipient"),
+            competition_id=data.get("competition_id"),
+            add_signature=data.get("add_signature", True)
+        )
+        return {"status": "success", "preview": preview_data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/send-email")
+def send_email_api(data: Dict[str, Any] = Body(...)):
+    """Déclenche l'envoi d'e-mails sécurisé via Gmail API ou SMTP avec injection de variables."""
+    try:
+        result = EmailDispatchService.dispatch_emails(
+            template_name=data.get("template_name"),
+            subject=data.get("subject"),
+            body=data.get("body"),
+            recipient_ids=data.get("recipient_ids"),
+            recipients=data.get("recipients"),
+            competition_id=data.get("competition_id"),
+            sender_email=data.get("sender_email"),
+            sender_name=data.get("sender_name"),
+            add_signature=data.get("add_signature", True)
+        )
+        return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# --------------------------------------------------------------------------
+# Synchronisation Google Cloud Firestore
+# --------------------------------------------------------------------------
+from infrastructure.firestore_sync import FirestoreSyncService
+
+
+@app.post("/api/firestore/push")
+def firestore_push(data: Dict[str, Any] = Body(default={})):
+    """Pousse l'ensemble des données SQLite vers Google Cloud Firestore."""
+    try:
+        project_id = data.get("project_id")
+        return FirestoreSyncService.push_all(project_id=project_id)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/firestore/pull/{competition_id}")
+def firestore_pull(competition_id: int):
+    """Récupère les sélections et pointages depuis Firestore vers SQLite."""
+    try:
+        return FirestoreSyncService.pull_competition_updates(competition_id)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 if __name__ == "__main__":
     import uvicorn
-    # Le serveur tourne sur le port 8000
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    # Support de la variable d'environnement PORT (Cloud Run injecte PORT=8080)
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+    uvicorn.run("server:app", host=host, port=port, reload=(port == 8000))

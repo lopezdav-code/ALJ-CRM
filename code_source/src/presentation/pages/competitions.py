@@ -340,7 +340,8 @@ class ManualCorrectionDialog(QDialog):
     def __init__(self, manual_review: list, current_competition=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Correction manuelle — n° de compétition HelloAsso")
-        self.resize(1160, 560)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self._size_to_application()
         # corrections : [{"id_item", "competition_id", "adherent_id", "montant", "commentaire"}]
         self.corrections = []
         self._review = manual_review
@@ -361,23 +362,27 @@ class ManualCorrectionDialog(QDialog):
         head.setStyleSheet("font-size: 13px; font-weight: bold; color: #1E293B;")
         layout.addWidget(head)
 
-        table = QTableWidget(len(manual_review), 7)
+        table = QTableWidget(len(manual_review), 11)
         table.setHorizontalHeaderLabels([
-            "Payeur", "Montant", "Commande",
-            "« Compétition concernée » (saisi sur HelloAsso)", "Compétition", "Compétiteur à créditer",
-            "Commentaire",
+            "Payeur", "Montant", "État", "Date HelloAsso", "N° de commande", "N° de licence",
+            "Compétition concernée (saisi sur HelloAsso)", "Numéro de la compétition",
+            "Compétition", "Compétiteur à créditer", "Commentaire",
         ])
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
-        table.setColumnWidth(4, 250)
-        table.setColumnWidth(5, 220)
-        table.setColumnWidth(6, 200)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(9, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)
+        table.setColumnWidth(8, 300)
+        table.setColumnWidth(9, 240)
+        table.setColumnWidth(10, 220)
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
@@ -387,11 +392,28 @@ class ManualCorrectionDialog(QDialog):
             montant = QTableWidgetItem(f"{float(rev.get('montant') or 0):.2f} €")
             montant.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             table.setItem(r, 1, montant)
-            table.setItem(r, 2, QTableWidgetItem(str(rev.get("order_ref") or "")))
-            valeur = QTableWidgetItem(str(rev.get("valeur_champ") or "— non renseigné —"))
-            if not (rev.get("valeur_champ") or "").strip():
-                valeur.setForeground(QColor(COLOR_WARNING))
-            table.setItem(r, 3, valeur)
+            etat = QTableWidgetItem(str(rev.get("etat") or ""))
+            etat.setForeground(QColor(COLOR_SUCCESS) if etat.text().lower() == "validated"
+                               else QColor(COLOR_WARNING))
+            table.setItem(r, 2, etat)
+            table.setItem(r, 3, QTableWidgetItem(self._format_date(rev.get("date_item"))))
+            table.setItem(r, 4, QTableWidgetItem(str(rev.get("order_ref") or "")))
+            table.setItem(r, 5, QTableWidgetItem(str(rev.get("licence") or "")))
+            # « Compétition concernée » (texte libre saisi sur HelloAsso) et
+            # « Numéro de la compétition » (champ n° du formulaire).
+            numero = str(rev.get("numero_competition") or "")
+            concernee = str(rev.get("competition_concernee") or "") or (""
+                                                                       if numero else
+                                                                       str(rev.get("valeur_champ") or ""))
+            item_concernee = QTableWidgetItem(concernee or "— non renseigné —")
+            if not concernee.strip():
+                item_concernee.setForeground(QColor(COLOR_WARNING))
+            item_concernee.setToolTip(concernee)
+            table.setItem(r, 6, item_concernee)
+            item_num = QTableWidgetItem(numero or "— non renseigné —")
+            if not numero.strip():
+                item_num.setForeground(QColor(COLOR_WARNING))
+            table.setItem(r, 7, item_num)
 
             # Colonne « Compétition » : toutes les épreuves enregistrées,
             # pré-sélection = épreuve en cours (si contexte de compétition).
@@ -419,16 +441,18 @@ class ManualCorrectionDialog(QDialog):
             combo_comp.currentIndexChanged.connect(
                 lambda _i, row=r, cpt=combo_part: self._on_target_changed(row, cpt)
             )
-            table.setCellWidget(r, 4, combo_comp)
-            table.setCellWidget(r, 5, combo_part)
-            
+            # La liste déroulante s'élargit pour afficher les noms complets
+            self._widen_popup(combo_comp)
+            table.setCellWidget(r, 8, combo_comp)
+            table.setCellWidget(r, 9, combo_part)
+
             # Colonne « Commentaire » (QLineEdit éditable)
             edit_comment = QLineEdit()
             edit_comment.setText(str(rev.get("commentaire") or ""))
             edit_comment.setPlaceholderText("Ajouter une note…")
             edit_comment.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px; }")
-            table.setCellWidget(r, 6, edit_comment)
-            
+            table.setCellWidget(r, 10, edit_comment)
+
             self._comp_combos.append(combo_comp)
             self._part_combos.append(combo_part)
             self._comment_edits.append(edit_comment)
@@ -450,6 +474,34 @@ class ManualCorrectionDialog(QDialog):
         btns.addWidget(btn_close)
         btns.addStretch()
         layout.addLayout(btns)
+
+    def _size_to_application(self):
+        """Prend la largeur de la fenêtre de l'application (et une hauteur confortable),
+        centré sur celle-ci ; repli sur une taille fixe si aucun parent."""
+        parent_win = self.parent().window() if self.parent() is not None else None
+        geo = parent_win.geometry() if parent_win is not None else None
+        if geo is not None and geo.width() > 0:
+            self.resize(geo.width(), max(560, min(780, geo.height() - 60)))
+        else:
+            self.resize(1400, 640)
+
+    @staticmethod
+    def _format_date(date_item) -> str:
+        """Formate la date de paiement HelloAsso en jj/mm/aaaa (si possible)."""
+        txt = str(date_item or "")
+        if not txt:
+            return ""
+        try:
+            return datetime.date.fromisoformat(txt[:10]).strftime("%d/%m/%Y")
+        except ValueError:
+            return txt
+
+    @staticmethod
+    def _widen_popup(combo: QComboBox):
+        """Élargit la liste déroulante pour que les libellés longs ne soient pas tronqués."""
+        view = combo.view()
+        if view is not None:
+            view.setMinimumWidth(view.sizeHintForColumn(0) + 40)
 
     def _adherents(self) -> list:
         """Instantané des adhérents du club (mis en cache) : tout membre peut être crédité,
@@ -486,6 +538,7 @@ class ManualCorrectionDialog(QDialog):
                     combo.setCurrentIndex(idx)
         combo.setEnabled(competition_id is not None)
         combo.blockSignals(False)
+        self._widen_popup(combo)
 
     def _on_target_changed(self, row: int, combo_part: QComboBox):
         rev = self._review[row] if row < len(self._review) else {}
@@ -1519,15 +1572,30 @@ class CompetitionsPage(QWidget):
             
         if not r:
             return
-            
+
+        import json
         r = dict(r)
+        # Champs saisis sur HelloAsso, extraits du JSON brut (comme le tableau miroir)
+        comp_name_val, comp_num_val = "", ""
+        raw_json_str = r.get("raw_json")
+        if raw_json_str:
+            try:
+                raw_data = json.loads(raw_json_str)
+                comp_name_val = competition_matching.extract_competition_name(raw_data)
+                comp_num_val = competition_matching.extract_competition_number(raw_data, fallback=False)
+            except Exception:
+                pass
         review_item = {
             "id_item": r["id_item"],
             "payer": f"{r['payer_nom']} {r['payer_prenom']}".strip(),
             "montant": r["montant"],
+            "etat": str(r["etat"] or ""),
+            "date_item": str(r["date_item"] or ""),
             "order_ref": r["order_id"],
             "licence": str(r["licence_saisie"] or ""),
             "valeur_champ": r["competition_saisie"],
+            "competition_concernee": comp_name_val,
+            "numero_competition": comp_num_val,
             "adherent_id": r["adherent_id"],
             "competition_id": r["competition_id"],
             "commentaire": str(r["commentaire"] or ""),

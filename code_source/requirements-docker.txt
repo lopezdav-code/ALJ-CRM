@@ -1,0 +1,11 @@
+# Dépendances conteneurisées pour Cloud Run (FastAPI Backend / PWA)
+# Exclut les dépendances client lourd Windows (PySide6, pywin32, python-docx)
+fastapi==0.139.0
+uvicorn==0.51.0
+requests==2.34.2
+pandas>=2.2.0
+openpyxl==3.1.5
+python-dotenv==1.2.2
+geopy==2.4.1
+pillow>=10.0.0
+lxml>=5.0.0

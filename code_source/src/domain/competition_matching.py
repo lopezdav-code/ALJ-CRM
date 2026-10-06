@@ -291,8 +291,9 @@ def match_items_to_participants(items: list, participants: list, prix_attendu: f
     Retourne {
       "updates":          [(adherent_id, montant_paye), ...]        # à marquer « paye »
       "order_by_adherent": {adherent_id: "n° commande (, n°…)"}     # pour affichage
-      "manual_review":    [{payer, montant, order_ref, licence, valeur_champ,
-                             adherent_id, participant}, ...]         # correction manuelle proposée
+      "manual_review":    [{payer, montant, etat, date_item, order_ref, licence,
+                             valeur_champ, competition_concernee, numero_competition,
+                             adherent_id, participant}, ...]  # correction manuelle proposée
       "anomalies":        [{"type", "severite", "titre", "detail"}] # rapport d'écarts
       "stats":            {nb_items, nb_payes, nb_matchs, nb_en_attente, nb_anomalies,
                            nb_manual_review}
@@ -361,9 +362,13 @@ def match_items_to_participants(items: list, participants: list, prix_attendu: f
             manual_review.append({
                 "payer": payer or "Inconnu",
                 "montant": amount,
+                "etat": str(item.get("state") or ""),
+                "date_item": str(item.get("date") or ""),
                 "order_ref": order_ref,
                 "licence": licence,
                 "valeur_champ": valeur_champ,
+                "competition_concernee": extract_competition_name(item),
+                "numero_competition": extract_competition_number(item, fallback=False),
                 "adherent_id": participant.get("adherent_id") if participant else None,
                 "participant": f"{participant.get('nom')} {participant.get('prenom')}" if participant else "",
             })

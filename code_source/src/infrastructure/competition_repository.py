@@ -806,6 +806,8 @@ class CompetitionRepository:
             conn.close()
 
         import re
+        import json
+        from domain import competition_matching
         result = []
         for r in rows:
             lic = re.sub(r"\D", "", str(r["licence_saisie"] or ""))
@@ -814,13 +816,29 @@ class CompetitionRepository:
                 preselect = next((aid for aid, a in adherents.items()
                                   if re.sub(r"\D", "", str(a.get("num_licence") or "")) == lic), None)
             payer = f"{r['payer_nom']} {r['payer_prenom']}".strip()
+            # Champs saisis sur HelloAsso, extraits du JSON brut comme dans le
+            # tableau miroir : texte libre « Compétition concernée » et
+            # « Numéro de la compétition » (à vide si non saisi).
+            comp_name_val, comp_num_val = "", ""
+            raw_json_str = r["raw_json"]
+            if raw_json_str:
+                try:
+                    raw_data = json.loads(raw_json_str)
+                    comp_name_val = competition_matching.extract_competition_name(raw_data)
+                    comp_num_val = competition_matching.extract_competition_number(raw_data, fallback=False)
+                except Exception:
+                    pass
             result.append({
                 "id_item": r["id_item"],
                 "payer": payer or "Inconnu",
                 "montant": float(r["montant"] or 0.0),
+                "etat": str(r["etat"] or ""),
+                "date_item": str(r["date_item"] or ""),
                 "order_ref": str(r["order_id"] or ""),
                 "licence": str(r["licence_saisie"] or ""),
                 "valeur_champ": str(r["competition_saisie"] or ""),
+                "competition_concernee": comp_name_val,
+                "numero_competition": comp_num_val,
                 "adherent_id": preselect,
                 "participant": "",
                 "commentaire": str(r["commentaire"] or ""),

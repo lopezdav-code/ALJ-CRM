@@ -1,0 +1,51 @@
+# Environnements virtuels
+venv/
+.venv/
+env/
+code_source/venv/
+
+# Fichiers Python compilés
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Caches de tests et linters
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Fichiers de configuration sensibles et secrets (CRITIQUE : Ne jamais embarquer dans l'image)
+.env
+.env.*
+*.json
+token_*.json
+credentials.json
+
+# Données SQLite locales réelles
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Fichiers d'archive, builds et exports
+archive/
+attestation/
+exports/
+import/
+build/
+dist/
+scripts_temporaires/
+*.spec
+*.log
+
+# Outils de versionnement et éditeurs
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/

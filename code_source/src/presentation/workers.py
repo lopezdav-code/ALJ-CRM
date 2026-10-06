@@ -164,34 +164,7 @@ class GenerateAttestationsWorker(QThread):
             self.finished.emit(0, 0, 1)
 
 
-def apply_template_variables(text, member, competition_context: dict = None) -> str:
-    """Remplace les variables de personnalisation {…} d'un sujet ou corps d'e-mail.
-
-    - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
-    - {num_licence} : licence FFME du destinataire ;
-    - variables compétition (contexte du filtre actif) : {no_competition},
-      {name_competition}, {montant_competition}, {date_competition} — laissées telles quelles
-      si absentes du contexte (aucun filtre compétition actif).
-
-    Fonction partagée par l'envoi réel (SendEmailCampaignWorker) et l'aperçu
-    (Communications) pour garantir un rendu identique.
-    """
-    if text is None:
-        return ""
-    ctx = competition_context or {}
-    out = str(text)
-    first = (getattr(member, "user_first_name", "") or "").strip().title()
-    last = (getattr(member, "user_last_name", "") or "").strip().upper()
-    out = out.replace("{Prénom}", first)
-    out = out.replace("{Nom}", last)
-    out = out.replace("{first_name}", first)
-    out = out.replace("{last_name}", last)
-    out = out.replace("{num_licence}", str(getattr(member, "licence_ffme", "") or "").strip())
-    for key in ("no_competition", "name_competition", "montant_competition", "date_competition"):
-        val = str(ctx.get(key) or "").strip()
-        if val:
-            out = out.replace("{" + key + "}", val)
-    return out
+from domain.utils import apply_template_variables
 
 
 class SendEmailCampaignWorker(QThread):

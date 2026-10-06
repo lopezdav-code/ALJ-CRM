@@ -1,4 +1,5 @@
 import unicodedata
+from typing import Any
 import pandas as pd
 
 def normalize_string(s) -> str:
@@ -57,3 +58,40 @@ def clean_city_name(city_raw) -> str:
     c = c.replace(" D ", " D'").replace(" D' ", " D'")
     c = c.title()
     return " ".join(c.split())
+
+
+def apply_template_variables(text: str, member: Any, competition_context: dict = None) -> str:
+    """Remplace les variables de personnalisation {…} d'un sujet ou corps d'e-mail.
+
+    Gère indifféremment un objet (ex: Member, SimpleNamespace) ou un dictionnaire :
+    - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
+    - {num_licence} : licence FFME du destinataire ;
+    - variables compétition : {no_competition}, {name_competition}, {montant_competition},
+      {date_competition} (laissées telles quelles si absentes du contexte).
+    """
+    if text is None:
+        return ""
+    ctx = competition_context or {}
+    out = str(text)
+
+    if isinstance(member, dict):
+        first = str(member.get("user_first_name") or member.get("first_name") or member.get("prenom") or "").strip().title()
+        last = str(member.get("user_last_name") or member.get("last_name") or member.get("nom") or "").strip().upper()
+        licence = str(member.get("licence_ffme") or member.get("num_licence") or "").strip()
+    else:
+        first = str(getattr(member, "user_first_name", getattr(member, "first_name", getattr(member, "prenom", ""))) or "").strip().title()
+        last = str(getattr(member, "user_last_name", getattr(member, "last_name", getattr(member, "nom", ""))) or "").strip().upper()
+        licence = str(getattr(member, "licence_ffme", getattr(member, "num_licence", "")) or "").strip()
+
+    out = out.replace("{Prénom}", first)
+    out = out.replace("{Nom}", last)
+    out = out.replace("{first_name}", first)
+    out = out.replace("{last_name}", last)
+    out = out.replace("{num_licence}", licence)
+
+    for key in ("no_competition", "name_competition", "montant_competition", "date_competition"):
+        val = str(ctx.get(key) or "").strip()
+        if val:
+            out = out.replace("{" + key + "}", val)
+    return out
+

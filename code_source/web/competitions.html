@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ALJ Escalade — Gestion des Compétitions</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1E293B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/annuaire/logo.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🏆</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 <style>
@@ -93,6 +98,37 @@
   .setup-box h2 { margin: 0 0 8px; font-size: 16px; }
   .setup-box p, .setup-box li { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
   .setup-box code { background: #F1F5F9; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; word-break: break-all; }
+
+  /* Fenêtre modale d'envoi d'e-mails */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.65); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 14px;
+    backdrop-filter: blur(2px);
+  }
+  .modal-content {
+    width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto;
+    margin: 0; animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  }
+  .radio-pill {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px;
+    cursor: pointer; font-size: 13px; font-weight: 500; background: #FAF5FF;
+  }
+  .radio-pill input { width: 17px; height: 17px; accent-color: var(--blue); }
+  textarea.fld-input {
+    width: 100%; padding: 10px 12px; border: 1px solid #CBD5E1; border-radius: 9px;
+    font-family: inherit; font-size: 13.5px; line-height: 1.5; color: var(--ink); background: #fff;
+    resize: vertical; outline: none;
+  }
+  textarea.fld-input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
 </style>
 </head>
 <body>
@@ -205,6 +241,7 @@
       <select id="p-comp-select"></select>
       <div class="btn-row">
         <button class="btn btn-muted btn-mini" id="p-load-group" style="flex:2">🧗 Charger le groupe « Compétition »</button>
+        <button class="btn btn-primary btn-mini" id="p-email-btn" onclick="openEmailModal()" style="flex:1.5">✉️ Envoyer un e-mail</button>
       </div>
     </div>
 
@@ -263,6 +300,51 @@
 
   <!-- ================= Bilan de saison (application de bureau uniquement) ================= -->
   <!-- HelloAsso (campagne annuelle, miroir) et Bilan restent gérés dans l'application de bureau -->
+
+  <!-- ================= Fenêtre Modale d'Envoi d'E-mails aux Compétiteurs ================= -->
+  <div id="email-modal" class="modal-overlay" style="display:none">
+    <div class="modal-content card">
+      <div class="modal-header">
+        <div class="m-name" style="font-size:16px;">✉️ Envoi d'e-mail aux compétiteurs</div>
+        <button class="icon-btn" onclick="closeEmailModal()" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px;">✕</button>
+      </div>
+
+      <label class="fld">Destinataires ciblés</label>
+      <div style="margin-bottom:8px;">
+        <label class="radio-pill">
+          <input type="radio" name="dest-filter" value="selected" checked onchange="updateEmailPreview()">
+          <span>Sélectionnés uniquement (<b id="em-count-selected">0</b> athlète(s))</span>
+        </label>
+        <label class="radio-pill">
+          <input type="radio" name="dest-filter" value="unpaid" onchange="updateEmailPreview()">
+          <span>En attente de paiement uniquement (<b id="em-count-unpaid">0</b> athlète(s))</span>
+        </label>
+        <label class="radio-pill">
+          <input type="radio" name="dest-filter" value="all" onchange="updateEmailPreview()">
+          <span>Tous les participants enregistrés (<b id="em-count-all">0</b> athlète(s))</span>
+        </label>
+      </div>
+
+      <label class="fld">Modèle d'e-mail</label>
+      <select id="em-template-select" onchange="onSelectEmailTemplate()">
+        <option value="">-- Personnalisé ou choisir un modèle --</option>
+      </select>
+
+      <label class="fld">Sujet de l'e-mail *</label>
+      <input type="text" id="em-subject" placeholder="Sujet de votre message..." oninput="updateEmailPreview()">
+
+      <label class="fld">Corps du message (Balises : {first_name}, {name_competition}, {montant_competition}, {no_competition}, {date_competition}) *</label>
+      <textarea id="em-body" class="fld-input" rows="6" placeholder="Bonjour {first_name}, ..." oninput="updateEmailPreview()"></textarea>
+
+      <div class="section-h" style="margin-top:12px;">👁 Aperçu en direct pour <span id="em-preview-recipient">—</span></div>
+      <div id="em-preview-box" class="card" style="background:#F8FAFC; border:1px dashed #CBD5E1; font-size:12.5px; line-height:1.5; white-space:pre-wrap; max-height:150px; overflow-y:auto; margin-bottom:10px;"></div>
+
+      <div class="btn-row" style="margin-top:10px;">
+        <button class="btn btn-muted" onclick="closeEmailModal()">Annuler</button>
+        <button class="btn btn-primary" id="em-submit-btn" onclick="sendCampaignEmails()">🚀 Envoyer via Gmail</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <nav>
@@ -761,7 +843,7 @@ function listAdherents() {
   return q("SELECT * FROM adherents ORDER BY nom COLLATE NOCASE, prenom COLLATE NOCASE");
 }
 function competitionAdherents(compId) {
-  return q(`SELECT p.*, a.nom, a.prenom, a.num_licence, a.tarif
+  return q(`SELECT p.*, a.nom, a.prenom, a.num_licence, a.tarif, a.email, a.phone
             FROM participants p JOIN adherents a ON a.id = p.adherent_id
             WHERE p.competition_id = ?`, [compId]);
 }
@@ -796,6 +878,7 @@ function renderParticipants() {
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(p.nom)} ${esc(p.prenom)}</div>
           <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}</div>
+          ${p.phone ? `<div style="margin-top:4px"><a href="tel:${esc(p.phone)}" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; background:#EFF6FF; color:#2563EB; border:1px solid #BFDBFE; border-radius:6px; padding:2px 8px;">📞 ${esc(p.phone)}</a></div>` : ""}
         </div>
         <span class="badge" style="background:${PAIEMENT_BADGE[p.statut_paiement] || "#94A3B8"}"
               title="Statut de paiement (modifié par la synchro HelloAsso dans l'application de bureau)">${PAIEMENT_LABELS[p.statut_paiement] || esc(p.statut_paiement)}</span>
@@ -1069,6 +1152,220 @@ function renderBalancePage() {
   }).join("") || `<div class="empty">Aucun athlète ne correspond aux critères de recherche.</div>`;
 }
 
+/* ===================== Modale d'Envoi d'E-mails (Templates Club) ===================== */
+let emailTemplatesCache = [];
+
+async function loadEmailTemplates() {
+  const sel = $("#em-template-select");
+  const defaultTemplates = [
+    {
+      id: "convoc",
+      name: "Convocation épreuve",
+      subject: "[ALJ Escalade] Convocation : {name_competition}",
+      body: "Bonjour {first_name},\n\nTu es sélectionné(e) pour participer à la compétition {name_competition} (#{no_competition}) qui aura lieu le {date_competition}.\n\nFrais d'inscription : {montant_competition}.\nMerci de confirmer ta présence et régler ton inscription sur HelloAsso ou auprès de ton coach.\n\nSportivement,\nL'équipe des coachs ALJ Escalade"
+    },
+    {
+      id: "relance",
+      name: "Relance paiement épreuve",
+      subject: "[ALJ Escalade] Rappel paiement : {name_competition}",
+      body: "Bonjour {first_name},\n\nSauf erreur de notre part, nous n'avons pas encore reçu le règlement ({montant_competition}) pour ta participation à l'épreuve {name_competition}.\nMerci de régulariser ton inscription au plus vite.\n\nSportivement,\nL'équipe des coachs ALJ Escalade"
+    }
+  ];
+
+  try {
+    const res = await fetch("/api/email-templates");
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.templates && data.templates.length > 0) {
+        emailTemplatesCache = data.templates;
+      } else {
+        emailTemplatesCache = defaultTemplates;
+      }
+    } else {
+      emailTemplatesCache = defaultTemplates;
+    }
+  } catch(e) {
+    emailTemplatesCache = defaultTemplates;
+  }
+
+  sel.innerHTML = '<option value="">-- Choisir un modèle ou saisir manuellement --</option>' +
+    emailTemplatesCache.map((t, idx) => `<option value="${idx}">${esc(t.name)}</option>`).join("");
+}
+
+function openEmailModal() {
+  const compId = currentCompId();
+  if (!compId) { toast("⚠️ Veuillez d'abord choisir une compétition."); return; }
+
+  const rows = competitionAdherents(compId);
+  const nbSel = rows.filter(r => r.selectionne).length;
+  const nbUnpaid = rows.filter(r => r.selectionne && r.statut_paiement !== 'paye').length;
+
+  $("#em-count-selected").textContent = nbSel;
+  $("#em-count-unpaid").textContent = nbUnpaid;
+  $("#em-count-all").textContent = rows.length;
+
+  loadEmailTemplates();
+
+  const radios = document.getElementsByName("dest-filter");
+  for (let r of radios) { if (r.value === "selected") r.checked = true; }
+
+  if (!$("#em-subject").value) {
+    $("#em-subject").value = "[ALJ Escalade] Convocation : {name_competition}";
+    $("#em-body").value = "Bonjour {first_name},\n\nTu es sélectionné(e) pour participer à l'épreuve {name_competition} (#{no_competition}) du {date_competition}.\nFrais d'inscription : {montant_competition}.\n\nSportivement,\nL'équipe ALJ Escalade";
+  }
+
+  updateEmailPreview();
+  $("#email-modal").style.display = "flex";
+}
+
+function closeEmailModal() {
+  $("#email-modal").style.display = "none";
+}
+
+function onSelectEmailTemplate() {
+  const idx = $("#em-template-select").value;
+  if (idx !== "" && emailTemplatesCache[idx]) {
+    const t = emailTemplatesCache[idx];
+    $("#em-subject").value = t.subject || "";
+    $("#em-body").value = t.body || "";
+  }
+  updateEmailPreview();
+}
+
+function getActiveCompetitionObject() {
+  const compId = currentCompId();
+  if (!compId) return null;
+  return q("SELECT * FROM competitions WHERE id=?", [compId])[0] || null;
+}
+
+function getActiveRecipients() {
+  const compId = currentCompId();
+  if (!compId) return [];
+  const rows = competitionAdherents(compId);
+  const filterVal = document.querySelector('input[name="dest-filter"]:checked')?.value || "selected";
+
+  if (filterVal === "selected") {
+    return rows.filter(r => r.selectionne);
+  } else if (filterVal === "unpaid") {
+    return rows.filter(r => r.selectionne && r.statut_paiement !== 'paye');
+  }
+  return rows;
+}
+
+function updateEmailPreview() {
+  const comp = getActiveCompetitionObject();
+  const recipients = getActiveRecipients();
+  const previewBox = $("#em-preview-box");
+  const previewDestSpan = $("#em-preview-recipient");
+
+  const submitBtn = $("#em-submit-btn");
+  if (submitBtn) {
+    submitBtn.textContent = `🚀 Envoyer (${recipients.length} e-mail${recipients.length > 1 ? "s" : ""})`;
+  }
+
+  if (recipients.length === 0) {
+    previewDestSpan.textContent = "Aucun destinataire sélectionné";
+    previewBox.textContent = "⚠️ Aucun athlète ne correspond aux critères de filtre sélectionnés.";
+    return;
+  }
+
+  const firstRec = recipients[0];
+  previewDestSpan.textContent = `${firstRec.prenom || ""} ${firstRec.nom || ""} (${firstRec.email || "email absent"})`;
+
+  let dateFmt = comp?.date_competition || "";
+  if (dateFmt && dateFmt.includes("-")) {
+    const p = dateFmt.split("-");
+    if (p.length === 3) dateFmt = `${p[2]}/${p[1]}/${p[0]}`;
+  }
+
+  const ctx = {
+    first_name: (firstRec.prenom || "").trim(),
+    last_name: (firstRec.nom || "").trim().toUpperCase(),
+    num_licence: (firstRec.num_licence || "").trim(),
+    name_competition: comp?.nom || "Compétition",
+    no_competition: comp?.id_ffme || "",
+    montant_competition: comp?.prix ? `${Number(comp.prix).toFixed(2).replace('.', ',')} €` : "0,00 €",
+    date_competition: dateFmt
+  };
+
+  let subj = $("#em-subject").value || "";
+  let body = $("#em-body").value || "";
+
+  for (const [k, v] of Object.entries(ctx)) {
+    const reg = new RegExp("{" + k + "}", "g");
+    subj = subj.replace(reg, v);
+    body = body.replace(reg, v);
+  }
+
+  previewBox.textContent = `Sujet : ${subj}\n\n${body}`;
+}
+
+async function sendCampaignEmails() {
+  const comp = getActiveCompetitionObject();
+  const allRecs = getActiveRecipients();
+  const validRecs = allRecs.filter(r => r.email && r.email.includes("@"));
+
+  if (validRecs.length === 0) {
+    toast("⚠️ Aucun destinataire n'a d'adresse e-mail valide.");
+    return;
+  }
+
+  const subjectTmpl = $("#em-subject").value.trim();
+  const bodyTmpl = $("#em-body").value.trim();
+
+  if (!subjectTmpl || !bodyTmpl) {
+    toast("⚠️ Veuillez renseigner le sujet et le message.");
+    return;
+  }
+
+  const submitBtn = $("#em-submit-btn");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "⏳ Envoi en cours…";
+
+  try {
+    const payload = {
+      subject: subjectTmpl,
+      body: bodyTmpl,
+      competition_id: comp?.id,
+      recipients: validRecs.map(r => ({
+        id: r.adherent_id,
+        first_name: r.prenom,
+        last_name: r.nom,
+        email: r.email,
+        num_licence: r.num_licence
+      }))
+    };
+
+    const res = await fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "success" || data.status === "partial") {
+        toast(`✅ ${data.sent_count} e-mail(s) envoyé(s) avec succès via Gmail !`);
+        closeEmailModal();
+      } else {
+        toast("❌ Erreur : " + (data.message || "Échec d'envoi."));
+      }
+    } else {
+      throw new Error(`Serveur indisponible (HTTP ${res.status})`);
+    }
+  } catch(err) {
+    console.warn("API send-email non disponible, repli mailto :", err);
+    const bccList = validRecs.map(r => r.email).join(",");
+    const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bccList)}&subject=${encodeURIComponent(subjectTmpl)}&body=${encodeURIComponent(bodyTmpl)}`;
+    window.location.href = mailtoUrl;
+    toast(`✉️ Ouverture de votre messagerie mobile pour ${validRecs.length} destinataire(s).`);
+    closeEmailModal();
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "🚀 Envoyer via Gmail";
+  }
+}
+
 /* ===================== Événements ===================== */
 function fillConfigForm() {
   $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
@@ -1107,6 +1404,13 @@ function wireEvents() {
 }
 
 (async function boot() {
+  // Enregistrement PWA Service Worker (mode hors-ligne & installation smartphone)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn("⚠️ Enregistrement Service Worker PWA :", err);
+    });
+  }
+
   wireEvents();
   try { await initSql(); } catch (e) {
     $("#sync-info").textContent = "⚠️ sql.js indisponible (hors ligne ?)";
