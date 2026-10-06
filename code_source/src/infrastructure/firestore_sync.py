@@ -5,6 +5,7 @@ Permet de :
 1. Convertir les données SQLite en documents NoSQL Firestore (REST API v1 / Firebase).
 2. Pousser (Push) vers Firestore :
    - Les compétitions et leurs listes de participants (avec statut et contacts).
+   - Le référentiel des coachs (coaches).
    - L'annuaire des adhérents actifs.
    - La grille du planning des créneaux.
    - Les modèles d'e-mails disponibles.
@@ -123,6 +124,15 @@ def prepare_firestore_data(season_filter: Optional[str] = None) -> Dict[str, Dic
         comps = conn_comp.execute("SELECT * FROM competitions ORDER BY date_competition DESC, id DESC").fetchall()
         coaches_dict = {r["id"]: r["nom"] for r in conn_comp.execute("SELECT id, nom FROM coaches").fetchall()}
 
+        # Référentiel des coachs (collection dédiée pour l'édition PWA)
+        coaches_docs: Dict[str, Dict[str, Any]] = {}
+        for r in conn_comp.execute("SELECT id, nom FROM coaches ORDER BY nom").fetchall():
+            coaches_docs[str(r["id"])] = {
+                "id": r["id"],
+                "nom": r["nom"] or "",
+                "updated_at": datetime.datetime.now().isoformat()
+            }
+
         # Coordonnées des utilisateurs depuis la base principale
         users_info = {
             u["id"]: dict(u) for u in conn_main.execute(
@@ -167,7 +177,8 @@ def prepare_firestore_data(season_filter: Optional[str] = None) -> Dict[str, Dic
         for c in comps:
             cid = c["id"]
             c_keys = c.keys()
-            coach_names = [coaches_dict.get(c[f"coach{i}_id"]) for i in (1, 2, 3) if f"coach{i}_id" in c_keys and c[f"coach{i}_id"]]
+            coach_ids = [c[f"coach{i}_id"] for i in (1, 2, 3) if f"coach{i}_id" in c_keys and c[f"coach{i}_id"]]
+            coach_names = [coaches_dict.get(cid_) for cid_ in coach_ids]
 
             parts = parts_by_comp.get(cid, [])
             nb_sel = sum(1 for p in parts if p["selectionne"])
@@ -182,6 +193,7 @@ def prepare_firestore_data(season_filter: Optional[str] = None) -> Dict[str, Dic
                 "prix": float(c["prix"] or 0.0),
                 "statut": c["statut"] or "en_preparation",
                 "coaches": coach_names,
+                "coach_ids": coach_ids,
                 "helloasso_ref": c["helloasso_ref"] or "",
                 "nb_participants": len(parts),
                 "nb_selectionnes": nb_sel,
@@ -268,6 +280,7 @@ def prepare_firestore_data(season_filter: Optional[str] = None) -> Dict[str, Dic
     return {
         "competitions": competitions_docs,
         "adherents": adherents_docs,
+        "coaches": coaches_docs,
         "planning": planning_docs,
         "email_templates": template_docs
     }

@@ -1,12 +1,13 @@
-const CACHE_NAME = "alj-escalade-v1";
+const CACHE_NAME = "alj-escalade-v2";
 const ASSETS_TO_CACHE = [
   "/competitions",
   "/annuaire/competitions.html",
   "/annuaire/index.html",
   "/annuaire/logo.png",
   "/manifest.webmanifest",
-  "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.wasm"
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"
 ];
 
 // Installation : mise en cache des ressources statiques

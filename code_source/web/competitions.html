@@ -10,7 +10,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="/annuaire/logo.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🏆</text></svg>">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root {
     --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
@@ -40,7 +42,6 @@
   .icon-btn:active { background: rgba(255,255,255,.3); }
   .icon-btn.spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #save-btn.dirty { background: var(--green); box-shadow: 0 0 0 2px rgba(22,163,74,.35); }
 
   main { max-width: 720px; margin: 0 auto; padding: calc(var(--header-h) + 10px) 12px calc(var(--nav-h) + 18px); }
   .page { display: none; }
@@ -136,35 +137,32 @@
 <header>
   <div class="title">
     <b>🏆 ALJ Escalade — Compétitions</b>
-    <small id="sync-info">Aucune donnée chargée</small>
+    <small id="sync-info">Connexion à Firebase…</small>
   </div>
-  <button class="icon-btn" id="refresh-btn" title="Recharger depuis Google Drive">🔄</button>
-  <button class="icon-btn" id="save-btn" title="Sauvegarder en BDD (renvoyer vers Google Drive)">💾 BDD</button>
-  <button class="icon-btn" id="config-btn" title="Configuration">⚙️</button>
+  <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
+  <button class="icon-btn" id="config-btn" title="Compte / Configuration">⚙️</button>
 </header>
 
 <main>
-  <!-- ================= Configuration (première utilisation) ================= -->
+  <!-- ================= Connexion (Firebase Auth) ================= -->
   <section class="page" id="page-setup">
     <div class="card setup-box">
-      <h2>⚙️ Configuration</h2>
-      <p>Cette page télécharge la base <code>database_Competition.db</code> depuis <b>votre Google Drive</b> (connexion Google),
-         la garde en <b>cache du navigateur</b> (IndexedDB) et permet de la modifier.
-         Les modifications restent <b>locales</b> : elles ne sont renvoyées vers Google Drive
-         qu'après un clic explicite sur le bouton <b>« 💾 Sauvegarder en BDD »</b>.</p>
-      <p>L'identifiant du fichier <code>database_Competition.db</code> sur le Drive est
-         <b>pré-rempli</b> avec celui du club (comme l'ID client OAuth) : modifiable ici si
-         le fichier change — l'accès reste contrôlé par les autorisations Drive.</p>
-      <p>⚠️ Dans Google Cloud Console (API et services → Identifiants → ID client OAuth),
-         cette adresse doit être listée en <b>URI de redirection autorisée</b> (sinon
-         erreur 400 <code>redirect_uri_mismatch</code>) :<br>
-         <code id="redirect-hint"></code></p>
-      <label class="fld">Identifiant client OAuth (Google)</label>
-      <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
-      <label class="fld">ID du fichier database_Competition.db sur Google Drive</label>
-      <input type="text" id="cfg-file-id" placeholder="1AbC…xYz" autocomplete="off">
-      <div class="btn-row">
-        <button class="btn btn-primary" id="cfg-save" style="flex:2">💾 Enregistrer &amp; se connecter</button>
+      <h2>🔐 Connexion</h2>
+      <p>Cette application est réservée aux coachs et gestionnaires du club. Les données sont
+         synchronisées en <b>temps réel</b> via Google Cloud Firestore : chaque modification
+         (sélections, épreuves, pointages) est instantanément visible par tous les appareils.</p>
+      <div id="setup-not-logged">
+        <div class="btn-row">
+          <button class="btn btn-primary" id="login-btn" style="flex:2">🔑 Se connecter avec Google</button>
+        </div>
+        <p style="margin-top:8px">Utilisez votre compte <code>@alj-escalade.fr</code> (accès complet)
+           ou un compte coach autorisé par le club.</p>
+      </div>
+      <div id="setup-logged" style="display:none">
+        <p>Connecté en tant que <b id="setup-email">—</b></p>
+        <div class="btn-row">
+          <button class="btn btn-muted" id="logout-btn-page" style="flex:2">🚪 Se déconnecter</button>
+        </div>
       </div>
     </div>
   </section>
@@ -359,34 +357,28 @@
 <script>
 "use strict";
 
-/* ===================== Configuration (localStorage) ===================== */
-const CFG_KEY = "alj_compet_config";
-const CACHE_KEY = "database_competition";
-const DB_NAME = "alj_competitions", DB_STORE = "kv";
-const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/";
-// Scope en écriture : le bouton « Sauvegarder en BDD » renvoie le fichier modifié vers le Drive.
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
-const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+/* ===================== Firebase (Auth + Firestore temps réel) ===================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDtwH7A6XokZZjUcyoL83gx9ZjyuN4IJoQ",
+  authDomain: "smart-amplifier-510811-n6.firebaseapp.com",
+  projectId: "smart-amplifier-510811-n6",
+  storageBucket: "smart-amplifier-510811-n6.firebasestorage.app",
+  messagingSenderId: "796572126711",
+  appId: "1:796572126711:web:a827fd60c313ba2c46f2f2"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const fsdb = firebase.firestore();
 
-const DEFAULT_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com";
-const LEGACY_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
-// ID du fichier database_Competition.db sur le Drive du club (pré-configuration ;
-// l'accès reste contrôlé par les autorisations Drive du fichier, modifiable via ⚙️).
-const DEFAULT_FILE_ID = "1TUvWtMKZmJJjNhAR4rmUXJYR-N3EJ8SA";
+let user = null;                 // compte Firebase Auth connecté
+let comps = [];                  // documents de la collection "competitions"
+let coaches = [];                // documents de la collection "coaches"
+let adherents = [];              // documents de la collection "adherents"
+let snapshotsReady = 0;          // nombre de premières snapshots reçues
+let listeners = [];              // fonctions de désabonnement onSnapshot
+let lastSyncAt = null;
 
-let cfg = Object.assign(
-  { clientId: DEFAULT_CLIENT_ID, fileId: DEFAULT_FILE_ID },
-  JSON.parse(localStorage.getItem(CFG_KEY) || "{}")
-);
-// Repli : une ancienne configuration locale sans ID fichier hérite de la constante
-if (!cfg.fileId) cfg.fileId = DEFAULT_FILE_ID;
-if (cfg.clientId === LEGACY_CLIENT_ID) cfg.clientId = DEFAULT_CLIENT_ID;
-
-let SQL = null;
-let db = null;          // SQL.Database en mémoire (lecture/écriture)
-let dirty = false;      // modifications non sauvegardées en BDD
-let editCompId = null;  // compétition en cours d'édition dans le formulaire
-
+/* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 function normKey(s) {
@@ -409,385 +401,198 @@ function showPage(name) {
     renderBalancePage();
   }
 }
+function setSyncInfo(msg) { $("#sync-info").textContent = msg; }
 
-/* ===================== Cache IndexedDB (navigateur) ===================== */
-function idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(DB_NAME, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
+/* ===================== Authentification Firebase ===================== */
+const googleProvider = new firebase.auth.GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
+function login() {
+  // Redirection (plus fiable que la popup en PWA installée sur smartphone)
+  auth.signInWithRedirect(googleProvider).catch(e => showAuthError(e));
 }
-async function idbGet(key) {
-  const d = await idbOpen();
-  return new Promise((res, rej) => {
-    const t = d.transaction(DB_STORE).objectStore(DB_STORE).get(key);
-    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
-  });
+function logout() {
+  auth.signOut().catch(() => {});
 }
-async function idbSet(key, val) {
-  const d = await idbOpen();
-  return new Promise((res, rej) => {
-    const tx = d.transaction(DB_STORE, "readwrite");
-    tx.objectStore(DB_STORE).put(val, key);
-    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
-  });
+function showAuthError(e) {
+  console.error(e);
+  let msg = e.message || String(e);
+  if (e.code === "auth/unauthorized-domain") msg = "Domaine non autorisé : ajoutez l'adresse de ce site dans Firebase Authentication → Paramètres → Domaines autorisés.";
+  else if (e.code === "auth/operation-not-allowed") msg = "Le fournisseur Google n'est pas activé dans Firebase Authentication.";
+  else if (e.code === "auth/popup-blocked") msg = "Fenêtre de connexion bloquée par le navigateur — réessayez.";
+  setSyncInfo("⚠️ Connexion impossible");
+  toast("❌ " + msg, 9000);
 }
 
-/* ===================== SQL (sql.js, lecture ET écriture) ===================== */
-async function initSql() {
-  if (!SQL) SQL = await initSqlJs({ locateFile: f => SQLJS_BASE + f });
-  return SQL;
-}
-function q(sql, params) {
-  const stmt = db.prepare(sql);
-  if (params) stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
-}
-function ex(sql, params) {
-  db.run(sql, params || []);
-  markDirty();
-}
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS competitions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  id_ffme TEXT DEFAULT '',
-  nom TEXT NOT NULL,
-  date_competition TEXT DEFAULT '',
-  prix REAL DEFAULT 0.0,
-  statut TEXT DEFAULT 'en_preparation',
-  helloasso_ref TEXT DEFAULT '',
-  created_at TEXT DEFAULT '',
-  updated_at TEXT DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS adherents (
-  id INTEGER PRIMARY KEY,
-  nom TEXT DEFAULT '', prenom TEXT DEFAULT '', num_licence TEXT DEFAULT '',
-  email TEXT DEFAULT '', email_secondaire TEXT DEFAULT '', phone TEXT DEFAULT '',
-  tarif TEXT DEFAULT '', saison TEXT DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS participants (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
-  adherent_id INTEGER NOT NULL REFERENCES adherents(id) ON DELETE CASCADE,
-  selectionne INTEGER DEFAULT 0,
-  statut_paiement TEXT DEFAULT 'en_attente',
-  date_synchro_helloasso TEXT DEFAULT '',
-  montant_paye REAL DEFAULT 0.0,
-  commande_helloasso TEXT DEFAULT '',
-  UNIQUE(competition_id, adherent_id)
-);
-CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS planning_groups (groupe TEXT DEFAULT '', tarif TEXT DEFAULT '');
-CREATE TABLE IF NOT EXISTS helloasso_items (
-  id_item INTEGER PRIMARY KEY,
-  order_id INTEGER, payer_nom TEXT DEFAULT '', payer_prenom TEXT DEFAULT '',
-  montant REAL DEFAULT 0.0, etat TEXT DEFAULT '', date_item TEXT DEFAULT '',
-  licence_saisie TEXT DEFAULT '', competition_saisie TEXT DEFAULT '',
-  campagne_slug TEXT DEFAULT '', raw_json TEXT DEFAULT '', synced_at TEXT DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS item_links (
-  id_item INTEGER PRIMARY KEY REFERENCES helloasso_items(id_item) ON DELETE CASCADE,
-  competition_id INTEGER REFERENCES competitions(id) ON DELETE SET NULL,
-  adherent_id INTEGER REFERENCES adherents(id) ON DELETE SET NULL,
-  source TEXT DEFAULT 'auto', updated_at TEXT DEFAULT ''
-);
-`;
-function loadDbFromBytes(bytes) {
-  db = new SQL.Database(new Uint8Array(bytes));
-  db.run(SCHEMA_SQL);   // tolère un fichier plus ancien / partiel
-  
-  // Table des coachs
-  db.run(`
-    CREATE TABLE IF NOT EXISTS coaches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nom TEXT NOT NULL UNIQUE
-    );
-  `);
-  
-  // Initialisation avec les 3 coachs par défaut si vide
-  let coachCount = 0;
-  try {
-    const rows = q("SELECT COUNT(*) AS count FROM coaches");
-    if (rows && rows.length > 0) coachCount = rows[0].count;
-  } catch(e) {}
-  
-  if (coachCount === 0) {
-    db.run("INSERT INTO coaches (nom) VALUES ('Adrien BERGER')");
-    db.run("INSERT INTO coaches (nom) VALUES ('Stephane LORIDANT')");
-    db.run("INSERT INTO coaches (nom) VALUES ('Clement DE LIMA FERREIRA')");
+auth.onAuthStateChanged(u => {
+  user = u;
+  if (u) {
+    $("#setup-email").textContent = u.email || "(compte sans e-mail)";
+    $("#setup-not-logged").style.display = "none";
+    $("#setup-logged").style.display = "block";
+    setSyncInfo("👤 " + (u.email || "connecté") + " — chargement Firestore…");
+    startListeners();
+  } else {
+    stopListeners();
+    $("#setup-not-logged").style.display = "block";
+    $("#setup-logged").style.display = "none";
+    snapshotsReady = 0;
+    comps = []; coaches = []; adherents = [];
+    setSyncInfo("Non connecté");
+    showPage("setup");
   }
+});
 
-  // Migration : colonnes coach dans la table competitions (bases existantes)
+/* ===================== Écoute temps réel Firestore ===================== */
+function startListeners() {
+  stopListeners();
+  snapshotsReady = 0;
+  listeners.push(fsdb.collection("competitions").onSnapshot(
+    snap => { comps = snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id })); onSnapshotArrived("competitions"); },
+    err => onSnapshotError("competitions", err)));
+  listeners.push(fsdb.collection("coaches").onSnapshot(
+    snap => { coaches = snap.docs.map(d => d.data()); onSnapshotArrived("coaches"); },
+    err => onSnapshotError("coaches", err)));
+  listeners.push(fsdb.collection("adherents").onSnapshot(
+    snap => { adherents = snap.docs.map(d => d.data()); onSnapshotArrived("adherents"); },
+    err => onSnapshotError("adherents", err)));
+}
+function stopListeners() {
+  listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
+  listeners = [];
+}
+function onSnapshotArrived(name) {
+  snapshotsReady++;
+  lastSyncAt = new Date();
+  if (snapshotsReady === 3) {
+    setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate(lastSyncAt.toISOString()));
+    renderAll();
+    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
+  } else {
+    renderAll();
+  }
+}
+function onSnapshotError(name, err) {
+  console.error("Firestore " + name + " :", err);
+  if (err.code === "permission-denied") {
+    setSyncInfo("🔒 Accès refusé par les règles Firestore");
+    toast("🔒 Accès refusé : votre compte doit être coach ou admin (voir Paramètres du bureau).", 9000);
+  } else {
+    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
+    toast("❌ Firestore : " + (err.message || err), 9000);
+  }
+}
+
+/* ===================== Accès aux données (Firestore) ===================== */
+function findComp(compId) {
+  return comps.find(c => String(c.id) === String(compId)) || null;
+}
+function findAdherent(adherentId) {
+  return adherents.find(a => String(a.id) === String(adherentId)) || null;
+}
+function getCoachesMap() {
+  const map = {};
+  for (const c of coaches) map[c.id] = c.nom;
+  return map;
+}
+function coachNames(ids) {
+  const map = getCoachesMap();
+  return (ids || []).map(id => map[id]).filter(Boolean);
+}
+function sortedCompetitions() {
+  return comps.slice().sort((a, b) =>
+    String(b.date_competition || "").localeCompare(String(a.date_competition || ""), "fr") ||
+    (Number(b.id) || 0) - (Number(a.id) || 0));
+}
+function newParticipant(adherentId, selected) {
+  const a = findAdherent(adherentId) || {};
+  return {
+    participant_id: null,
+    adherent_id: Number(adherentId),
+    nom: String(a.nom || "").toUpperCase(),
+    prenom: a.prenom || "",
+    num_licence: a.licence_ffme || "",
+    email: a.email || "",
+    phone: a.phone || "",
+    selectionne: !!selected,
+    statut_paiement: "en_attente",
+    montant_paye: 0,
+    commande_helloasso: "",
+    urgence_nom: a.emergency_name || "",
+    urgence_tel: a.emergency_phone || "",
+    updated_at: new Date().toISOString()
+  };
+}
+async function updateCompetitionDoc(comp, patch) {
   try {
-    const cols = q("PRAGMA table_info(competitions)").map(r => r.name);
-    if (!cols.includes("coach1_id")) db.run("ALTER TABLE competitions ADD COLUMN coach1_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
-    if (!cols.includes("coach2_id")) db.run("ALTER TABLE competitions ADD COLUMN coach2_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
-    if (!cols.includes("coach3_id")) db.run("ALTER TABLE competitions ADD COLUMN coach3_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL");
-  } catch(e) { console.warn("Migration colonnes coaches :", e); }
-
-  // Migration légère : colonne commande_helloasso (bases créées avant la v2.1.6)
-  try {
-    const cols = q("PRAGMA table_info(participants)").map(r => r.name);
-    if (!cols.includes("commande_helloasso")) {
-      db.run("ALTER TABLE participants ADD COLUMN commande_helloasso TEXT DEFAULT ''");
-    }
-  } catch (e) { console.warn("Migration commande_helloasso :", e); }
-}
-
-/* ===================== Marquage des modifications ===================== */
-function markDirty() {
-  dirty = true;
-  $("#save-btn").classList.add("dirty");
-  $("#save-btn").title = "Modifications non sauvegardées — cliquez pour écrire en BDD (Drive)";
-  $("#sync-info").textContent = "✏️ Modifications locales non sauvegardées";
-}
-function markClean(msg) {
-  dirty = false;
-  $("#save-btn").classList.remove("dirty");
-  if (msg) $("#sync-info").textContent = msg;
-}
-
-/* ===================== Authentification Google ===================== */
-let accessToken = null;
-let tokenExpiresAt = 0;
-
-function redirectUri() { return location.origin + location.pathname; }
-
-function startGoogleAuth() {
-  const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
-    b => b.toString(16).padStart(2, "0")).join("");
-  sessionStorage.setItem("alj_compet_oauth_state", state);
-  const url = OAUTH_AUTH_URL
-    + "?client_id=" + encodeURIComponent(cfg.clientId)
-    + "&redirect_uri=" + encodeURIComponent(redirectUri())
-    + "&response_type=token"
-    + "&scope=" + encodeURIComponent(DRIVE_SCOPE)
-    + "&state=" + state
-    + "&prompt=select_account";
-  location.assign(url);
-}
-function readTokenFromHash() {
-  if (!location.hash || location.hash.length < 2) return null;
-  const params = new URLSearchParams(location.hash.slice(1));
-  history.replaceState(null, "", location.pathname + location.search);
-  if (params.get("error")) throw new Error("Connexion Google refusée : " + params.get("error"));
-  const token = params.get("access_token");
-  const state = params.get("state");
-  const expected = sessionStorage.getItem("alj_compet_oauth_state");
-  sessionStorage.removeItem("alj_compet_oauth_state");
-  if (!token) throw new Error("Réponse Google invalide (token absent)");
-  if (!state || state !== expected) throw new Error("Réponse Google invalide (state) — réessayez");
-  const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
-  tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
-  return token;
-}
-function sessionToken() {
-  try {
-    const o = JSON.parse(sessionStorage.getItem("alj_compet_oauth_token") || "null");
-    if (o && o.token && o.exp > Date.now()) return o.token;
-  } catch (e) {}
-  return null;
-}
-async function driveDownload(fileId) {
-  const headers = { Authorization: "Bearer " + accessToken };
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=name,modifiedTime`, { headers });
-  if (!metaRes.ok) throw new Error("Fichier Drive introuvable (ID invalide ou accès refusé) [" + metaRes.status + "]");
-  const meta = await metaRes.json();
-  const mediaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { headers });
-  if (!mediaRes.ok) throw new Error("Téléchargement de database_Competition.db échoué [" + mediaRes.status + "]");
-  return { bytes: await mediaRes.arrayBuffer(), meta };
-}
-async function driveUploadBytes(fileId, bytes) {
-  // Mise à jour de contenu en conservant l'ID de fichier (liens de partage préservés)
-  const res = await fetch(
-    `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
-    { method: "PATCH", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/x-sqlite3" }, body: bytes }
-  );
-  if (!res.ok) throw new Error("Échec de la sauvegarde sur Drive [" + res.status + "] " + (await res.text()));
-  return res.json();
-}
-async function driveCreateFile(bytes) {
-  const boundary = "aljcompet" + Date.now();
-  const metadata = JSON.stringify({ name: "database_Competition.db", mimeType: "application/x-sqlite3" });
-  const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +
-               `--${boundary}\r\nContent-Type: application/x-sqlite3\r\n\r\n`;
-  const tail = `\r\n--${boundary}--`;
-  const body = new Blob([head, bytes, tail]);
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + accessToken, "Content-Type": "multipart/related; boundary=" + boundary },
-    body
-  });
-  if (!res.ok) throw new Error("Création du fichier sur Drive échouée [" + res.status + "]");
-  return res.json();
-}
-
-/* ===================== Chargement / sauvegarde ===================== */
-async function applyDbBytes(bytes, metaInfo) {
-  await initSql();
-  loadDbFromBytes(bytes);
-  loadPlanningGroups();
-  const info = { bytes, savedAt: new Date().toISOString(), driveModified: metaInfo && metaInfo.driveModified || "" };
-  await idbSet(CACHE_KEY, info);
-  markClean("💾 Cache du " + fmtDate(info.savedAt));
-  renderAll();
-}
-async function refreshFromDrive() {
-  if (!cfg || !cfg.clientId || !cfg.fileId) { fillConfigForm(); showPage("setup"); return; }
-  const btn = $("#refresh-btn"); btn.classList.add("spin");
-  try {
-    if (!accessToken) accessToken = sessionToken();
-    if (!accessToken) {
-      $("#sync-info").textContent = "Redirection vers la page d'authentification Google…";
-      btn.classList.remove("spin");
-      startGoogleAuth();
-      return;
-    }
-    $("#sync-info").textContent = "Téléchargement de database_Competition.db depuis Google Drive…";
-    const { bytes, meta } = await driveDownload(cfg.fileId);
-    await applyDbBytes(bytes, { driveModified: meta.modifiedTime });
-    markClean("☁️ Base Drive du " + fmtDate(meta.modifiedTime));
-    toast("✅ Base des compétitions chargée depuis Google Drive");
+    await fsdb.collection("competitions").doc(String(comp.docId)).update(
+      Object.assign({ updated_at: new Date().toISOString() }, patch));
   } catch (e) {
     console.error(e);
-    accessToken = null;
-    sessionStorage.removeItem("alj_compet_oauth_token");
-    const msg = String(e.message || e);
-    const m = msg.match(/\[(\d{3})\]/);
-    const status = m ? parseInt(m[1], 10) : 0;
-    let friendly = msg;
-    if (status === 404) friendly = "Fichier Drive introuvable : vérifiez l'ID de database_Competition.db (⚙️ Configuration).";
-    else if (status === 403) friendly = "Accès refusé : le compte Google connecté n'a pas accès au fichier.";
-    else if (status === 401) friendly = "Session Google expirée — reconnexion…";
-    $("#sync-info").textContent = "⚠️ " + friendly;
-    toast("❌ " + friendly, 9000);
-    if (status === 404) { fillConfigForm(); showPage("setup"); }
-    return;
-  } finally {
-    btn.classList.remove("spin");
+    if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
+    else toast("❌ " + (e.message || e), 9000);
+    throw e;
   }
-}
-async function saveToDrive() {
-  if (!db) { toast("⚠️ Aucune base chargée."); return; }
-  if (!accessToken) accessToken = sessionToken();
-  if (!accessToken) { startGoogleAuth(); return; }
-  const btn = $("#save-btn"); btn.classList.add("spin");
-  try {
-    $("#sync-info").textContent = "Écriture de la base vers Google Drive…";
-    const bytes = db.export();  // Uint8Array de la base SQLite complète
-    let fileId = cfg.fileId;
-    if (fileId) {
-      await driveUploadBytes(fileId, bytes);
-    } else {
-      fileId = await driveCreateFile(bytes);
-      cfg.fileId = fileId;
-      localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
-      toast("🆕 Fichier database_Competition.db créé sur le Drive (ID mémorisé). Reportez-le dans les Paramètres du bureau : " + fileId, 8000);
-    }
-    const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=modifiedTime`,
-      { headers: { Authorization: "Bearer " + accessToken } });
-    const meta = metaRes.ok ? await metaRes.json() : {};
-    await idbSet(CACHE_KEY, { bytes, savedAt: new Date().toISOString(), driveModified: meta.modifiedTime || "" });
-    markClean("☁️ Sauvegardé en BDD à " + fmtDate(new Date().toISOString()));
-    toast("✅ Sauvegardé en BDD : la base a été renvoyée vers Google Drive.");
-  } catch (e) {
-    console.error(e);
-    toast("❌ " + (e.message || e), 9000);
-    $("#sync-info").textContent = "⚠️ Échec de la sauvegarde : " + (e.message || e);
-  } finally {
-    btn.classList.remove("spin");
-  }
-}
-async function loadFromCache() {
-  const cached = await idbGet(CACHE_KEY);
-  if (!cached || !cached.bytes) return false;
-  await initSql();
-  loadDbFromBytes(cached.bytes);
-  loadPlanningGroups();
-  markClean("💾 Cache du " + fmtDate(cached.savedAt));
-  renderAll();
-  return true;
 }
 
 /* ===================== Rendu : compétitions ===================== */
 const STATUT_LABELS = { en_preparation: "En préparation", en_cours: "En cours", close: "Clos" };
 const STATUT_COLORS = { en_preparation: "#64748B", en_cours: "#D97706", close: "#16A34A" };
 const PAIEMENT_LABELS = { non_invite: "Non invité", en_attente: "En attente", paye: "Payé" };
-
-function getCoachesMap() {
-  const coaches = q("SELECT * FROM coaches");
-  const map = {};
-  for (const c of coaches) {
-    map[c.id] = c.nom;
-  }
-  return map;
-}
+const PAIEMENT_BADGE = { paye: "#16A34A", en_attente: "#D97706", non_invite: "#94A3B8" };
 
 function populateCoachDropdowns() {
-  const coaches = q("SELECT * FROM coaches ORDER BY nom COLLATE NOCASE");
-  const options = '<option value="">Aucun</option>' + coaches.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join("");
+  const sorted = coaches.slice().sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || ""), "fr"));
+  const options = '<option value="">Aucun</option>' + sorted.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join("");
   $("#f-coach1").innerHTML = options;
   $("#f-coach2").innerHTML = options;
   $("#f-coach3").innerHTML = options;
 }
-
-function listCompetitions() {
-  return q("SELECT * FROM competitions ORDER BY date_competition DESC, id DESC");
-}
 function currentCompId() {
   const sel = $("#p-comp-select");
-  return sel.value ? parseInt(sel.value, 10) : null;
+  return sel.value ? sel.value : null;
 }
 function renderComps() {
-  const comps = listCompetitions();
-  const coachesMap = getCoachesMap();
-  $("#comps-count").textContent = `${comps.length} compétition${comps.length > 1 ? "s" : ""}`;
-  $("#comps-list").innerHTML = comps.map(c => {
-    const compCoaches = [c.coach1_id, c.coach2_id, c.coach3_id]
-      .map(id => coachesMap[id])
-      .filter(Boolean);
-    const coachesText = compCoaches.length > 0 ? `🏃 Coachs : ${compCoaches.join(", ")}` : "🏃 Aucun coach";
+  const list = sortedCompetitions();
+  $("#comps-count").textContent = `${list.length} compétition${list.length > 1 ? "s" : ""}`;
+  $("#comps-list").innerHTML = list.map(c => {
+    const coachesText = (c.coaches && c.coaches.length > 0) ? `🏃 Coachs : ${c.coaches.join(", ")}` : "🏃 Aucun coach";
     return `
-    <div class="card" onclick="openEdit(${c.id})">
+    <div class="card" onclick="openEdit('${esc(String(c.id))}')">
       <div class="row-flex">
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(c.nom)}</div>
-          <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(c.date_competition || "sans date")} · 💶 ${Number(c.prix).toFixed(2)} €</div>
+          <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(c.date_competition || "sans date")} · 💶 ${Number(c.prix || 0).toFixed(2)} €</div>
           <div class="m-sub" style="margin-top:2px; color: #475569;">${esc(coachesText)}</div>
         </div>
         <span class="badge" style="display: none; background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
       </div>
       <div class="btn-row" style="margin-top:8px">
-        <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants(${c.id})">👁 Voir détail — compétiteurs</button>
+        <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants('${esc(String(c.id))}')">👁 Voir détail — compétiteurs</button>
       </div>
     </div>`;
   }).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
 
-  // Sélecteur de l'onglet Compétiteurs + combo du formulaire d'édition
   const sel = $("#p-comp-select");
   const prev = sel.value;
-  sel.innerHTML = comps.map(c => `<option value="${c.id}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`).join("");
-  if (prev && comps.some(c => String(c.id) === prev)) sel.value = prev;
+  sel.innerHTML = list.map(c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`).join("");
+  if (prev && list.some(c => String(c.id) === prev)) sel.value = prev;
   renderParticipants();
 }
 function openEdit(id) {
-  const c = q("SELECT * FROM competitions WHERE id=?", [id])[0];
+  const c = findComp(id);
   if (!c) return;
   editCompId = id;
-  $("#f-nom").value = c.nom;
+  $("#f-nom").value = c.nom || "";
   $("#f-idffme").value = c.id_ffme || "";
   $("#f-date").value = c.date_competition || "";
   $("#f-prix").value = c.prix || 0;
   $("#f-statut").value = c.statut || "en_preparation";
   populateCoachDropdowns();
-  $("#f-coach1").value = c.coach1_id || "";
-  $("#f-coach2").value = c.coach2_id || "";
-  $("#f-coach3").value = c.coach3_id || "";
+  const ids = c.coach_ids || [];
+  $("#f-coach1").value = ids[0] != null ? String(ids[0]) : "";
+  $("#f-coach2").value = ids[1] != null ? String(ids[1]) : "";
+  $("#f-coach3").value = ids[2] != null ? String(ids[2]) : "";
   $("#f-btns").style.display = "flex";
   $("#f-btns-new").style.display = "none";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -803,51 +608,95 @@ function resetCompForm() {
   $("#f-btns").style.display = "none";
   $("#f-btns-new").style.display = "flex";
 }
-function createCompetition() {
+function readCoachSelection() {
+  return ["#f-coach1", "#f-coach2", "#f-coach3"]
+    .map(sel => $(sel).value ? Number($(sel).value) : null)
+    .filter(v => v !== null);
+}
+async function createCompetition() {
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
-  const c1 = $("#f-coach1").value ? parseInt($("#f-coach1").value, 10) : null;
-  const c2 = $("#f-coach2").value ? parseInt($("#f-coach2").value, 10) : null;
-  const c3 = $("#f-coach3").value ? parseInt($("#f-coach3").value, 10) : null;
-  // NB : la campagne HelloAsso est annuelle (app_settings) — pas de champ par compétition
-  ex("INSERT INTO competitions (nom, id_ffme, date_competition, prix, statut, coach1_id, coach2_id, coach3_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
-    [nom, $("#f-idffme").value.trim(), $("#f-date").value || "",
-     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value, c1, c2, c3]);
-  resetCompForm();
-  renderComps();
-  toast("✅ Compétition créée (localement — pensez à « 💾 Sauvegarder en BDD »).");
+  const coachIds = readCoachSelection();
+  const nowIso = new Date().toISOString();
+  try {
+    await fsdb.collection("competitions").add({
+      id: Date.now(),
+      nom: nom,
+      id_ffme: $("#f-idffme").value.trim(),
+      date_competition: $("#f-date").value || "",
+      prix: parseFloat($("#f-prix").value || "0") || 0,
+      statut: $("#f-statut").value,
+      coach_ids: coachIds,
+      coaches: coachNames(coachIds),
+      helloasso_ref: "",
+      nb_participants: 0,
+      nb_selectionnes: 0,
+      nb_payes: 0,
+      total_collecte: 0,
+      participants: [],
+      created_at: nowIso,
+      updated_at: nowIso
+    });
+    resetCompForm();
+    toast("✅ Compétition créée — synchronisée en temps réel.");
+  } catch (e) { /* déjà toasté par updateCompetitionDoc ? non : ici add */ 
+    console.error(e);
+    if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
+    else toast("❌ " + (e.message || e), 9000);
+  }
 }
-function updateCompetition() {
+async function updateCompetition() {
   if (!editCompId) return;
+  const c = findComp(editCompId);
+  if (!c) return;
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
-  const c1 = $("#f-coach1").value ? parseInt($("#f-coach1").value, 10) : null;
-  const c2 = $("#f-coach2").value ? parseInt($("#f-coach2").value, 10) : null;
-  const c3 = $("#f-coach3").value ? parseInt($("#f-coach3").value, 10) : null;
-  ex("UPDATE competitions SET nom=?, id_ffme=?, date_competition=?, prix=?, statut=?, coach1_id=?, coach2_id=?, coach3_id=?, updated_at=datetime('now') WHERE id=?",
-    [nom, $("#f-idffme").value.trim(), $("#f-date").value || "",
-     parseFloat($("#f-prix").value || "0") || 0, $("#f-statut").value, c1, c2, c3, editCompId]);
-  renderComps();
-  toast("✅ Compétition mise à jour (localement).");
+  const coachIds = readCoachSelection();
+  try {
+    await updateCompetitionDoc(c, {
+      nom: nom,
+      id_ffme: $("#f-idffme").value.trim(),
+      date_competition: $("#f-date").value || "",
+      prix: parseFloat($("#f-prix").value || "0") || 0,
+      statut: $("#f-statut").value,
+      coach_ids: coachIds,
+      coaches: coachNames(coachIds)
+    });
+    renderComps();
+    toast("✅ Compétition mise à jour.");
+  } catch (e) {}
 }
-function deleteCompetition() {
+async function deleteCompetition() {
   if (!editCompId) return;
   if (!confirm("Supprimer cette compétition et sa liste de participants ?")) return;
-  ex("DELETE FROM participants WHERE competition_id=?", [editCompId]);
-  ex("DELETE FROM competitions WHERE id=?", [editCompId]);
-  resetCompForm();
-  renderComps();
-  toast("🗑 Compétition supprimée (localement).");
+  const c = findComp(editCompId);
+  if (!c) return;
+  try {
+    await fsdb.collection("competitions").doc(String(c.docId)).delete();
+    resetCompForm();
+    renderComps();
+    toast("🗑 Compétition supprimée.");
+  } catch (e) {
+    console.error(e);
+    toast("❌ " + (e.message || e), 9000);
+  }
 }
 
 /* ===================== Rendu : compétiteurs ===================== */
-function listAdherents() {
-  return q("SELECT * FROM adherents ORDER BY nom COLLATE NOCASE, prenom COLLATE NOCASE");
-}
+const NON_IDENTIFIES = "Non identifiés";
+
 function competitionAdherents(compId) {
-  return q(`SELECT p.*, a.nom, a.prenom, a.num_licence, a.tarif, a.email, a.phone
-            FROM participants p JOIN adherents a ON a.id = p.adherent_id
-            WHERE p.competition_id = ?`, [compId]);
+  const c = findComp(compId);
+  if (!c) return [];
+  return (c.participants || []).map(p => {
+    const adh = findAdherent(p.adherent_id) || {};
+    return Object.assign({}, p, {
+      competition_id: c.id,
+      tarif: adh.tarif || "",
+      groupe: adh.creneau_groupe || "",
+      date_synchro_helloasso: p.updated_at || ""
+    });
+  });
 }
 function renderParticipants() {
   const compId = currentCompId();
@@ -857,12 +706,11 @@ function renderParticipants() {
   const nbSel = rows.filter(r => r.selectionne).length;
   count.textContent = `${nbSel} compétiteur${nbSel > 1 ? "s" : ""} sélectionné${nbSel > 1 ? "s" : ""} sur ${rows.length}`;
 
-  // Regroupement par groupe de créneau (miroir planning_groups) ; à défaut,
-  // par tarif ; « Non identifiés » regroupe les tarifs vides.
+  // Regroupement par groupe de créneau (donnée du planning poussée par le bureau) ;
+  // à défaut, par tarif ; « Non identifiés » regroupe les tarifs vides.
   const groups = {};
   for (const p of rows) {
-    const tarifKey = normKey(p.tarif);
-    const groupe = (PLANNING_GROUPS[tarifKey]) || (p.tarif ? p.tarif : NON_IDENTIFIES);
+    const groupe = p.groupe || (p.tarif ? p.tarif : NON_IDENTIFIES);
     (groups[groupe] = groups[groupe] || []).push(p);
   }
   const ordered = Object.entries(groups)
@@ -874,7 +722,7 @@ function renderParticipants() {
     <div class="card">
       <div class="row-flex">
         <label class="switch" title="Participe : Oui / Non">
-          <input type="checkbox" ${p.selectionne ? "checked" : ""} onchange="toggleSelection(${p.competition_id},${p.adherent_id},this.checked)">
+          <input type="checkbox" ${p.selectionne ? "checked" : ""} onchange="toggleSelection('${esc(String(p.competition_id))}',${Number(p.adherent_id)},this.checked)">
           <span class="slider"></span>
         </label>
         <div style="flex:1;min-width:0">
@@ -889,45 +737,49 @@ function renderParticipants() {
     || `<div class="empty">Aucun compétiteur : utilisez « Charger le groupe Compétition » ou la recherche étendue.</div>`;
   renderSearchResults();
 }
-const NON_IDENTIFIES = "Non identifiés";
-let PLANNING_GROUPS = {};
-function loadPlanningGroups() {
-  try { PLANNING_GROUPS = {}; for (const r of q("SELECT groupe, tarif FROM planning_groups")) PLANNING_GROUPS[normKey(r.tarif)] = r.groupe; }
-  catch (e) { PLANNING_GROUPS = {}; }
+async function toggleSelection(compId, adherentId, checked) {
+  const c = findComp(compId);
+  if (!c) return;
+  const parts = (c.participants || []).slice();
+  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
+  const stamp = new Date().toISOString();
+  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: !!checked, updated_at: stamp });
+  else parts.push(newParticipant(adherentId, checked));
+  try {
+    await updateCompetitionDoc(c, {
+      participants: parts,
+      nb_participants: parts.length,
+      nb_selectionnes: parts.filter(p => p.selectionne).length
+    });
+  } catch (e) {}
 }
-function deleteParticipant(compId, adherentId, nomComplet) {
-  /* Retrait d'un compétiteur réservé à l'application de bureau (bouton corbeille
-     masqué sur la page web). Fonction conservée pour un usage futur. */
-  if (!confirm(`Retirer « ${nomComplet} » de cette compétition ?\n(L'adhérent reste dans la base.)`)) return;
-  ex("DELETE FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId]);
-  renderParticipants();
-  toast("🗑 Compétiteur retiré de l'épreuve (localement).");
+function listAdherents() {
+  return adherents.slice().sort((a, b) =>
+    String(a.nom || "").localeCompare(String(b.nom || ""), "fr") ||
+    String(a.prenom || "").localeCompare(String(b.prenom || ""), "fr"));
 }
-function toggleSelection(compId, adherentId, checked) {
-  const row = q("SELECT id FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId])[0];
-  if (row) {
-    ex("UPDATE participants SET selectionne=? WHERE id=?", [checked ? 1 : 0, row.id]);
-  } else {
-    ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,?, 'en_attente')",
-      [compId, adherentId, checked ? 1 : 0]);
-  }
-  renderParticipants();
-}
-/* Statut de paiement : LECTURE SEULE sur la web — seul le rattachement HelloAsso
-   (synchro / correction manuelle dans l'application de bureau) passe le statut à « Payé ». */
-const PAIEMENT_BADGE = { paye: "#16A34A", en_attente: "#D97706", non_invite: "#94A3B8" };
-function loadCompetitionGroup() {
+async function loadCompetitionGroup() {
   const compId = currentCompId();
   if (!compId) return;
-  const group = listAdherents().filter(a => normKey(a.tarif).includes("competition"));
+  const c = findComp(compId);
+  if (!c) return;
+  const group = adherents.filter(a => normKey(a.tarif).includes("competition"));
+  const parts = (c.participants || []).slice();
   let added = 0;
   for (const a of group) {
-    const row = q("SELECT id, selectionne FROM participants WHERE competition_id=? AND adherent_id=?", [compId, a.id])[0];
-    if (!row) { ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'en_attente')", [compId, a.id]); added++; }
-    else if (!row.selectionne) { ex("UPDATE participants SET selectionne=1 WHERE id=?", [row.id]); added++; }
+    const idx = parts.findIndex(p => Number(p.adherent_id) === Number(a.id));
+    if (idx < 0) { parts.push(newParticipant(a.id, true)); added++; }
+    else if (!parts[idx].selectionne) { parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: new Date().toISOString() }); added++; }
   }
-  renderParticipants();
-  toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » activé(s).`);
+  if (added === 0) { toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà actifs."); return; }
+  try {
+    await updateCompetitionDoc(c, {
+      participants: parts,
+      nb_participants: parts.length,
+      nb_selectionnes: parts.filter(p => p.selectionne).length
+    });
+    toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » activé(s).`);
+  } catch (e) {}
 }
 function renderSearchResults() {
   const compId = currentCompId();
@@ -935,32 +787,59 @@ function renderSearchResults() {
   if (!compId) { wrap.innerHTML = ""; return; }
   const query = normKey($("#p-search").value);
   if (query.length < 2) { wrap.innerHTML = `<div class="m-sub">Tapez au moins 2 lettres…</div>`; return; }
-  const inComp = new Set(competitionAdherents(compId).map(p => p.adherent_id));
-  const results = listAdherents().filter(a =>
-    !inComp.has(a.id) &&
-    (normKey(a.nom).includes(query) || normKey(a.prenom).includes(query) || normKey(a.num_licence).includes(query))
+  const c = findComp(compId);
+  const inComp = new Set(((c && c.participants) || []).map(p => Number(p.adherent_id)));
+  const results = adherents.filter(a =>
+    !inComp.has(Number(a.id)) &&
+    (normKey(a.nom).includes(query) || normKey(a.prenom).includes(query) || normKey(a.licence_ffme).includes(query))
   ).slice(0, 12);
   wrap.innerHTML = results.map(a => `
     <div class="row-flex" style="padding:7px 0;border-bottom:1px solid var(--line)">
       <div style="flex:1;min-width:0">
         <b style="font-size:13px">${esc(a.nom)} ${esc(a.prenom)}</b>
-        <div class="m-sub">🪪 ${esc(a.num_licence || "sans licence")} · ${esc(a.tarif || "—")}</div>
+        <div class="m-sub">🪪 ${esc(a.licence_ffme || "sans licence")} · ${esc(a.tarif || "—")}</div>
       </div>
-      <button class="btn btn-primary btn-mini" onclick="addAdherent(${compId},${a.id})">➕ Ajouter</button>
+      <button class="btn btn-primary btn-mini" onclick="addAdherent('${esc(String(compId))}',${Number(a.id)})">➕ Ajouter</button>
     </div>`).join("") || `<div class="m-sub">Aucun adhérent trouvé (ou déjà ajouté).</div>`;
 }
-function addAdherent(compId, adherentId) {
-  const row = q("SELECT id FROM participants WHERE competition_id=? AND adherent_id=?", [compId, adherentId])[0];
-  if (row) ex("UPDATE participants SET selectionne=1 WHERE id=?", [row.id]);
-  else ex("INSERT INTO participants (competition_id, adherent_id, selectionne, statut_paiement) VALUES (?,?,1,'en_attente')", [compId, adherentId]);
-  renderParticipants();
-  toast("➕ Adhérent ajouté à la compétition.");
+async function addAdherent(compId, adherentId) {
+  const c = findComp(compId);
+  if (!c) return;
+  const parts = (c.participants || []).slice();
+  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
+  const stamp = new Date().toISOString();
+  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: stamp });
+  else parts.push(newParticipant(adherentId, true));
+  try {
+    await updateCompetitionDoc(c, {
+      participants: parts,
+      nb_participants: parts.length,
+      nb_selectionnes: parts.filter(p => p.selectionne).length
+    });
+    toast("➕ Adhérent ajouté à la compétition.");
+  } catch (e) {}
+}
+async function deleteParticipant(compId, adherentId, nomComplet) {
+  /* Retrait d'un compétiteur réservé à l'application de bureau (bouton corbeille
+     masqué sur la page web). Fonction conservée pour un usage futur. */
+  if (!confirm(`Retirer « ${nomComplet} » de cette compétition ?\n(L'adhérent reste dans la base.)`)) return;
+  const c = findComp(compId);
+  if (!c) return;
+  const parts = (c.participants || []).filter(p => Number(p.adherent_id) !== Number(adherentId));
+  try {
+    await updateCompetitionDoc(c, {
+      participants: parts,
+      nb_participants: parts.length,
+      nb_selectionnes: parts.filter(p => p.selectionne).length
+    });
+    toast("🗑 Compétiteur retiré de l'épreuve.");
+  } catch (e) {}
 }
 
 /* ===================== Navigation : détail d'une épreuve ===================== */
 function openParticipants(compId) {
   const sel = $("#p-comp-select");
-  if (compId && sel.querySelector(`option[value="${compId}"]`)) sel.value = String(compId);
+  if (compId && sel.querySelector(`option[value="${CSS.escape(String(compId))}"]`)) sel.value = String(compId);
   showPage("participants");
   renderParticipants();
 }
@@ -969,14 +848,14 @@ function openParticipants(compId) {
 let editCoachId = null;
 
 function renderCoachesPage() {
-  const coaches = q("SELECT * FROM coaches ORDER BY nom COLLATE NOCASE");
-  $("#coaches-count").textContent = `${coaches.length} coach${coaches.length > 1 ? "s" : ""}`;
+  const sorted = coaches.slice().sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || ""), "fr"));
+  $("#coaches-count").textContent = `${sorted.length} coach${sorted.length > 1 ? "s" : ""}`;
   
-  $("#coaches-list").innerHTML = coaches.map(c => `
-    <div class="card" onclick="openEditCoach(${c.id})">
+  $("#coaches-list").innerHTML = sorted.map(c => `
+    <div class="card" onclick="openEditCoach('${esc(String(c.id))}')">
       <div class="row-flex" style="align-items: center; justify-content: space-between;">
         <div class="m-name">${esc(c.nom)}</div>
-        <span style="font-size: 11px; color: var(--muted)">ID: ${c.id}</span>
+        <span style="font-size: 11px; color: var(--muted)">ID: ${esc(String(c.id))}</span>
       </div>
     </div>
   `).join("") || `<div class="empty">Aucun coach enregistré.</div>`;
@@ -985,20 +864,20 @@ function renderCoachesPage() {
 }
 
 function openEditCoach(id) {
-  const c = q("SELECT * FROM coaches WHERE id=?", [id])[0];
+  const c = coaches.find(x => String(x.id) === String(id));
   if (!c) return;
   editCoachId = id;
   $("#coach-form-title").textContent = "✏️ Modifier le coach";
-  $("#f-coach-nom").value = c.nom;
+  $("#f-coach-nom").value = c.nom || "";
   $("#f-coach-btns").style.display = "flex";
   $("#f-coach-btns-new").style.display = "none";
   
-  // Load competitions for this coach
-  const comps = q("SELECT * FROM competitions WHERE coach1_id=? OR coach2_id=? OR coach3_id=? ORDER BY date_competition DESC, id DESC", [id, id, id]);
+  const owned = sortedCompetitions().filter(comp =>
+    (comp.coach_ids || []).some(cid => String(cid) === String(id)));
   $("#coach-competitions-section").style.display = "block";
-  $("#coach-competitions-h").textContent = `🏆 Épreuves pour ${esc(c.nom)} (${comps.length})`;
-  $("#coach-competitions-list").innerHTML = comps.map(comp => `
-    <div class="card" onclick="showPage('comps'); openEdit(${comp.id})">
+  $("#coach-competitions-h").textContent = `🏆 Épreuves pour ${esc(c.nom)} (${owned.length})`;
+  $("#coach-competitions-list").innerHTML = owned.map(comp => `
+    <div class="card" onclick="showPage('comps'); openEdit('${esc(String(comp.id))}')">
       <div class="m-name">${esc(comp.nom)}</div>
       <div class="m-sub">🪪 ${esc(comp.id_ffme || "—")} · 📅 ${esc(comp.date_competition || "sans date")}</div>
     </div>
@@ -1014,45 +893,67 @@ function resetCoachForm() {
   $("#coach-competitions-section").style.display = "none";
 }
 
-function createCoach() {
+async function createCoach() {
   const nom = $("#f-coach-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
   try {
-    ex("INSERT INTO coaches (nom) VALUES (?)", [nom]);
+    const newId = Date.now();
+    await fsdb.collection("coaches").doc(String(newId)).set({
+      id: newId,
+      nom: nom,
+      updated_at: new Date().toISOString()
+    });
     resetCoachForm();
-    renderCoachesPage();
-    renderComps();
-    toast("✅ Coach ajouté (localement).");
-  } catch(e) {
-    toast("⚠️ Ce coach existe déjà ou une erreur est survenue.");
+    toast("✅ Coach ajouté.");
+  } catch (e) {
+    console.error(e);
+    toast("⚠️ " + (e.message || e), 9000);
   }
 }
 
-function updateCoach() {
+async function updateCoach() {
   if (!editCoachId) return;
   const nom = $("#f-coach-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
   try {
-    ex("UPDATE coaches SET nom=? WHERE id=?", [nom, editCoachId]);
+    await fsdb.collection("coaches").doc(String(editCoachId)).update({
+      nom: nom,
+      updated_at: new Date().toISOString()
+    });
+    // Répercuter le nom dans les compétitions qui l'affichent
+    for (const c of comps) {
+      const ids = c.coach_ids || [];
+      if (ids.some(cid => String(cid) === String(editCoachId))) {
+        await updateCompetitionDoc(c, { coaches: coachNames(ids) });
+      }
+    }
     const coachId = editCoachId;
     resetCoachForm();
-    renderCoachesPage();
-    renderComps();
-    openEditCoach(coachId); // refresh
-    toast("✅ Coach mis à jour (localement).");
-  } catch(e) {
-    toast("⚠️ Ce nom de coach est déjà utilisé.");
+    openEditCoach(coachId);
+    toast("✅ Coach mis à jour.");
+  } catch (e) {
+    console.error(e);
+    toast("⚠️ " + (e.message || e), 9000);
   }
 }
 
-function deleteCoach() {
+async function deleteCoach() {
   if (!editCoachId) return;
   if (!confirm("Supprimer ce coach ? Il sera retiré de toutes les compétitions associées.")) return;
-  ex("DELETE FROM coaches WHERE id=?", [editCoachId]);
-  resetCoachForm();
-  renderCoachesPage();
-  renderComps();
-  toast("🗑 Coach supprimé (localement).");
+  try {
+    await fsdb.collection("coaches").doc(String(editCoachId)).delete();
+    for (const c of comps) {
+      const ids = (c.coach_ids || []).filter(cid => String(cid) !== String(editCoachId));
+      if (ids.length !== (c.coach_ids || []).length) {
+        await updateCompetitionDoc(c, { coach_ids: ids, coaches: coachNames(ids) });
+      }
+    }
+    resetCoachForm();
+    toast("🗑 Coach supprimé.");
+  } catch (e) {
+    console.error(e);
+    toast("⚠️ " + (e.message || e), 9000);
+  }
 }
 
 function renderAll() {
@@ -1064,28 +965,37 @@ function renderAll() {
 }
 
 /* ===================== Rendu : balance financière ===================== */
+function computeBalances() {
+  const map = new Map();
+  for (const c of comps) {
+    for (const p of (c.participants || [])) {
+      if (!p.selectionne) continue;
+      const aid = Number(p.adherent_id);
+      const e = map.get(aid) || {
+        id: aid, nom: String(p.nom || "").toUpperCase(), prenom: p.prenom || "",
+        num_licence: p.num_licence || "", nb_competitions: 0,
+        total_du: 0, total_paye: 0, details: []
+      };
+      e.nb_competitions++;
+      e.total_du += Number(c.prix || 0);
+      e.total_paye += Number(p.montant_paye || 0);
+      e.details.push({ nom: c.nom, prix: c.prix, montant_paye: p.montant_paye, statut_paiement: p.statut_paiement });
+      map.set(aid, e);
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    String(a.nom || "").localeCompare(String(b.nom || ""), "fr") ||
+    String(a.prenom || "").localeCompare(String(b.prenom || ""), "fr"));
+}
+
 function renderBalancePage() {
-  if (!db) return;
-  const searchQuery = ($("#bal-search").value || "").trim().toLowerCase();
+  if (snapshotsReady < 3) return;
+  const searchQuery = ($("#bal-search").value || "").trim();
   
-  // Query all adherents, their active competitions, and cumulative dues & payments
-  const query = `
-    SELECT 
-      a.id, a.nom, a.prenom, a.num_licence,
-      COUNT(p.id) AS nb_competitions,
-      SUM(CASE WHEN p.selectionne = 1 THEN c.prix ELSE 0 END) AS total_du,
-      SUM(CASE WHEN p.selectionne = 1 THEN p.montant_paye ELSE 0 END) AS total_paye
-    FROM adherents a
-    LEFT JOIN participants p ON p.adherent_id = a.id AND p.selectionne = 1
-    LEFT JOIN competitions c ON c.id = p.competition_id
-    GROUP BY a.id, a.nom, a.prenom, a.num_licence
-    ORDER BY a.nom COLLATE NOCASE, a.prenom COLLATE NOCASE
-  `;
-  const rows = q(query);
+  const rows = computeBalances();
   
   const filtered = rows.filter(r => {
-    // If no competitions are linked and no search query, we can still list them or only list those with competitions or balance
-    if (!searchQuery && r.nb_competitions === 0) return false; // hide completely inactive athletes by default unless searching
+    if (!searchQuery && r.nb_competitions === 0) return false;
     if (!searchQuery) return true;
     const fullName = normKey(`${r.nom} ${r.prenom}`);
     const licence = normKey(r.num_licence || "");
@@ -1114,19 +1024,10 @@ function renderBalancePage() {
       style = "color: #16A34A; font-weight: bold; background: #F0FDF4; border: 1px solid #BBF7D0; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block;";
     }
 
-    // Detail of competitions for this athlete
-    const details = q(`
-      SELECT c.nom, c.prix, p.montant_paye, p.statut_paiement
-      FROM participants p
-      JOIN competitions c ON c.id = p.competition_id
-      WHERE p.adherent_id = ? AND p.selectionne = 1
-      ORDER BY c.date_competition DESC
-    `, [r.id]);
-
-    const detailsHtml = details.map(d => `
+    const detailsHtml = (r.details || []).map(d => `
       <div style="font-size: 12px; color: #475569; padding: 4px 0; border-bottom: 1px dashed #F1F5F9; display: flex; justify-content: space-between; align-items: center;">
         <span>🏆 ${esc(d.nom)}</span>
-        <span>Dû: <b>${Number(d.prix).toFixed(2)} €</b> | Payé: <span style="color: ${d.statut_paiement === 'paye' ? '#16A34A' : '#D97706'}">${Number(d.montant_paye).toFixed(2)} €</span></span>
+        <span>Dû: <b>${Number(d.prix || 0).toFixed(2)} €</b> | Payé: <span style="color: ${d.statut_paiement === 'paye' ? '#16A34A' : '#D97706'}">${Number(d.montant_paye || 0).toFixed(2)} €</span></span>
       </div>
     `).join("") || `<div style="font-size: 12px; color: #94A3B8; font-style: italic;">Aucune compétition active.</div>`;
 
@@ -1237,7 +1138,7 @@ function onSelectEmailTemplate() {
 function getActiveCompetitionObject() {
   const compId = currentCompId();
   if (!compId) return null;
-  return q("SELECT * FROM competitions WHERE id=?", [compId])[0] || null;
+  return findComp(compId);
 }
 
 function getActiveRecipients() {
@@ -1369,25 +1270,16 @@ async function sendCampaignEmails() {
 }
 
 /* ===================== Événements ===================== */
-function fillConfigForm() {
-  $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
-  $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
-  const hint = document.getElementById("redirect-hint");
-  if (hint) hint.textContent = redirectUri();
-}
 function wireEvents() {
   document.querySelectorAll("nav button").forEach(b =>
     b.addEventListener("click", () => showPage(b.dataset.page)));
-  $("#refresh-btn").addEventListener("click", refreshFromDrive);
-  $("#save-btn").addEventListener("click", saveToDrive);
-  $("#config-btn").addEventListener("click", () => { fillConfigForm(); showPage("setup"); });
-  $("#cfg-save").addEventListener("click", () => {
-    cfg = { clientId: $("#cfg-client-id").value.trim(), fileId: $("#cfg-file-id").value.trim() };
-    if (!cfg.clientId || !cfg.fileId) { toast("⚠️ Renseignez les deux identifiants (l'ID fichier vient des Paramètres du bureau)."); return; }
-    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
-    toast("💾 Configuration enregistrée");
-    refreshFromDrive();
+  $("#refresh-btn").addEventListener("click", () => {
+    if (user) { startListeners(); setSyncInfo("🔄 Rechargement Firestore…"); }
+    else showPage("setup");
   });
+  $("#config-btn").addEventListener("click", () => showPage("setup"));
+  $("#login-btn").addEventListener("click", login);
+  $("#logout-btn-page").addEventListener("click", logout);
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);
@@ -1400,9 +1292,6 @@ function wireEvents() {
   $("#p-load-group").addEventListener("click", loadCompetitionGroup);
   $("#p-search").addEventListener("input", renderSearchResults);
   $("#bal-search").addEventListener("input", renderBalancePage);
-  window.addEventListener("beforeunload", e => {
-    if (dirty) { e.preventDefault(); e.returnValue = ""; }
-  });
 }
 
 (async function boot() {
@@ -1414,34 +1303,13 @@ function wireEvents() {
   }
 
   wireEvents();
-  try { await initSql(); } catch (e) {
-    $("#sync-info").textContent = "⚠️ sql.js indisponible (hors ligne ?)";
-    toast("❌ Impossible de charger sql.js (connexion internet requise au premier lancement)");
-  }
 
-  // Retour de Google après la redirection : token dans le fragment (#access_token=…)
-  try {
-    const hashToken = readTokenFromHash();
-    if (hashToken) {
-      accessToken = hashToken;
-      sessionStorage.setItem("alj_compet_oauth_token",
-        JSON.stringify({ token: hashToken, exp: tokenExpiresAt }));
-      await refreshFromDrive();
-      return;
-    }
-  } catch (e) {
-    $("#sync-info").textContent = "⚠️ Authentification Google interrompue";
-    toast("❌ " + (e.message || e));
-  }
+  // Cache hors-ligne Firestore (les écritures en attente sont renvoyées dès le retour du réseau)
+  try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
+  catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 
-  const ok = await loadFromCache();
-  if (!cfg || !cfg.clientId || !cfg.fileId) {
-    fillConfigForm();
-    showPage("setup");
-  } else if (!ok) {
-    $("#sync-info").textContent = "Connexion à Google Drive…";
-    startGoogleAuth();
-  }
+  // Retour de la redirection Google (sign-in) : onAuthStateChanged prend le relais
+  auth.getRedirectResult().catch(showAuthError);
 })();
 </script>
 </body>

@@ -34,7 +34,7 @@ class TestMobilePWA(unittest.TestCase):
         self.assertTrue(os.path.exists(resp.path))
         with open(resp.path, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("alj-escalade-v1", content)
+        self.assertIn("alj-escalade-v2", content)
         self.assertIn("addEventListener(\"fetch\"", content)
 
     def test_competitions_html_pwa_and_email_features(self):
