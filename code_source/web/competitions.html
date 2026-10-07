@@ -1286,15 +1286,15 @@ async function loadEmailTemplates() {
   const defaultTemplates = [
     {
       id: "convoc",
-      name: "Convocation épreuve",
-      subject: "[ALJ Escalade] Convocation : {name_competition}",
-      body: "Bonjour {first_name},\n\nTu es sélectionné(e) pour participer à la compétition {name_competition} (#{no_competition}) qui aura lieu le {date_competition}.\n\nFrais d'inscription : {montant_competition}.\nMerci de confirmer ta présence et régler ton inscription sur HelloAsso ou auprès de ton coach.\n\nSportivement,\nL'équipe des coachs ALJ Escalade"
+      name: "Compétition - 1er Inscription",
+      subject: "[ALJ] Inscription Compétition {name_competition} du {date_competition}",
+      body: "Bonjour,\nComme {first_name} l'as vu avec son entraineur, notre équipe encadrante lui propose de participer à la prochaine compétition d'escalade {name_competition} !\nCette compétition se déroule à la date du : {date_competition}.\nAfin de finaliser et régulariser son inscription, nous vous invitons à effectuer le règlement via notre page HelloAsso.\nVoici la démarche à suivre :\nRendez-vous sur le site HelloAsso <a href=\"https://www.helloasso.com/associations/amicale-laique-de-jonage/evenements/regularisation-inscription-competiteurs-2026-2027\">helloasso.com/</a>\nSaisissez le numéro de licence de votre enfant : {num_licence}\nIndiquez le numéro de la compétition : {no_competition}\nIndiquer le nom de la compétition {name_competition}\nProcédez au règlement d'un montant de {montant_competition} €.\nMerci de réaliser cette démarche dans les meilleurs délais afin que l'inscription de votre enfant soit validée à temps auprès des organisateurs.\nSi vous rencontrez le moindre problème ou si vous avez des questions, n'hésitez pas à nous contacter en répondant à ce message.\nSportivement,\nL'équipe d'encadrement"
     },
     {
       id: "relance",
-      name: "Relance paiement épreuve",
-      subject: "[ALJ Escalade] Rappel paiement : {name_competition}",
-      body: "Bonjour {first_name},\n\nSauf erreur de notre part, nous n'avons pas encore reçu le règlement ({montant_competition}) pour ta participation à l'épreuve {name_competition}.\nMerci de régulariser ton inscription au plus vite.\n\nSportivement,\nL'équipe des coachs ALJ Escalade"
+      name: "Compétition - relance",
+      subject: "[ALJ] Inscription Compétition {name_competition} du {date_competition} [Relance]",
+      body: "Bonjour,\nComme {first_name} l'as vu avec son entraineur, notre équipe encadrante lui propose de participer à la prochaine compétition d'escalade {name_competition} !\nCette compétition se déroule à la date du : {date_competition}.\nAfin de finaliser et régulariser son inscription, nous vous invitons à effectuer le règlement via notre page HelloAsso.\nVoici la démarche à suivre :\nRendez-vous sur le site HelloAsso <a href=\"https://www.helloasso.com/associations/amicale-laique-de-jonage/evenements/regularisation-inscription-competiteurs-2026-2027\">helloasso.com/</a>\nSaisissez le numéro de licence de votre enfant : {num_licence}\nIndiquez le numéro de la compétition : {no_competition}\nIndiquer le nom de la compétition {name_competition}\nProcédez au règlement d'un montant de {montant_competition} €.\nMerci de réaliser cette démarche dans les meilleurs délais afin que l'inscription de votre enfant soit validée à temps auprès des organisateurs.\nSi vous rencontrez le moindre problème ou si vous avez des questions, n'hésitez pas à nous contacter en répondant à ce message.\n\n\nSportivement,\nL'équipe d'encadrement"
     }
   ];
 
@@ -1316,6 +1316,14 @@ async function loadEmailTemplates() {
 
   sel.innerHTML = '<option value="">-- Choisir un modèle ou saisir manuellement --</option>' +
     emailTemplatesCache.map((t, idx) => `<option value="${idx}">${esc(t.name)}</option>`).join("");
+
+  if (sel.value === "") {
+    const prefIdx = emailTemplatesCache.findIndex(t => t.name === "Compétition - 1er Inscription");
+    if (prefIdx >= 0) {
+      sel.value = String(prefIdx);
+      onSelectEmailTemplate();
+    }
+  }
 }
 
 function openEmailModal() {

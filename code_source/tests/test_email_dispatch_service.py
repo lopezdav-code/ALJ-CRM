@@ -78,6 +78,9 @@ class TestEmailDispatchService(unittest.TestCase):
         res_t = get_email_templates()
         self.assertEqual(res_t["status"], "success")
         self.assertIsInstance(res_t["templates"], list)
+        template_names = [t.get("name") for t in res_t["templates"]]
+        self.assertIn("Compétition - 1er Inscription", template_names)
+        self.assertIn("Compétition - relance", template_names)
 
         # 2. Preview
         preview_req = {

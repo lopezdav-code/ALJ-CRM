@@ -252,6 +252,35 @@ class SqliteRepository:
                 conn.commit()
         except Exception as e:
             print(f"⚠️ [SQLITE] Impossible de s'assurer de la présence du modèle d'email 'Attestation échéance' : {e}")
+
+        # S'assurer de la présence des modèles d'e-mails de compétition
+        comp_templates = [
+            (
+                "Compétition - 1er Inscription",
+                "[ALJ] Inscription Compétition {name_competition} du {date_competition}",
+                "Bonjour,\nComme {first_name} l'as vu avec son entraineur, notre équipe encadrante lui propose de participer à la prochaine compétition d'escalade {name_competition} !\nCette compétition se déroule à la date du : {date_competition}.\nAfin de finaliser et régulariser son inscription, nous vous invitons à effectuer le règlement via notre page HelloAsso.\nVoici la démarche à suivre :\nRendez-vous sur le site HelloAsso <a href=\"https://www.helloasso.com/associations/amicale-laique-de-jonage/evenements/regularisation-inscription-competiteurs-2026-2027\">helloasso.com/</a>\nSaisissez le numéro de licence de votre enfant : {num_licence}\nIndiquez le numéro de la compétition : {no_competition}\nIndiquer le nom de la compétition {name_competition}\nProcédez au règlement d'un montant de {montant_competition} €.\nMerci de réaliser cette démarche dans les meilleurs délais afin que l'inscription de votre enfant soit validée à temps auprès des organisateurs.\nSi vous rencontrez le moindre problème ou si vous avez des questions, n'hésitez pas à nous contacter en répondant à ce message.\nSportivement,\nL'équipe d'encadrement",
+                DEFAULT_SENDER_EMAIL,
+                DEFAULT_SENDER_NAME
+            ),
+            (
+                "Compétition - relance",
+                "[ALJ] Inscription Compétition {name_competition} du {date_competition} [Relance]",
+                "Bonjour,\nComme {first_name} l'as vu avec son entraineur, notre équipe encadrante lui propose de participer à la prochaine compétition d'escalade {name_competition} !\nCette compétition se déroule à la date du : {date_competition}.\nAfin de finaliser et régulariser son inscription, nous vous invitons à effectuer le règlement via notre page HelloAsso.\nVoici la démarche à suivre :\nRendez-vous sur le site HelloAsso <a href=\"https://www.helloasso.com/associations/amicale-laique-de-jonage/evenements/regularisation-inscription-competiteurs-2026-2027\">helloasso.com/</a>\nSaisissez le numéro de licence de votre enfant : {num_licence}\nIndiquez le numéro de la compétition : {no_competition}\nIndiquer le nom de la compétition {name_competition}\nProcédez au règlement d'un montant de {montant_competition} €.\nMerci de réaliser cette démarche dans les meilleurs délais afin que l'inscription de votre enfant soit validée à temps auprès des organisateurs.\nSi vous rencontrez le moindre problème ou si vous avez des questions, n'hésitez pas à nous contacter en répondant à ce message.\n\n\nSportivement,\nL'équipe d'encadrement",
+                DEFAULT_SENDER_EMAIL,
+                DEFAULT_SENDER_NAME
+            )
+        ]
+        for cname, csubj, cbody, cmail, cnom in comp_templates:
+            try:
+                cursor.execute("SELECT COUNT(*) FROM email_templates WHERE name = ?", (cname,))
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute("""
+                        INSERT INTO email_templates (name, subject, body, sender_email, sender_name)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (cname, csubj, cbody, cmail, cnom))
+                    conn.commit()
+            except Exception as e:
+                print(f"⚠️ [SQLITE] Impossible d'assurer la présence du modèle '{cname}' : {e}")
         
         # Création de la table de réglages applicatifs (clé/valeur) : texte WhatsApp, etc. (Nouveau !)
         cursor.execute("""
