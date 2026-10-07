@@ -269,7 +269,7 @@ class FirestoreClient:
             body = []
             for w in chunk:
                 op: Dict[str, Any] = {"update": {
-                    "name": f"{cls.database_url(pid)}/{w['path']}",
+                    "name": f"{DATABASE_PATH.format(pid=pid)}/{w['path']}",
                     "fields": dict_to_firestore_fields(w.get("data") or {}),
                 }}
                 if w.get("update_fields"):

@@ -14,6 +14,7 @@ if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 from infrastructure.firestore_client import FirestoreClient
+from infrastructure import firestore_client as fc
 from infrastructure import competition_firestore_repository as repo_module
 from infrastructure.competition_firestore_repository import CompetitionFirestoreRepository as Repo
 from domain.competition_models import Competition
@@ -394,6 +395,34 @@ class TestAdherents(FirestoreRepoTestCase):
         self.assertEqual(len(Repo.list_adherents(search="dupont")), 1)
         self.assertEqual(len(Repo.list_adherents(competition_only=True)), 1)
         self.assertEqual(Repo.count_adherents(), 2)
+
+
+class TestBatchUpsertCommitBody(unittest.TestCase):
+    """Régression : :commit exige un nom de document RELATIF (projects/…/documents/…),
+    pas une URL complète (HTTP 400 « lacks projects » vu en production)."""
+
+    def test_commit_uses_relative_document_name(self):
+        import json as _json
+        with patch.object(fc.requests, "post") as mock_post, \
+             patch.object(FirestoreClient, "get_access_token", return_value="fake-token"):
+            resp = mock_post.return_value
+            resp.status_code = 200
+            report = FirestoreClient.batch_upsert(
+                [{"path": "adherents/131", "data": {"nom": "DUPONT"}}],
+                project_id="smart-amplifier-510811-n6",
+            )
+        self.assertEqual(report["written"], 1)
+        self.assertEqual(report["errors_count"], 0)
+        body = mock_post.call_args.kwargs["json"]
+        name = body["writes"][0]["update"]["name"]
+        self.assertTrue(name.startswith("projects/"), name)
+        self.assertEqual(
+            name,
+            "projects/smart-amplifier-510811-n6/databases/(default)/documents/adherents/131",
+        )
+        # Le :commit est bien appelé sur l'URL absolue du service
+        self.assertIn("https://firestore.googleapis.com/v1/", mock_post.call_args.args[0])
+        self.assertIn(":commit", mock_post.call_args.args[0])
 
 
 if __name__ == "__main__":
