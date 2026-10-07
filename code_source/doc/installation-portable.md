@@ -5,7 +5,7 @@
 1. Télécharger **`ALJ_Portable_vX.Y.Z.zip`** depuis la page [Releases du projet](https://github.com/lopezdav-code/ALJ-CRM/releases) (dernière release, section *Assets*).
 2. Placer à côté l'assistant d'installation (le dossier `installer/` contenant `Installateur-ALJ.bat` et `Installateur-ALJ.ps1`).
 3. Double-cliquer sur **`Installateur-ALJ.bat`**.
-4. Renseigner les clés d'accès dans l'assistant graphique : le programme va s'extraire automatiquement, puis lancer l'assistant de connexion Google (OAuth2) dans votre navigateur pour synchroniser et télécharger immédiatement vos deux bases de données de référence (`database.db` et `database_Competition.db`).
+4. Renseigner les clés d'accès dans l'assistant graphique : le programme va s'extraire automatiquement, puis lancer l'assistant de connexion Google (OAuth2) dans votre navigateur pour synchroniser et télécharger immédiatement votre base de référence d'adhérents (`database.db`). Les compétitions, elles, sont directement gérées dans Google Cloud Firestore (aucun fichier à télécharger).
 
 Un raccourci est automatiquement créé sur votre bureau ! Double-cliquez dessus pour lancer l'application.
 

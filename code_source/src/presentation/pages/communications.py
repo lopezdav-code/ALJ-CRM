@@ -15,7 +15,9 @@ from PIL import Image, ImageDraw
 from paths import CODE_ROOT
 from domain.models import Member
 from infrastructure.sqlite_repository import SqliteRepository, DEFAULT_SENDER_EMAIL, DEFAULT_SENDER_NAME
-from infrastructure.competition_repository import CompetitionRepository
+from infrastructure.competition_firestore_repository import (
+    CompetitionFirestoreRepository as CompetitionRepository,
+)
 from domain.competition_models import (
     LIBELLES_STATUT_PAIEMENT,
     LIBELLE_VERS_STATUT_PAIEMENT,
@@ -399,7 +401,7 @@ class CommunicationsPage(QWidget):
         filters_layout.addLayout(adv_row)
 
         # Filtre « Compétition » (Nouveau !) : cible les compétiteurs sélectionnés d'une
-        # épreuve de database_Competition.db ; le filtre de paiement permet les relances.
+        # épreuve de la base Firestore des compétitions ; le filtre de paiement permet les relances.
         comp_row = QHBoxLayout()
         comp_row.setSpacing(6)
         lbl_comp = QLabel("🏆 Compétition")
@@ -1363,7 +1365,7 @@ class CommunicationsPage(QWidget):
     # Filtre de destination « Compétition » (Nouveau !)
     # ------------------------------------------------------------------
     def load_competition_filters(self):
-        """Peuple la liste déroulante des compétitions depuis database_Competition.db."""
+        """Peuple la liste déroulante des compétitions depuis Firestore."""
         self.competition_filter.blockSignals(True)
         self.competition_filter.clear()
         self.competition_filter.addItem("(Aucun filtre compétition)", 0)

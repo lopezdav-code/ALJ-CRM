@@ -904,9 +904,8 @@ def root_route():
 
 @app.get("/competitions", response_class=HTMLResponse)
 def get_competitions_page():
-    """Page web de gestion des compétitions : télécharge database_Competition.db
-    depuis Google Drive au chargement ; les modifications ne sont renvoyées vers
-    le Drive qu'après un clic explicite sur « Sauvegarder en BDD »."""
+    """Page web de gestion des compétitions : données en temps réel depuis
+    Google Cloud Firestore (même base que l'application de bureau)."""
     if os.path.exists(_competitions_page_path):
         return FileResponse(_competitions_page_path, media_type="text/html")
     return HTMLResponse("<h1>Page web/competitions.html introuvable</h1>", status_code=404)

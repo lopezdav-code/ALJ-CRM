@@ -58,5 +58,17 @@ service cloud.firestore {
       allow read: if isCoach();
       allow write: if isAdmin();
     }
+
+    // 5. Paramètres applicatifs (campagne annuelle HelloAsso, etc.) : admins
+    match /app_settings/{settingId} {
+      allow read: if isCoach();
+      allow write: if isAdmin();
+    }
+
+    // 6. Miroir des paiements HelloAsso + rattachements : réservé aux coachs
+    match /helloasso_items/{itemId} {
+      allow read: if isCoach();
+      allow write: if isCoach();
+    }
   }
 }

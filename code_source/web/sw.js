@@ -1,4 +1,4 @@
-const CACHE_NAME = "alj-escalade-v3";
+const CACHE_NAME = "alj-escalade-v4";
 const ASSETS_TO_CACHE = [
   "/competitions",
   "/annuaire/competitions.html",

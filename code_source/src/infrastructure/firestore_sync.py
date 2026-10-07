@@ -14,11 +14,9 @@ Permet de :
    - Rapprocher et mettre à jour la base de données SQLite locale.
 """
 
-import os
-import sys
 import json
 import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from domain.constants import get_active_season
 from domain.age_rules import parse_birth_date, age_at, get_season_start_date
@@ -27,78 +25,17 @@ from infrastructure.sqlite_repository import SqliteRepository
 from infrastructure.competition_repository import CompetitionRepository
 from infrastructure.secret_store import SecretStore
 from infrastructure.google_drive_client import GoogleDriveClient
+# Convertisseurs de types partagés avec le client Firestore (réexportés pour
+# compatibilité avec les tests existants).
+from infrastructure.firestore_client import (  # noqa: F401
+    python_to_firestore_value,
+    firestore_to_python_value,
+    dict_to_firestore_fields,
+    firestore_fields_to_dict,
+)
 
 DEFAULT_PROJECT_ID = "smart-amplifier-510811-n6"
 FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
-
-
-# --------------------------------------------------------------------------
-# 1. Convertisseurs de types Python <-> Firestore REST API
-# --------------------------------------------------------------------------
-def python_to_firestore_value(val: Any) -> Dict[str, Any]:
-    """Convertit une valeur Python native en format de champ Firestore REST."""
-    if val is None:
-        return {"nullValue": None}
-    if isinstance(val, bool):
-        return {"booleanValue": val}
-    if isinstance(val, int):
-        return {"integerValue": str(val)}
-    if isinstance(val, float):
-        return {"doubleValue": val}
-    if isinstance(val, (datetime.date, datetime.datetime)):
-        # Format ISO 8601 UTC
-        iso = val.isoformat()
-        if isinstance(val, datetime.date) and not isinstance(val, datetime.datetime):
-            iso = f"{iso}T00:00:00Z"
-        elif not iso.endswith("Z"):
-            iso = f"{iso}Z"
-        return {"timestampValue": iso}
-    if isinstance(val, list):
-        return {"arrayValue": {"values": [python_to_firestore_value(x) for x in val]}}
-    if isinstance(val, dict):
-        return {"mapValue": {"fields": {k: python_to_firestore_value(v) for k, v in val.items()}}}
-    return {"stringValue": str(val)}
-
-
-def firestore_to_python_value(f_val: Dict[str, Any]) -> Any:
-    """Convertit un champ Firestore REST en valeur Python native."""
-    if not isinstance(f_val, dict):
-        return None
-    if "nullValue" in f_val:
-        return None
-    if "booleanValue" in f_val:
-        return bool(f_val["booleanValue"])
-    if "integerValue" in f_val:
-        try:
-            return int(f_val["integerValue"])
-        except (ValueError, TypeError):
-            return 0
-    if "doubleValue" in f_val:
-        try:
-            return float(f_val["doubleValue"])
-        except (ValueError, TypeError):
-            return 0.0
-    if "stringValue" in f_val:
-        return f_val["stringValue"]
-    if "timestampValue" in f_val:
-        return f_val["timestampValue"]
-    if "arrayValue" in f_val:
-        arr = f_val["arrayValue"].get("values", [])
-        return [firestore_to_python_value(x) for x in arr]
-    if "mapValue" in f_val:
-        fields = f_val["mapValue"].get("fields", {})
-        return {k: firestore_to_python_value(v) for k, v in fields.items()}
-    return None
-
-
-def dict_to_firestore_fields(d: Dict[str, Any]) -> Dict[str, Any]:
-    """Convertit un dictionnaire Python en structure de champs Firestore."""
-    return {k: python_to_firestore_value(v) for k, v in d.items()}
-
-
-def firestore_fields_to_dict(fields: Dict[str, Any]) -> Dict[str, Any]:
-    """Convertit une structure de champs Firestore en dictionnaire Python."""
-    return {k: firestore_to_python_value(v) for k, v in (fields or {}).items()}
 
 
 # --------------------------------------------------------------------------
@@ -296,8 +233,8 @@ class FirestoreSyncService:
     def get_project_id(cls) -> str:
         """Récupère l'identifiant du projet Google Cloud / Firebase."""
         return (
-            SecretStore.get_secret("GOOGLE_PROJECT_ID") or
             SecretStore.get_secret("FIREBASE_PROJECT_ID") or
+            SecretStore.get_secret("GOOGLE_PROJECT_ID") or
             DEFAULT_PROJECT_ID
         )
 
@@ -435,3 +372,131 @@ class FirestoreSyncService:
             "competition_id": competition_id,
             "participants_reconciled": applied
         }
+
+    @classmethod
+    def import_sqlite_into_firestore(cls, project_id: Optional[str] = None) -> Dict[str, Any]:
+        """Import de l'ancienne base SQLite (database_Competition.db) vers Firestore.
+
+        Mode « fusion » : seuls les documents ABSENTS de Firestore sont créés —
+        les données déjà présentes (source de vérité) ne sont jamais écrasées.
+        L'instantané des adhérents fait exception : c'est un miroir de la base
+        principale, il est intégralement recalculé.
+        """
+        from infrastructure.firestore_client import FirestoreClient
+
+        pid = project_id or cls.get_project_id()
+        data = prepare_firestore_data()
+        report: Dict[str, Any] = {"project_id": pid, "competitions": 0,
+                                  "competitions_ignorees": 0, "coaches": 0,
+                                  "adherents": 0, "app_settings": 0,
+                                  "helloasso_items": 0, "errors": []}
+
+        # 1. Compétitions absentes uniquement (jamais d'écrasement)
+        for doc_id, doc in data["competitions"].items():
+            try:
+                existing = FirestoreClient.get_document("competitions", doc_id, project_id=pid)
+                if existing:
+                    report["competitions_ignorees"] += 1
+                    continue
+                FirestoreClient.upsert_document("competitions", doc_id, doc, project_id=pid)
+                report["competitions"] += 1
+            except Exception as e:
+                report["errors"].append(f"Compétition #{doc_id} : {e}")
+
+        # 2. Coachs absents uniquement
+        for doc_id, doc in data["coaches"].items():
+            try:
+                existing = FirestoreClient.get_document("coaches", doc_id, project_id=pid)
+                if existing:
+                    continue
+                FirestoreClient.upsert_document("coaches", doc_id, doc, project_id=pid)
+                report["coaches"] += 1
+            except Exception as e:
+                report["errors"].append(f"Coach #{doc_id} : {e}")
+
+        # 3. Instantané des adhérents (miroir recalculé intégralement)
+        try:
+            if data["adherents"]:
+                writes = [{"path": f"adherents/{doc_id}", "data": doc}
+                          for doc_id, doc in data["adherents"].items()]
+                batch_report = FirestoreClient.batch_upsert(writes, project_id=pid)
+                report["adherents"] = batch_report["written"]
+                report["errors"].extend(batch_report["errors"][:3])
+        except Exception as e:
+            report["errors"].append(f"Adhérents : {e}")
+
+        # 4. Paramètres applicatifs absents (campagne annuelle HelloAsso)
+        try:
+            conn_comp = CompetitionRepository.get_connection()
+            try:
+                settings_rows = conn_comp.execute(
+                    "SELECT key, value FROM app_settings WHERE value IS NOT NULL AND value != ''"
+                ).fetchall()
+            finally:
+                conn_comp.close()
+            for r in settings_rows:
+                key = r["key"]
+                try:
+                    existing = FirestoreClient.get_document("app_settings", str(key), project_id=pid)
+                    if existing:
+                        continue
+                    FirestoreClient.upsert_document(
+                        "app_settings", str(key),
+                        {"key": key, "value": r["value"],
+                         "updated_at": datetime.datetime.now().isoformat()},
+                        project_id=pid,
+                    )
+                    report["app_settings"] += 1
+                except Exception as e:
+                    report["errors"].append(f"Paramètre {key} : {e}")
+        except Exception as e:
+            report["errors"].append(f"Paramètres applicatifs : {e}")
+
+        # 5. Miroir HelloAsso + liens (documents absents uniquement, lien embarqué)
+        try:
+            conn_comp = CompetitionRepository.get_connection()
+            try:
+                items = conn_comp.execute("SELECT * FROM helloasso_items").fetchall()
+                links = conn_comp.execute(
+                    "SELECT id_item, competition_id, adherent_id, source FROM item_links"
+                ).fetchall()
+            finally:
+                conn_comp.close()
+            links_map = {r["id_item"]: dict(r) for r in links}
+            now = datetime.datetime.now().isoformat()
+            for it in items:
+                doc_id = str(it["id_item"])
+                try:
+                    existing = FirestoreClient.get_document("helloasso_items", doc_id, project_id=pid)
+                    if existing:
+                        continue
+                    link = links_map.get(it["id_item"], {})
+                    doc = {
+                        "id_item": it["id_item"],
+                        "order_id": it["order_id"],
+                        "payer_nom": it["payer_nom"] or "",
+                        "payer_prenom": it["payer_prenom"] or "",
+                        "montant": float(it["montant"] or 0.0),
+                        "etat": it["etat"] or "",
+                        "date_item": it["date_item"] or "",
+                        "licence_saisie": it["licence_saisie"] or "",
+                        "competition_saisie": it["competition_saisie"] or "",
+                        "campagne_slug": it["campagne_slug"] or "",
+                        "raw_json": it["raw_json"] or "",
+                        "synced_at": it["synced_at"] or now,
+                        "commentaire": it["commentaire"] or "",
+                        "competition_id": link.get("competition_id"),
+                        "adherent_id": link.get("adherent_id"),
+                        "source": link.get("source"),
+                        "link_updated_at": link.get("updated_at"),
+                        "updated_at": now,
+                    }
+                    FirestoreClient.upsert_document("helloasso_items", doc_id, doc, project_id=pid)
+                    report["helloasso_items"] += 1
+                except Exception as e:
+                    report["errors"].append(f"Article #{doc_id} : {e}")
+        except Exception as e:
+            report["errors"].append(f"Miroir HelloAsso : {e}")
+
+        report["status"] = "success" if not report["errors"] else "partial"
+        return report

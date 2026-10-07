@@ -28,7 +28,6 @@ $script:Champs = @(
     ,@("HelloAsso — Client ID :",                          "HELLOASSO_CLIENT_ID",           $false, $true)
     ,@("HelloAsso — Client Secret :",                      "HELLOASSO_CLIENT_SECRET",       $true,  $true)
     ,@("Google Drive — ID base adhérents (SQLite) :",      "GOOGLE_DRIVE_DB_ID",            $false, $true)
-    ,@("Google Drive — ID base compétitions (SQLite) :",   "GOOGLE_DRIVE_COMPETITION_DB_ID", $false, $false)
     ,@("Google Cloud — Client ID :",                       "GMAIL_CLIENT_ID",               $false, $true)
     ,@("Adresse expéditeur Gmail :",                       "GMAIL_USER_EMAIL",              $false, $true)
 )

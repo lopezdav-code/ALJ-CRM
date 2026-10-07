@@ -2,7 +2,9 @@
 Script d'initialisation post-extraction lors de la première installation.
 1. Lance l'authentification Google via redirection (OAuth2).
 2. Télécharge database.db depuis Google Drive (ID : GOOGLE_DRIVE_DB_ID).
-3. Télécharge database_Competition.db depuis Google Drive (ID : GOOGLE_DRIVE_COMPETITION_DB_ID).
+
+Les compétitions ne dépendent plus d'un fichier local : elles vivent dans
+Google Cloud Firestore, partagées avec la page web PWA.
 """
 import os
 import sys
@@ -17,7 +19,6 @@ try:
     from infrastructure.secret_store import SecretStore
     from infrastructure.google_drive_client import GoogleDriveClient
     from infrastructure.sqlite_repository import SqliteRepository
-    from infrastructure.competition_repository import CompetitionRepository
     import gmail_auth_helper
 except ImportError as ie:
     print(f"❌ Erreur lors du chargement des modules d'ALJ : {ie}")
@@ -69,25 +70,8 @@ def run_bootstrap():
     else:
         print("⚠️ Aucun ID configuré pour la base d'adhérents (GOOGLE_DRIVE_DB_ID).")
 
-    # 2. Base de compétitions (database_Competition.db)
-    comp_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_COMPETITION_DB_ID")
-    comp_db_local_path = CompetitionRepository.get_db_path()
-    
-    if comp_drive_id:
-        print(f"📥 Téléchargement de database_Competition.db (ID Drive : {comp_drive_id})...")
-        os.makedirs(os.path.dirname(comp_db_local_path), exist_ok=True)
-        try:
-            if GoogleDriveClient.download_file(comp_drive_id, comp_db_local_path):
-                print("✅ Base de données des compétitions 'database_Competition.db' téléchargée avec succès.")
-                # Initialiser le schéma de la base de compétitions
-                CompetitionRepository.setup_database(force=True)
-                print("✅ Schéma de la base de compétitions vérifié et initialisé.")
-            else:
-                print("❌ Échec du téléchargement de 'database_Competition.db'. Vérifiez l'ID Drive.")
-        except Exception as ex:
-            print(f"❌ Erreur lors du traitement de 'database_Competition.db' : {ex}")
-    else:
-        print("💡 Aucun ID de base de compétitions configuré (GOOGLE_DRIVE_COMPETITION_DB_ID).")
+    # 2. Compétitions : aucune base locale à télécharger (données dans Firestore)
+    print("💡 Compétitions : données directement dans Firestore (aucun fichier à récupérer).")
 
     print("\n==========================================================")
     print(" 🎉 PROCESSUS DE PREMIÈRE INSTALLATION TERMINÉ ! ")

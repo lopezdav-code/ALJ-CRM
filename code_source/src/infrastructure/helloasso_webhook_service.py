@@ -27,7 +27,9 @@ from domain.competition_matching import (
     auto_link_items,
     summarize_items,
 )
-from infrastructure.competition_repository import CompetitionRepository
+from infrastructure.competition_firestore_repository import (
+    CompetitionFirestoreRepository as CompetitionRepository,
+)
 
 # Type helper pour tuple (défini AVANT la classe : les annotations sont évaluées
 # à l'import en Python <= 3.13, une définition en fin de fichier lèverait NameError)

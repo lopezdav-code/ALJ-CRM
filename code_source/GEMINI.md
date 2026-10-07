@@ -193,32 +193,43 @@ Règles de conception (respecter impérativement) :
 
 ---
 
-## 🏆 Module Compétitions (v2.1.0) — Base dédiée `database_Competition.db`
+## 🏆 Module Compétitions (v2.1.0) — Base partagée Firestore (v2.3.0)
 
 Module complet de gestion des compétitions FFME (création d'épreuves, sélection des
-compétiteurs, invitations, paiements HelloAsso, bilan de saison) appuyé sur une base
-SQLite **distincte** de la base d'adhérents :
+compétiteurs, invitations, paiements HelloAsso, bilan de saison) appuyé sur **Google
+Cloud Firestore** — la même base que la page web PWA (temps réel des deux côtés) :
 
 ### Architecture
 
-- **Base dédiée** : `data/database_Competition.db` (même dossier de cache local que
-  `database.db`). Sa table `adherents` est un **instantané** initialisé / rafraîchi
-  depuis la base principale (vue `v_adherents_legacy`) via
-  `CompetitionRepository.sync_adherents_from_main()` — jamais de suppression lors de la
-  synchro, pour préserver l'historique des saisons passées.
-- **Schéma** : `competitions` (id, id_ffme, nom, date_competition, prix, statut
-  `en_preparation|en_cours|close`, helloasso_ref) / `participants` (id, competition_id,
-  adherent_id, selectionne, statut_paiement `non_invite|en_attente|paye`,
-  date_synchro_helloasso, montant_paye, commande_helloasso — migrée automatiquement à
-  l'ouverture des bases anciennes) / `adherents` (instantané) / `app_settings`
-  (dont `HELLOASSO_ANNUAL_CAMPAIGN`) / **`helloasso_items`** (miroir de la campagne
-  annuelle HelloAsso : id_item PK, order_id, payeur, montant, état, date, champs saisis
-  « licence » et « compétition concernée », raw_json — jamais édité à la main, upsert à
-  chaque synchro) / **`item_links`** (1 ligne par article → competition_id + adherent_id
-  NULLables, `source` = 'auto' recalculé à chaque synchro ou 'manuel' **jamais écrasé**).
-- **Google Drive** : même mécanisme que la base principale avec un ID de fichier dédié
-  (`GOOGLE_DRIVE_COMPETITION_DB_ID`), via `infrastructure/competition_drive_sync.py`
-  (téléchargement, mise à jour PATCH conservant l'ID, création automatique).
+- **Source de vérité : Firestore** (projet `smart-amplifier-510811-n6`). Les
+  collections : `competitions/{id}` (épreuve + tableau `participants` **embarqué** dans
+  le document : participant_id, adherent_id, nom, prenom, num_licence, email, phone,
+  tarif, selectionne, statut_paiement `non_invite|en_attente|paye`, montant_paye,
+  commande_helloasso, urgence_nom/tel, updated_at — compteurs `nb_participants`,
+  `nb_selectionnes`, `nb_payes`, `total_collecte` recalculés à chaque écriture) /
+  `coaches/{id}` (id, nom, updated_at) / `adherents/{id}` (instantané recalculé depuis
+  la base principale `database.db` : licence_ffme, creneau_groupe, tarif, urgence…,
+  poussé par `sync_adherents_from_main`) / `planning/{id}` / `app_settings/{key}`
+  (dont `HELLOASSO_ANNUAL_CAMPAIGN`) / `helloasso_items/{id_item}` (miroir HelloAsso :
+  order_id, payeur, montant, état, champs saisis « licence » et « compétition
+  concernée », raw_json, commentaire — **rattachement embarqué** competition_id +
+  adherent_id + `source` = 'auto' recalculé à chaque synchro, 'webhook' ou 'manuel'
+  **jamais écrasé**).
+- **Identifiants de documents** : canonique = `str(id)` de l'identifiant métier
+  (id = Date.now() ms pour les créations, comme la PWA). Les épreuves créées
+  historiquement par la PWA sous un ID Firestore aléatoire sont **normalisées
+  automatiquement** à la première lecture (`_list_comp_docs` / `_load_comp_doc`) :
+  copie vers l'ID canonique puis suppression du document hérité ; la PWA dédoublonne
+  par `String(id)` au rendu et écrit toujours l'ID canonique.
+- **Ancienne base locale** : `database_Competition.db` (SQLite) et sa synchro Drive
+  (`competition_drive_sync.py`, supprimée) ne sont plus utilisées. Le dépôt SQLite
+  (`competition_repository.py`) est conservé comme source de l'**import de secours**
+  (« ⬆️ Importer l'ancienne base locale (fusion) » : seuls les documents absents de
+  Firestore sont créés, jamais d'écrasement — `FirestoreSyncService.import_sqlite_into_firestore`).
+- **Accès Firestore** : REST API v1 via `infrastructure/firestore_client.py`
+  (`FirestoreClient`) ; jeton = OAuth2 du club (le consentement inclut déjà le scope
+  `datastore`) sur le bureau, **metadata server** du compte de service sur Cloud Run.
+  Écritures par lot via `:commit` (≤ 450 écritures par lot).
 
 ### Fichiers clés
 
@@ -227,11 +238,14 @@ SQLite **distincte** de la base d'adhérents :
 | `src/domain/competition_models.py` | Modèles purs `Competition` / `Participant` + libellés de statuts |
 | `src/domain/competition_matching.py` | Rapprochement HelloAsso **pur** : parsing d'URL de campagne, croisement licence → nom, contrôle du n° d'épreuve (« Compétition concernée »), anomalies |
 | `src/domain/planning_groups.py` | Hiérarchie des créneaux + `group_for_tarif()` : rapprochement tarif → groupe de créneau (regroupement de la liste Compétiteurs) |
-| `src/infrastructure/competition_repository.py` | Dépôt SQLite dédié (CRUD, instantané adhérents, bilan croisé) |
-| `src/infrastructure/competition_drive_sync.py` | Synchro Drive de la base dédiée |
-| `src/presentation/pages/competitions.py` | Onglet desktop « 🏆 Compétitions » à deux niveaux : onglets **globaux** (🏆 Épreuves / 🔄 HelloAsso / 📊 Bilan) et détail d'épreuve avec ses onglets propres (📋 Détails — sans champ campagne —, 👥 Compétiteurs) |
-| `web/competitions.html` | Page web de gestion servie sur `/competitions` (téléchargement au chargement, écriture Drive **uniquement** au clic « 💾 Sauvegarder en BDD », cache IndexedDB, scope OAuth `drive` en écriture) |
-| `tests/test_competition_module.py` | Tests unitaires (dépôt, rapprochement, bilan) |
+| `src/infrastructure/firestore_client.py` | Client REST Firestore (get/list/upsert/update partiel/delete/commit par lot) |
+| `src/infrastructure/competition_firestore_repository.py` | Dépôt Firestore (CRUD épreuves/participants/coachs, annuaire adhérents, bilan croisé, miroir HelloAsso + liens) — API identique à l'ancien dépôt SQLite |
+| `src/infrastructure/competition_repository.py` | (Hérité) dépôt SQLite — conservé pour l'import de secours vers Firestore |
+| `src/infrastructure/firestore_sync.py` | Projection SQLite → Firestore (`prepare_firestore_data`, push/pull REST) + `import_sqlite_into_firestore` (fusion sans écrasement) |
+| `src/presentation/pages/competitions.py` | Onglet desktop « 🏆 Compétitions » à deux niveaux : onglets **globaux** (🏆 Épreuves / 🔄 HelloAsso / 📊 Bilan) et détail d'épreuve avec ses onglets propres (📋 Détails — sans champ campagne —, 👥 Compétiteurs) ; barre Firestore (🔄 Actualiser, ⬆️ import ancienne base) |
+| `web/competitions.html` | Page web de gestion servie sur `/competitions` (temps réel Firestore via `onSnapshot`, écritures sur l'ID canonique `String(id)`) |
+| `tests/test_competition_module.py` | Tests unitaires (dépôt SQLite hérité, rapprochement, bilan) |
+| `tests/test_competition_firestore_repository.py` | Tests du dépôt Firestore (client simulé en mémoire) |
 
 ### Onglet Créneaux — Vue semaine et Exports Excel (v2.2.7 → 2.2.10)
 
@@ -283,14 +297,18 @@ SQLite **distincte** de la base d'adhérents :
    insère des balises dans le texte brut ; `email_html.text_to_html` conserve
    `<b>/<i>/<u>/<br>` **et les liens `<a href="…">`** (schémas http/https/mailto
    uniquement — tout autre schéma est neutralisé, seul le texte du lien est gardé).
-4. **Page web** : ne jamais écrire automatiquement sur le Drive — l'écriture passe
-   exclusivement par le bouton « 💾 Sauvegarder en BDD » ; un garde-fou
-   `beforeunload` alerte si des modifications locales ne sont pas sauvegardées.
+4. **Écritures Firestore** : chaque mutation réécrit le tableau `participants` complet
+   (même convention que la PWA) via `update_fields` (updateMask) sur l'ID canonique
+   `str(id)` ; jamais d'écriture automatique en boucle — les mutations partent d'un
+   document chargé (`_load_comp_doc`). Les garde-fous d'interface sont **non modaux
+   pour les chargements** (`_guard` → barre d'état) et modaux uniquement pour les
+   actions cliquées (`_guard_modal`) : un `QMessageBox.critical` pendant la
+   construction de la page bloque le boot (test smoke headless).
 5. **QProgressDialog de la page Compétitions** : création **paresseuse** obligatoire
    (`_ensure_progress`, jamais à l'init) — un `QProgressDialog` instancié au démarrage
    est rendu visible par le minuteur interne armé par `setMinimumDuration` (fenêtre
    fantôme « python » vide). Toujours titré et labellisé, `show()` explicite, worker
-   Drive sous try/except (sinon la fenêtre reste ouverte en cas de crash du thread).
+   sous try/except (sinon la fenêtre reste ouverte en cas de crash du thread).
 6. **Liste des compétiteurs** : la table de l'onglet Compétiteurs est regroupée par
    **groupe de créneau du planning** (`group_for_tarif` via le payload `helloasso_tarifs`)
    avec des lignes d'en-tête fusionnées sur toute la largeur ; les tarifs non rapprochés
@@ -325,9 +343,10 @@ SQLite **distincte** de la base d'adhérents :
 11. **Page web alignée (v2.2.3, simplifiée en v2.2.6/2.2.11)** : `web/competitions.html`
    servie sur `/competitions` suit le modèle desktop — champ « campagne par compétition »
    retiré (création/maj sans `helloasso_ref`), compétiteurs **regroupés par créneau**
-   via un miroir `planning_groups` (groupe + tarif, rempli par
+   via `adherents.creneau_groupe` (annuaire Firestore poussé par
    `sync_adherents_from_main` depuis la table planning de database.db), n° de commande
-   affiché. Écriture Drive inchangée : uniquement au clic « 💾 Sauvegarder en BDD ».
+   affiché. Écritures Firestore sur l'ID canonique `String(id)` (document hérité à ID
+   aléatoire supprimé après écriture réussie).
    Les onglets web « HelloAsso » et « Bilan » ont été supprimés (v2.2.6 : HelloAsso =
    campagne annuelle + miroir + rattachement, Bilan croisé — restent **exclusifs à
    l'application de bureau**) ; chaque carte d'épreuve porte un bouton « 👁 Voir détail »
@@ -335,10 +354,9 @@ SQLite **distincte** de la base d'adhérents :
    retrait d'un compétiteur est **masqué sur la web** (v2.2.11) : réservé au bureau.
 12. **Pré-configuration web (v2.2.4)** : sur `/competitions` comme sur l'annuaire,
    l'écran de configuration est pré-rempli avec les identifiants du club en constantes
-   (`DEFAULT_CLIENT_ID` et `DEFAULT_FILE_ID` = secret desktop
-   `GOOGLE_DRIVE_COMPETITION_DB_ID`) ; une ancienne config locale sans ID fichier hérite
-   de la constante, une config personnalisée reste respectée. L'accès au fichier reste
-   contrôlé par les autorisations Drive.
+   (`DEFAULT_CLIENT_ID` = client OAuth du club). Depuis la bascule Firestore (v2.3.0),
+   la PWA ne manipule plus de fichier Drive : lecture temps réel + écritures
+   Firestore selon les règles (`firestore.rules`).
 13. **Statut de paiement (v2.2.9)** : initialisé à **« En attente »** à la création d'un
    compétiteur (`add_participant` / `set_selection` / inserts web — plus de
    « Non invité » par défaut). Sur la page web, le statut est **en lecture seule**

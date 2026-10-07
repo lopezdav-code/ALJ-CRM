@@ -59,12 +59,12 @@ class TestHelloAssoWebhookService(unittest.TestCase):
         self.assertEqual(items[0]["id"], 9001)
         self.assertEqual(items[0]["amount"], 1800)
 
-    @patch("infrastructure.competition_repository.CompetitionRepository.apply_helloasso_payment")
-    @patch("infrastructure.competition_repository.CompetitionRepository.set_item_link")
-    @patch("infrastructure.competition_repository.CompetitionRepository.sync_helloasso_mirror")
-    @patch("infrastructure.competition_repository.CompetitionRepository.list_helloasso_links", return_value={})
-    @patch("infrastructure.competition_repository.CompetitionRepository.list_adherents")
-    @patch("infrastructure.competition_repository.CompetitionRepository.list_competitions")
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.apply_helloasso_payment")
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.set_item_link")
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.sync_helloasso_mirror")
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.list_helloasso_links", return_value={})
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.list_adherents")
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.list_competitions")
     def test_process_webhook_match_successful(
         self,
         mock_list_comps,

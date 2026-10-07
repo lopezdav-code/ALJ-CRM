@@ -474,7 +474,7 @@ function startListeners() {
   stopListeners();
   snapshotsReady = 0;
   listeners.push(fsdb.collection("competitions").onSnapshot(
-    snap => { comps = snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id })); onSnapshotArrived("competitions"); },
+    snap => { comps = normalizeCompDocs(snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id }))); onSnapshotArrived("competitions"); },
     err => onSnapshotError("competitions", err)));
   listeners.push(fsdb.collection("coaches").onSnapshot(
     snap => { coaches = snap.docs.map(d => d.data()); onSnapshotArrived("coaches"); },
@@ -486,6 +486,19 @@ function startListeners() {
 function stopListeners() {
   listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
   listeners = [];
+}
+/* Dédoublonnage par identifiant métier : une épreuve créée historiquement sur la
+   page web porte un identifiant Firestore aléatoire ; si le bureau a recopié la
+   même épreuve vers l'identifiant canonique String(id), la version la plus
+   récente (updated_at) gagne. */
+function normalizeCompDocs(docs) {
+  const kept = {};
+  for (const d of docs) {
+    const key = String(d.id != null ? d.id : d.docId);
+    const cur = kept[key];
+    if (!cur || String(d.updated_at || "") > String(cur.updated_at || "")) kept[key] = d;
+  }
+  return Object.values(kept);
 }
 function onSnapshotArrived(name) {
   snapshotsReady++;
@@ -555,9 +568,18 @@ function newParticipant(adherentId, selected) {
   };
 }
 async function updateCompetitionDoc(comp, patch) {
+  /* Écrit toujours l'identifiant canonique String(comp.id) (même convention que
+     l'application de bureau) ; un éventuel document hérité (ID aléatoire) est
+     supprimé après l'écriture réussie. */
+  const canon = String(comp.id);
   try {
-    await fsdb.collection("competitions").doc(String(comp.docId)).update(
-      Object.assign({ updated_at: new Date().toISOString() }, patch));
+    const full = Object.assign({}, comp, patch, { updated_at: new Date().toISOString() });
+    delete full.docId;
+    await fsdb.collection("competitions").doc(canon).set(full);
+    if (comp.docId && comp.docId !== canon) {
+      try { await fsdb.collection("competitions").doc(String(comp.docId)).delete(); } catch (e) {}
+      comp.docId = canon;
+    }
   } catch (e) {
     console.error(e);
     if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
@@ -649,9 +671,10 @@ async function createCompetition() {
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
   const coachIds = readCoachSelection();
   const nowIso = new Date().toISOString();
+  const newId = Date.now();
   try {
-    await fsdb.collection("competitions").add({
-      id: Date.now(),
+    await fsdb.collection("competitions").doc(String(newId)).set({
+      id: newId,
       nom: nom,
       id_ffme: $("#f-idffme").value.trim(),
       date_competition: $("#f-date").value || "",
@@ -670,7 +693,7 @@ async function createCompetition() {
     });
     resetCompForm();
     toast("✅ Compétition créée — synchronisée en temps réel.");
-  } catch (e) { /* déjà toasté par updateCompetitionDoc ? non : ici add */ 
+  } catch (e) { /* déjà toasté par updateCompetitionDoc ? non : ici set */
     console.error(e);
     if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
     else toast("❌ " + (e.message || e), 9000);
@@ -703,7 +726,11 @@ async function deleteCompetition() {
   const c = findComp(editCompId);
   if (!c) return;
   try {
-    await fsdb.collection("competitions").doc(String(c.docId)).delete();
+    const canon = String(c.id);
+    await fsdb.collection("competitions").doc(canon).delete();
+    if (c.docId && c.docId !== canon) {
+      try { await fsdb.collection("competitions").doc(String(c.docId)).delete(); } catch (e) {}
+    }
     resetCompForm();
     renderComps();
     toast("🗑 Compétition supprimée.");

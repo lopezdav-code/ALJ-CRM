@@ -1,9 +1,9 @@
 """
-Page « Compétitions » : gestion des épreuves de la saison (base dédiée database_Competition.db).
+Page « Compétitions » : gestion des épreuves de la saison (base Firestore partagée).
 
 Structure à deux niveaux :
 - Onglets GLOBAUX (indépendants des épreuves) : « 🔄 HelloAsso » (campagne annuelle
-  unique + miroir local + rattachements persistants) et « 📊 Bilan de saison » ;
+  unique + miroir + rattachements persistants) et « 📊 Bilan de saison » ;
 - Onglet « 🏆 Épreuves » : liste des épreuves + détail d'une compétition avec ses
   onglets propres (« 📋 Détails », « 👥 Compétiteurs »).
 
@@ -13,6 +13,9 @@ Workflow (cahier des charges) :
 3. Invitations / relances via l'onglet Communication (bouton ✉️) ;
 4. Synchronisation HelloAsso de la campagne annuelle (miroir + liens) ;
 5. Bilan de fin d'année (tableau croisé élèves × compétitions, export CSV).
+
+Les données vivent dans Google Cloud Firestore, la même base que la page web PWA :
+les deux applications partagent le même état en temps réel.
 """
 import os
 import csv
@@ -36,8 +39,9 @@ from domain.competition_models import (
     PAIEMENT_EN_ATTENTE,
     PAIEMENT_NON_INVITE,
 )
-from infrastructure.competition_repository import CompetitionRepository
-from infrastructure import competition_drive_sync
+from infrastructure.competition_firestore_repository import (
+    CompetitionFirestoreRepository as CompetitionRepository,
+)
 from domain import competition_matching
 from domain.planning_groups import group_for_tarif
 from domain.utils import normalize_string
@@ -53,31 +57,27 @@ ANNUAL_CAMPAIGN_KEY = "HELLOASSO_ANNUAL_CAMPAIGN"
 # ----------------------------------------------------------------------
 # Workers asynchrones (réseau / BDD lourde)
 # ----------------------------------------------------------------------
-class CompetitionDriveWorker(QThread):
-    """Téléchargement ou téléversement de database_Competition.db sur Google Drive."""
-    progress = Signal(str, int)
-    finished_sig = Signal(bool, str)
+class FirestoreImportWorker(QThread):
+    """Import de l'ancienne base locale (database_Competition.db) vers Firestore.
 
-    def __init__(self, mode: str, parent=None):
-        super().__init__(parent)
-        self.mode = mode
+    Mode fusion : seuls les documents absents de Firestore sont créés — les
+    données déjà présentes (source de vérité) ne sont jamais écrasées."""
+    progress = Signal(str, int)
+    finished_sig = Signal(bool, dict)
 
     def run(self):
+        result = {"report": {}, "message": ""}
         try:
-            self.progress.emit("Connexion à Google Drive...", 20)
-            if self.mode == "download":
-                self.progress.emit("Téléchargement de database_Competition.db...", 60)
-                ok, msg = competition_drive_sync.download_competition_db()
-            else:
-                self.progress.emit("Téléversement de database_Competition.db...", 60)
-                ok, msg = competition_drive_sync.upload_competition_db()
+            self.progress.emit("Connexion à Firestore...", 20)
+            from infrastructure.firestore_sync import FirestoreSyncService
+            self.progress.emit("Import de l'ancienne base (fusion, sans écrasement)...", 60)
+            report = FirestoreSyncService.import_sqlite_into_firestore()
+            result["report"] = report
             self.progress.emit("Terminé.", 100)
-            self.finished_sig.emit(bool(ok), str(msg))
+            self.finished_sig.emit(report.get("status") != "error", result)
         except Exception as e:
-            # Sans cet except, un crash du thread laisserait la fenêtre de
-            # progression ouverte (jamais de finished_sig -> jamais de reset()).
             self.progress.emit("Terminé.", 100)
-            self.finished_sig.emit(False, f"Erreur lors de la synchronisation Drive : {e}")
+            self.finished_sig.emit(False, {"report": {}, "message": str(e)})
 
 
 class AnnualHelloAssoSyncWorker(QThread):
@@ -185,14 +185,17 @@ class AddAdherentsDialog(QDialog):
 
     def refresh_list(self):
         self.list_widget.clear()
-        existing = {p.adherent_id for p in CompetitionRepository.list_participants(self.competition_id)}
-        for a in CompetitionRepository.list_adherents(search=self.search_input.text().strip()):
-            if a["id"] in existing:
-                continue
-            licence = a.get("num_licence") or "sans licence"
-            item = QListWidgetItem(f"{a['nom']} {a['prenom']}  ·  {licence}  ·  {a.get('tarif') or '—'}")
-            item.setData(Qt.UserRole, a["id"])
-            self.list_widget.addItem(item)
+        try:
+            existing = {p.adherent_id for p in CompetitionRepository.list_participants(self.competition_id)}
+            for a in CompetitionRepository.list_adherents(search=self.search_input.text().strip()):
+                if a["id"] in existing:
+                    continue
+                licence = a.get("num_licence") or "sans licence"
+                item = QListWidgetItem(f"{a['nom']} {a['prenom']}  ·  {licence}  ·  {a.get('tarif') or '—'}")
+                item.setData(Qt.UserRole, a["id"])
+                self.list_widget.addItem(item)
+        except Exception as e:
+            self.list_widget.addItem(f"⚠️ Firestore inaccessible : {e}")
 
     def add_selected(self):
         for item in self.list_widget.selectedItems():
@@ -576,7 +579,7 @@ class CompetitionsPage(QWidget):
         super().__init__()
         self.current_competition = None
         self.sync_worker = None
-        self.drive_worker = None
+        self.import_worker = None
         self._loading = False
         self._group_header_rows = []   # [(ligne en-tête, [lignes compétiteurs])]
         self.init_ui()
@@ -599,34 +602,38 @@ class CompetitionsPage(QWidget):
         subtitle.setStyleSheet("color: #64748B; font-size: 13px;")
         layout.addWidget(subtitle)
 
-        # Barre de synchronisation Drive (même mécanisme que la base principale)
-        drive_bar = QFrame()
-        drive_bar.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; }")
-        drive_layout = QHBoxLayout(drive_bar)
-        drive_layout.setContentsMargins(12, 8, 12, 8)
+        # Barre Firestore (même base que la page web PWA, en temps réel)
+        cloud_bar = QFrame()
+        cloud_bar.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; }")
+        cloud_layout = QHBoxLayout(cloud_bar)
+        cloud_layout.setContentsMargins(12, 8, 12, 8)
 
-        lbl_drive = QLabel("🗄️ Base dédiée : database_Competition.db (cache local + Google Drive)")
-        lbl_drive.setStyleSheet("color: #334155; font-size: 12px; border: none;")
-        drive_layout.addWidget(lbl_drive)
-        drive_layout.addStretch()
+        lbl_cloud = QLabel("☁️ Base partagée : Firestore (identique à la page web Compétitions)")
+        lbl_cloud.setStyleSheet("color: #334155; font-size: 12px; border: none;")
+        cloud_layout.addWidget(lbl_cloud)
+        cloud_layout.addStretch()
 
-        self.btn_drive_download = QPushButton("⬇️  Charger depuis Drive")
-        self.btn_drive_download.setCursor(Qt.PointingHandCursor)
-        self.btn_drive_download.setStyleSheet(self._btn_style("#2563EB"))
-        self.btn_drive_download.clicked.connect(lambda: self._start_drive_worker("download"))
-        drive_layout.addWidget(self.btn_drive_download)
+        self.btn_cloud_refresh = QPushButton("🔄  Actualiser depuis Firestore")
+        self.btn_cloud_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_cloud_refresh.setStyleSheet(self._btn_style("#2563EB"))
+        self.btn_cloud_refresh.clicked.connect(self.on_refresh_from_firestore)
+        cloud_layout.addWidget(self.btn_cloud_refresh)
 
-        self.btn_drive_upload = QPushButton("💾  Sauvegarder en BDD (Drive)")
-        self.btn_drive_upload.setCursor(Qt.PointingHandCursor)
-        self.btn_drive_upload.setToolTip("Envoie la base des compétitions vers Google Drive.")
-        self.btn_drive_upload.setStyleSheet(self._btn_style("#10B981"))
-        self.btn_drive_upload.clicked.connect(lambda: self._start_drive_worker("upload"))
-        drive_layout.addWidget(self.btn_drive_upload)
+        self.btn_cloud_import = QPushButton("⬆️  Importer l'ancienne base locale (fusion)")
+        self.btn_cloud_import.setToolTip(
+            "Importe dans Firestore les données de l'ancienne base locale "
+            "(database_Competition.db) qui n'existent pas encore dans Firestore.\n"
+            "Jamais d'écrasement : les données déjà présentes dans Firestore sont conservées."
+        )
+        self.btn_cloud_import.setCursor(Qt.PointingHandCursor)
+        self.btn_cloud_import.setStyleSheet(self._btn_style("#10B981"))
+        self.btn_cloud_import.clicked.connect(self.on_import_legacy_db)
+        cloud_layout.addWidget(self.btn_cloud_import)
 
-        self.drive_status_lbl = QLabel("")
-        self.drive_status_lbl.setStyleSheet("color: #64748B; font-size: 11px; border: none;")
-        drive_layout.addWidget(self.drive_status_lbl)
-        layout.addWidget(drive_bar)
+        self.cloud_status_lbl = QLabel("")
+        self.cloud_status_lbl.setStyleSheet("color: #64748B; font-size: 11px; border: none;")
+        cloud_layout.addWidget(self.cloud_status_lbl)
+        layout.addWidget(cloud_bar)
 
         # Fenêtre de progression créée paresseusement (_ensure_progress) : ne PAS
         # l'instancier au démarrage — QProgressDialog arme un minuteur interne
@@ -670,6 +677,25 @@ class CompetitionsPage(QWidget):
             QPushButton:disabled {{ background-color: #94A3B8; }}
         """
 
+    def _guard(self, action, *args, title="Firestore", **kwargs):
+        """Exécute une opération Firestore ; en cas d'erreur (réseau, droits),
+        journalise l'échec dans la barre d'état (jamais de boîte modale : les
+        chargements sont appelés pendant la construction de la page)."""
+        try:
+            return action(*args, **kwargs)
+        except Exception as e:
+            print(f"⚠️ [COMPETITIONS] {title} : {e}")
+            self.cloud_status_lbl.setText(f"⚠️ {title} : {e}")
+            return None
+
+    def _guard_modal(self, action, *args, title="Firestore", **kwargs):
+        """Comme _guard, mais avec un message bloquant — réservé aux actions
+        explicitement déclenchées par l'utilisateur (bouton cliqué)."""
+        result = self._guard(action, *args, title=title, **kwargs)
+        if result is None and self.cloud_status_lbl.text().startswith("⚠️"):
+            QMessageBox.critical(self, title, f"Opération impossible :\n{self.cloud_status_lbl.text()[2:]}")
+        return result
+
     def _build_left_panel(self) -> QWidget:
         container = QFrame()
         container.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; }")
@@ -700,7 +726,7 @@ class CompetitionsPage(QWidget):
         layout.addWidget(self.adherents_status_lbl)
 
         btn_refresh = QPushButton("🔄  Rafraîchir / resynchroniser les adhérents")
-        btn_refresh.setToolTip("Recopie la table des adhérents depuis la base principale database.db.")
+        btn_refresh.setToolTip("Recalcule l'annuaire des adhérents dans Firestore depuis la base principale database.db.")
         btn_refresh.setCursor(Qt.PointingHandCursor)
         btn_refresh.setStyleSheet(self._btn_style("#475569"))
         btn_refresh.clicked.connect(self.on_sync_adherents)
@@ -1059,36 +1085,40 @@ class CompetitionsPage(QWidget):
     # Chargement des données
     # ------------------------------------------------------------------
     def refresh_page(self):
-        """(Re)charge les compétitions et vérifie l'instantané des adhérents."""
+        """(Re)charge les compétitions et vérifie l'annuaire des adhérents."""
         if self._loading:
             return
         self._loading = True
         try:
-            CompetitionRepository.setup_database()
             count = CompetitionRepository.count_adherents()
             if count == 0:
                 report = CompetitionRepository.sync_adherents_from_main()
                 if report["errors"]:
                     self.adherents_status_lbl.setText(
-                        "⚠️ Instantané des adhérents non initialisé : " + " ; ".join(report["errors"])
+                        "⚠️ Annuaire des adhérents non initialisé : " + " ; ".join(report["errors"])
                     )
                 else:
                     count = CompetitionRepository.count_adherents()
                     self.adherents_status_lbl.setText(
-                        f"✅ Instantané des adhérents initialisé depuis database.db ({count} adhérents)."
+                        f"✅ Annuaire des adhérents initialisé depuis database.db ({count} adhérents)."
                     )
             elif count:
-                self.adherents_status_lbl.setText(f"👥 {count} adhérents dans l'instantané local.")
+                self.adherents_status_lbl.setText(f"👥 {count} adhérents dans l'annuaire Firestore.")
 
             self.reload_competitions_list()
             self._refresh_bilan_seasons()
+        except Exception as e:
+            self.adherents_status_lbl.setText(f"⚠️ Firestore inaccessible : {e}")
         finally:
             self._loading = False
 
     def reload_competitions_list(self):
+        comps = self._guard(CompetitionRepository.list_competitions)
+        if comps is None:
+            self.adherents_status_lbl.setText("⚠️ Chargement des épreuves impossible (voir message).")
+            return
         self.competitions_list.blockSignals(True)
         self.competitions_list.clear()
-        comps = CompetitionRepository.list_competitions()
         for c in comps:
             lib_statut = LIBELLES_STATUT_COMPETITION.get(c.statut, c.statut)
             date_txt = datetime.date.fromisoformat(c.date_competition).strftime("%d/%m/%Y") if c.date_competition else "sans date"
@@ -1116,7 +1146,9 @@ class CompetitionsPage(QWidget):
         if not item:
             return
         comp_id = item.data(Qt.UserRole)
-        self.current_competition = CompetitionRepository.get_competition(comp_id)
+        self.current_competition = self._guard(CompetitionRepository.get_competition, comp_id)
+        if self.current_competition is None:
+            return
         self._fill_form()
         self._update_participants_view()
         self._update_helloasso_view()
@@ -1193,7 +1225,9 @@ class CompetitionsPage(QWidget):
         comp.coach3_id = self.input_coach3.currentData()
         # NB : helloasso_ref n'est plus éditable ici — la campagne HelloAsso est
         # désormais annuelle et se configure dans l'onglet global « HelloAsso ».
-        comp_id = CompetitionRepository.save_competition(comp)
+        comp_id = self._guard_modal(CompetitionRepository.save_competition, comp, title="Enregistrement")
+        if comp_id is None:
+            return
         self.current_competition = CompetitionRepository.get_competition(comp_id)
         self.reload_competitions_list()
         self._update_participants_view()
@@ -1210,7 +1244,10 @@ class CompetitionsPage(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
-        CompetitionRepository.delete_competition(self.current_competition.id)
+        result = self._guard_modal(CompetitionRepository.delete_competition,
+                                   self.current_competition.id, title="Suppression")
+        if result is None:
+            return
         self.current_competition = None
         self.reload_competitions_list()
         self._update_participants_view()
@@ -1218,19 +1255,22 @@ class CompetitionsPage(QWidget):
 
     def on_sync_adherents(self):
         progress = self._ensure_progress()
-        progress.setLabelText("Resynchronisation des adhérents depuis database.db…")
+        progress.setLabelText("Resynchronisation de l'annuaire adhérents (database.db → Firestore)…")
         progress.setValue(40)
         progress.show()
-        report = CompetitionRepository.sync_adherents_from_main()
+        report = self._guard_modal(CompetitionRepository.sync_adherents_from_main, title="Synchronisation adhérents")
+        if report is None:
+            progress.reset()
+            return
         progress.reset()
         if report["errors"]:
             QMessageBox.critical(self, "Erreur", "\n".join(report["errors"]))
         else:
             count = CompetitionRepository.count_adherents()
-            self.adherents_status_lbl.setText(f"👥 {count} adhérents dans l'instantané local (mise à jour réussie).")
+            self.adherents_status_lbl.setText(f"👥 {count} adhérents dans l'annuaire Firestore (mise à jour réussie).")
             QMessageBox.information(
                 self, "Synchronisation adhérents",
-                f"{report['imported']} ajouté(s), {report['updated']} mis à jour.\nTotal : {count} adhérents."
+                f"{report['updated']} adhérent(s) mis à jour.\nTotal : {count} adhérents."
             )
 
     # ------------------------------------------------------------------
@@ -1244,7 +1284,9 @@ class CompetitionsPage(QWidget):
         if not self.current_competition:
             self.participants_count_lbl.setText("0 compétiteur sélectionné")
             return
-        participants = CompetitionRepository.list_participants(self.current_competition.id)
+        participants = self._guard(CompetitionRepository.list_participants, self.current_competition.id)
+        if participants is None:
+            return
         selected = sum(1 for p in participants if p.selectionne)
 
         # Regroupement par groupe de créneau du planning (Autonome, Compétition
@@ -1347,7 +1389,7 @@ class CompetitionsPage(QWidget):
         return f
 
     def _on_selection_toggled(self, competition_id: int, adherent_id: int, checked: bool):
-        CompetitionRepository.set_selection(competition_id, adherent_id, checked)
+        self._guard(CompetitionRepository.set_selection, competition_id, adherent_id, checked)
         self._refresh_count_only()
 
     def _on_delete_participant(self, competition_id: int, adherent_id: int, nom_complet: str):
@@ -1360,17 +1402,22 @@ class CompetitionsPage(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
-        CompetitionRepository.remove_participant(competition_id, adherent_id)
+        result = self._guard(CompetitionRepository.remove_participant, competition_id, adherent_id,
+                             title="Suppression")
+        if result is None:
+            return
         self._update_participants_view()
 
     def _on_paiement_changed(self, competition_id: int, adherent_id: int, libelle: str):
         statut = LIBELLE_VERS_STATUT_PAIEMENT.get(libelle, PAIEMENT_NON_INVITE)
-        CompetitionRepository.set_payment_status(competition_id, adherent_id, statut)
+        self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, statut)
 
     def _refresh_count_only(self):
         if not self.current_competition:
             return
-        participants = CompetitionRepository.list_participants(self.current_competition.id)
+        participants = self._guard(CompetitionRepository.list_participants, self.current_competition.id)
+        if participants is None:
+            return
         selected = sum(1 for p in participants if p.selectionne)
         self.participants_count_lbl.setText(
             f"{selected} compétiteur{'s' if selected > 1 else ''} sélectionné{'s' if selected > 1 else ''} "
@@ -1400,7 +1447,9 @@ class CompetitionsPage(QWidget):
         if not self.current_competition:
             QMessageBox.information(self, "Aucune compétition", "Créez ou sélectionnez d'abord une compétition.")
             return
-        n = CompetitionRepository.load_competition_group_into(self.current_competition.id)
+        n = self._guard_modal(CompetitionRepository.load_competition_group_into, self.current_competition.id)
+        if n is None:
+            return
         self._update_participants_view()
         QMessageBox.information(
             self, "Groupe « Compétition »",
@@ -1411,7 +1460,11 @@ class CompetitionsPage(QWidget):
         if not self.current_competition:
             QMessageBox.information(self, "Aucune compétition", "Créez ou sélectionnez d'abord une compétition.")
             return
-        dlg = AddAdherentsDialog(self.current_competition.id, self)
+        try:
+            dlg = AddAdherentsDialog(self.current_competition.id, self)
+        except Exception as e:
+            QMessageBox.critical(self, "Firestore", f"Ouverture impossible :\n{e}")
+            return
         if dlg.exec():
             self._update_participants_view()
             QMessageBox.information(self, "Ajout réussi", f"{dlg.added} adhérent(s) ajouté(s) à la compétition.")
@@ -1451,15 +1504,21 @@ class CompetitionsPage(QWidget):
     # ------------------------------------------------------------------
     def _update_helloasso_view(self):
         """Onglet global HelloAsso : campagne annuelle + miroir (indépendant des épreuves)."""
-        self.annual_campaign_input.setText(
-            CompetitionRepository.get_app_setting(ANNUAL_CAMPAIGN_KEY)
-        )
+        try:
+            self.annual_campaign_input.setText(
+                CompetitionRepository.get_app_setting(ANNUAL_CAMPAIGN_KEY)
+            )
+        except Exception as e:
+            print(f"⚠️ [COMPETITIONS] Lecture du paramètre campagne impossible : {e}")
+            self.cloud_status_lbl.setText(f"⚠️ Firestore : {e}")
         self._refresh_mirror_table()
 
     def _refresh_mirror_table(self):
         """Affiche le miroir HelloAsso + rattachements (compétition, adhérent, source)."""
         import json
-        rows = CompetitionRepository.list_mirror_items()
+        rows = self._guard(CompetitionRepository.list_mirror_items)
+        if rows is None:
+            return
         table = self.items_table
         table.setRowCount(len(rows))
         nb_attente = 0
@@ -1556,25 +1615,13 @@ class CompetitionsPage(QWidget):
         id_item = payer_item.data(Qt.UserRole)
         if id_item is None:
             return
-            
-        # Récupère l'article spécifique pour correction manuelle
-        conn = CompetitionRepository.get_connection()
-        try:
-            r = conn.execute(
-                """SELECT h.*, l.competition_id, l.adherent_id
-                   FROM helloasso_items h
-                   LEFT JOIN item_links l ON l.id_item = h.id_item
-                   WHERE h.id_item = ?""",
-                (id_item,)
-            ).fetchone()
-        finally:
-            conn.close()
-            
+
+        # Récupère l'article spécifique (miroir Firestore, rattachement inclus)
+        r = self._guard(CompetitionRepository.get_item, id_item, title="Miroir HelloAsso")
         if not r:
             return
 
         import json
-        r = dict(r)
         # Champs saisis sur HelloAsso, extraits du JSON brut (comme le tableau miroir)
         comp_name_val, comp_num_val = "", ""
         raw_json_str = r.get("raw_json")
@@ -1587,18 +1634,18 @@ class CompetitionsPage(QWidget):
                 pass
         review_item = {
             "id_item": r["id_item"],
-            "payer": f"{r['payer_nom']} {r['payer_prenom']}".strip(),
-            "montant": r["montant"],
-            "etat": str(r["etat"] or ""),
-            "date_item": str(r["date_item"] or ""),
-            "order_ref": r["order_id"],
-            "licence": str(r["licence_saisie"] or ""),
-            "valeur_champ": r["competition_saisie"],
+            "payer": f"{r.get('payer_nom') or ''} {r.get('payer_prenom') or ''}".strip(),
+            "montant": r.get("montant"),
+            "etat": str(r.get("etat") or ""),
+            "date_item": str(r.get("date_item") or ""),
+            "order_ref": r.get("order_id"),
+            "licence": str(r.get("licence_saisie") or ""),
+            "valeur_champ": r.get("competition_saisie"),
             "competition_concernee": comp_name_val,
             "numero_competition": comp_num_val,
-            "adherent_id": r["adherent_id"],
-            "competition_id": r["competition_id"],
-            "commentaire": str(r["commentaire"] or ""),
+            "adherent_id": r.get("adherent_id"),
+            "competition_id": r.get("competition_id"),
+            "commentaire": str(r.get("commentaire") or ""),
         }
         
         self._run_manual_corrections([review_item], current_competition=None)
@@ -1611,7 +1658,11 @@ class CompetitionsPage(QWidget):
             except ValueError as ve:
                 QMessageBox.warning(self, "Campagne invalide", str(ve))
                 return
-        CompetitionRepository.save_app_setting(ANNUAL_CAMPAIGN_KEY, slug)
+        try:
+            CompetitionRepository.save_app_setting(ANNUAL_CAMPAIGN_KEY, slug)
+        except Exception as e:
+            QMessageBox.critical(self, "Campagne annuelle", f"Enregistrement impossible :\n{e}")
+            return
         QMessageBox.information(
             self, "Campagne annuelle enregistrée",
             "La campagne annuelle HelloAsso a été enregistrée." if slug
@@ -1619,7 +1670,12 @@ class CompetitionsPage(QWidget):
         )
 
     def on_sync_annual(self):
-        if not (CompetitionRepository.get_app_setting(ANNUAL_CAMPAIGN_KEY) or "").strip():
+        try:
+            campaign = (CompetitionRepository.get_app_setting(ANNUAL_CAMPAIGN_KEY) or "").strip()
+        except Exception as e:
+            QMessageBox.critical(self, "Campagne annuelle", f"Lecture impossible :\n{e}")
+            return
+        if not campaign:
             QMessageBox.warning(
                 self, "Campagne manquante",
                 "Renseignez d'abord la campagne annuelle (slug ou URL) puis enregistrez-la."
@@ -1660,7 +1716,11 @@ class CompetitionsPage(QWidget):
 
     def on_attach_items(self):
         """Ouvre la boîte de rattachement des paiements en attente (miroir)."""
-        unlinked = CompetitionRepository.list_unlinked_items()
+        try:
+            unlinked = CompetitionRepository.list_unlinked_items()
+        except Exception as e:
+            QMessageBox.critical(self, "Miroir HelloAsso", f"Lecture impossible :\n{e}")
+            return
         if not unlinked:
             QMessageBox.information(
                 self, "Rien à rattacher",
@@ -1681,7 +1741,12 @@ class CompetitionsPage(QWidget):
         (item_links, source='manuel'), conservé lors des synchronisations suivantes,
         puis est reportée sur les participants.
         """
-        dlg = ManualCorrectionDialog(manual_review, current_competition, self)
+        dlg: ManualCorrectionDialog
+        try:
+            dlg = ManualCorrectionDialog(manual_review, current_competition, self)
+        except Exception as e:
+            QMessageBox.critical(self, "Miroir HelloAsso", f"Ouverture impossible :\n{e}")
+            return
         if not dlg.exec() or not dlg.corrections:
             return
         for corr in dlg.corrections:
@@ -1689,24 +1754,27 @@ class CompetitionsPage(QWidget):
             comp_id = corr["competition_id"]
             adherent_id = corr["adherent_id"]
             comment = corr["commentaire"]
-            
+
             # Enregistrer le commentaire persistant
-            CompetitionRepository.save_item_comment(id_item, comment)
-            
+            try:
+                CompetitionRepository.save_item_comment(id_item, comment)
+            except Exception as e:
+                QMessageBox.critical(self, "Miroir HelloAsso", f"Commentaire non enregistré :\n{e}")
+                return
+
             # Mettre à jour ou supprimer le lien de rattachement
             if comp_id is None:
                 # Suppression de la liaison existante si l'utilisateur a choisi "Ignorer"
-                conn = CompetitionRepository.get_connection()
-                try:
-                    conn.execute("DELETE FROM item_links WHERE id_item = ?", (id_item,))
-                    conn.commit()
-                finally:
-                    conn.close()
+                CompetitionRepository.clear_item_link(id_item)
             else:
                 CompetitionRepository.set_item_link(id_item, comp_id, adherent_id, source="manuel")
-                
+
         # Report de TOUS les liens (y compris les corrections qui viennent d'être saisies)
-        reported = CompetitionRepository.apply_links_to_participants()
+        try:
+            reported = CompetitionRepository.apply_links_to_participants()
+        except Exception as e:
+            QMessageBox.critical(self, "Miroir HelloAsso", f"Report des paiements impossible :\n{e}")
+            return
         self._refresh_mirror_table()
         self._update_participants_view()
         QMessageBox.information(
@@ -1726,7 +1794,12 @@ class CompetitionsPage(QWidget):
             self._update_helloasso_view()
 
     def _refresh_bilan_seasons(self):
-        bilan = CompetitionRepository.get_bilan()
+        try:
+            bilan = CompetitionRepository.get_bilan()
+        except Exception as e:
+            print(f"⚠️ [COMPETITIONS] Chargement du bilan impossible : {e}")
+            self.cloud_status_lbl.setText(f"⚠️ Bilan : {e}")
+            return
         seasons = bilan["seasons"]
         self.bilan_season_combo.blockSignals(True)
         self.bilan_season_combo.clear()
@@ -1748,7 +1821,12 @@ class CompetitionsPage(QWidget):
             self.balance_table.setRowCount(0)
             return
 
-        bilan = CompetitionRepository.get_bilan(season)
+        try:
+            bilan = CompetitionRepository.get_bilan(season)
+        except Exception as e:
+            print(f"⚠️ [COMPETITIONS] Chargement du bilan impossible : {e}")
+            self.cloud_status_lbl.setText(f"⚠️ Bilan : {e}")
+            return
         comps = bilan["competitions"]
         students = bilan["students"]
         parts = bilan["participations"]
@@ -1855,7 +1933,11 @@ class CompetitionsPage(QWidget):
         if not season:
             QMessageBox.information(self, "Aucune donnée", "Rien à exporter : aucune compétition enregistrée.")
             return
-        bilan = CompetitionRepository.get_bilan(season)
+        try:
+            bilan = CompetitionRepository.get_bilan(season)
+        except Exception as e:
+            QMessageBox.critical(self, "Bilan", f"Export impossible :\n{e}")
+            return
         comps, students, parts = bilan["competitions"], bilan["students"], bilan["participations"]
 
         out_dir = os.path.join(ROOT_DIR, "exports")
@@ -1885,8 +1967,11 @@ class CompetitionsPage(QWidget):
         season = self.bilan_season_combo.currentText()
         if not season:
             return
-            
-        dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        try:
+            dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        except Exception as e:
+            QMessageBox.critical(self, "Bilan", f"Détail indisponible :\n{e}")
+            return
         dlg.exec()
 
     def on_balance_row_clicked(self, row: int, col: int):
@@ -1900,12 +1985,15 @@ class CompetitionsPage(QWidget):
         season = self.bilan_season_combo.currentText()
         if not season:
             return
-            
-        dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        try:
+            dlg = AthleteBilanDetailDialog(adherent_id, season, self)
+        except Exception as e:
+            QMessageBox.critical(self, "Bilan", f"Détail indisponible :\n{e}")
+            return
         dlg.exec()
 
     # ------------------------------------------------------------------
-    # Google Drive
+    # Firestore : actualisation et import de l'ancienne base
     # ------------------------------------------------------------------
     def _ensure_progress(self) -> QProgressDialog:
         """Crée la fenêtre de progression à la demande (titre et label définis :
@@ -1920,38 +2008,81 @@ class CompetitionsPage(QWidget):
             self.progress.hide()
         return self.progress
 
-    def _start_drive_worker(self, mode: str):
-        self.btn_drive_download.setEnabled(False)
-        self.btn_drive_upload.setEnabled(False)
+    def _reload_all(self):
+        self.current_competition = None
+        CompetitionRepository._invalidate_adherents_cache()
+        self._refresh_bilan_seasons()
+        self.reload_competitions_list()
+        self.reload_coaches_list()
+        self._update_helloasso_view()
+
+    def on_refresh_from_firestore(self):
+        """Recharge toutes les données depuis Firestore (état partagé avec la PWA)."""
+        self.btn_cloud_refresh.setEnabled(False)
+        self.btn_cloud_import.setEnabled(False)
         progress = self._ensure_progress()
-        progress.setLabelText("Connexion à Google Drive…")
+        progress.setLabelText("Actualisation depuis Firestore…")
+        progress.setValue(30)
+        progress.show()
+        try:
+            self._reload_all()
+            self.cloud_status_lbl.setText(
+                f"☁️ Dernière actualisation : {datetime.datetime.now().strftime('%H:%M:%S')}"
+            )
+        finally:
+            progress.reset()
+            self.btn_cloud_refresh.setEnabled(True)
+            self.btn_cloud_import.setEnabled(True)
+
+    def on_import_legacy_db(self):
+        """Import (fusion, sans écrasement) de l'ancienne base locale vers Firestore."""
+        reply = QMessageBox.question(
+            self, "Importer l'ancienne base locale",
+            "Importer dans Firestore les données de l'ancienne base locale "
+            "(database_Competition.db) ?\n\n"
+            "Seules les données ABSENTS de Firestore seront créées (jamais d'écrasement) :\n"
+            "compétitions, coachs, articles HelloAsso, campagne annuelle et annuaire des adhérents.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.btn_cloud_refresh.setEnabled(False)
+        self.btn_cloud_import.setEnabled(False)
+        progress = self._ensure_progress()
+        progress.setLabelText("Connexion à Firestore…")
         progress.setValue(10)
         progress.show()
-        self.drive_worker = CompetitionDriveWorker(mode)
-        self.drive_worker.progress.connect(self._on_drive_progress)
-        self.drive_worker.finished_sig.connect(lambda ok, msg, m=mode: self._on_drive_finished(ok, msg, m))
-        self.drive_worker.start()
+        self.import_worker = FirestoreImportWorker()
+        self.import_worker.progress.connect(self._on_sync_progress)
+        self.import_worker.finished_sig.connect(self._on_import_finished)
+        self.import_worker.start()
 
-    def _on_drive_progress(self, message: str, percent: int):
-        progress = self._ensure_progress()
-        progress.setLabelText(message)
-        progress.setValue(percent)
-
-    def _on_drive_finished(self, ok: bool, message: str, mode: str):
+    def _on_import_finished(self, ok: bool, result: dict):
         if self.progress is not None:
             self.progress.reset()
-        self.btn_drive_download.setEnabled(True)
-        self.btn_drive_upload.setEnabled(True)
-        self.drive_status_lbl.setText(message)
-        if ok:
-            # La base locale vient d'être remplacée (ou envoyée) : recharger tout l'état
-            self.current_competition = None
-            self._refresh_bilan_seasons()
-            self.reload_competitions_list()
-            self.reload_coaches_list()
-            QMessageBox.information(self, "Google Drive", message)
+        self.btn_cloud_refresh.setEnabled(True)
+        self.btn_cloud_import.setEnabled(True)
+        message = result.get("message") or ""
+        report = result.get("report") or {}
+        if not ok and message:
+            self.cloud_status_lbl.setText(f"❌ {message}")
+            QMessageBox.critical(self, "Échec de l'import", message)
+            return
+        errors = report.get("errors") or []
+        summary = (
+            f"Compétitions créées : {report.get('competitions', 0)} "
+            f"(déjà présentes : {report.get('competitions_ignorees', 0)})\n"
+            f"Coachs créés : {report.get('coaches', 0)} · "
+            f"Adhérents mis à jour : {report.get('adherents', 0)} · "
+            f"Paramètres créés : {report.get('app_settings', 0)} · "
+            f"Articles HelloAsso créés : {report.get('helloasso_items', 0)}"
+        )
+        self.cloud_status_lbl.setText("⬆️ Import de l'ancienne base terminé.")
+        if errors:
+            QMessageBox.warning(self, "Import partiel", summary + "\n\nErreurs :\n" + "\n".join(errors[:5]))
         else:
-            QMessageBox.critical(self, "Échec Google Drive", message)
+            QMessageBox.information(self, "Import terminé", summary)
+        self._reload_all()
 
     # ------------------------------------------------------------------
     # Gestion des Coachs
@@ -2022,7 +2153,11 @@ class CompetitionsPage(QWidget):
         return container
 
     def _populate_coach_dropdowns(self):
-        coaches = CompetitionRepository.list_coaches()
+        try:
+            coaches = CompetitionRepository.list_coaches()
+        except Exception as e:
+            print(f"⚠️ [COMPETITIONS] Lecture des coachs impossible : {e}")
+            coaches = []
         for combo in [self.input_coach1, self.input_coach2, self.input_coach3]:
             combo.blockSignals(True)
             combo.clear()
@@ -2034,7 +2169,11 @@ class CompetitionsPage(QWidget):
     def reload_coaches_list(self):
         self.coaches_list.blockSignals(True)
         self.coaches_list.clear()
-        coaches = CompetitionRepository.list_coaches()
+        try:
+            coaches = CompetitionRepository.list_coaches()
+        except Exception as e:
+            QMessageBox.critical(self, "Coachs", f"Chargement impossible :\n{e}")
+            coaches = []
         for c in coaches:
             item = QListWidgetItem(f"🏃  {c['nom']}")
             item.setData(Qt.UserRole, c["id"])
@@ -2057,20 +2196,23 @@ class CompetitionsPage(QWidget):
             return
         
         coach_id = item.data(Qt.UserRole)
-        coach = CompetitionRepository.get_coach(coach_id)
-        if coach:
-            self.coach_name_input.setText(coach["nom"])
-            self.btn_save_coach.setText("💾 Modifier")
-            self.btn_delete_coach.setEnabled(True)
-            
-            # Load competitions
-            self.coach_comps_list.clear()
-            comps = CompetitionRepository.list_competitions_for_coach(coach_id)
-            self.coach_comps_lbl.setText(f"Épreuves pour {coach['nom']} ({len(comps)}) :")
-            for c in comps:
-                date_txt = datetime.date.fromisoformat(c.date_competition).strftime("%d/%m/%Y") if c.date_competition else "sans date"
-                comp_item = QListWidgetItem(f"🏆 {c.nom}\n📅 {date_txt}")
-                self.coach_comps_list.addItem(comp_item)
+        try:
+            coach = CompetitionRepository.get_coach(coach_id)
+            if coach:
+                self.coach_name_input.setText(coach["nom"])
+                self.btn_save_coach.setText("💾 Modifier")
+                self.btn_delete_coach.setEnabled(True)
+
+                # Load competitions
+                self.coach_comps_list.clear()
+                comps = CompetitionRepository.list_competitions_for_coach(coach_id)
+                self.coach_comps_lbl.setText(f"Épreuves pour {coach['nom']} ({len(comps)}) :")
+                for c in comps:
+                    date_txt = datetime.date.fromisoformat(c.date_competition).strftime("%d/%m/%Y") if c.date_competition else "sans date"
+                    comp_item = QListWidgetItem(f"🏆 {c.nom}\n📅 {date_txt}")
+                    self.coach_comps_list.addItem(comp_item)
+        except Exception as e:
+            QMessageBox.critical(self, "Coachs", f"Chargement impossible :\n{e}")
 
     def on_save_coach(self):
         nom = self.coach_name_input.text().strip()
@@ -2101,7 +2243,11 @@ class CompetitionsPage(QWidget):
             return
         
         coach_id = item.data(Qt.UserRole)
-        coach = CompetitionRepository.get_coach(coach_id)
+        try:
+            coach = CompetitionRepository.get_coach(coach_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Coachs", f"Lecture impossible :\n{e}")
+            return
         if not coach:
             return
             
@@ -2111,7 +2257,11 @@ class CompetitionsPage(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            CompetitionRepository.delete_coach(coach_id)
+            try:
+                CompetitionRepository.delete_coach(coach_id)
+            except Exception as e:
+                QMessageBox.critical(self, "Coachs", f"Suppression impossible :\n{e}")
+                return
             self.reload_coaches_list()
             self.reload_competitions_list()
             QMessageBox.information(self, "Supprimé", "Le coach a été supprimé.")

@@ -15,7 +15,9 @@ from typing import Dict, Any, List, Optional
 
 from domain.utils import apply_template_variables, format_montant
 from infrastructure.sqlite_repository import SqliteRepository
-from infrastructure.competition_repository import CompetitionRepository
+from infrastructure.competition_firestore_repository import (
+    CompetitionFirestoreRepository as CompetitionRepository,
+)
 from infrastructure.email_repository import EmailRepository
 from email_html import build_email_html, build_signature_plain, get_inline_images
 

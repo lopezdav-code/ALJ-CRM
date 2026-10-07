@@ -1,5 +1,5 @@
 """
-Modèles métier du module de gestion des compétitions (base dédiée database_Competition.db).
+Modèles métier du module de gestion des compétitions (base partagée Firestore).
 
 Ces modèles sont purs (aucune dépendance Qt / réseau) afin d'être réutilisables
 par l'application de bureau, le serveur web et les tests unitaires.
@@ -36,7 +36,7 @@ LIBELLE_VERS_STATUT_COMPETITION = {v: k for k, v in LIBELLES_STATUT_COMPETITION.
 
 @dataclass
 class Competition:
-    """Une épreuve de la saison (compétition FFME)."""
+    """Une épreuve de la saison (document Firestore `competitions/{id}`)."""
     id: int = None
     id_ffme: str = ""
     nom: str = ""
@@ -49,6 +49,9 @@ class Competition:
     coach1_id: int = None
     coach2_id: int = None
     coach3_id: int = None
+    # Identifiant Firestore réel du document (peut différer de str(id) sur une
+    # base héritée ; normalisé au premier chargement par le référentiel).
+    doc_id: str = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +84,7 @@ class Competition:
             coach1_id=row.get("coach1_id"),
             coach2_id=row.get("coach2_id"),
             coach3_id=row.get("coach3_id"),
+            doc_id=row.get("doc_id") or row.get("_doc_id"),
         )
 
 
