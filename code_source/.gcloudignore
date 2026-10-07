@@ -1,0 +1,47 @@
+# Ignorés lors de l'envoi du code source vers Cloud Build (gcloud run deploy --source .)
+# Envoyer uniquement le nécessaire : Dockerfile + requirements-docker.txt + src/ + web/ + doc/ + VERSION
+
+# Environnements virtuels et caches Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets et données personnelles (jamais dans l'image)
+.env
+.env.*
+client_secret_*.json
+token_*.json
+credentials.json
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+app_activity.log
+
+# Artefacts de build, exports et archives
+build/
+dist/
+archive/
+attestation/
+exports/
+import/
+scripts_temporaires/
+*.spec
+*.xlsx
+
+# Git, tests, outils
+.git/
+.github/
+tests/
+installer/
+*.bat
+*.vbs
+*.png.bak
