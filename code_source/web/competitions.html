@@ -797,14 +797,6 @@ function onSnapshotError(name, err) {
     if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
   }
 }
-    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
-    toast("❌ Firestore : " + (err.message || err), 9000);
-  }
-  if (snapshotsReady >= 4) {
-    renderAll();
-    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
-  }
-}
 
 /* ===================== Accès aux données (Firestore) ===================== */
 function findComp(compId) {
