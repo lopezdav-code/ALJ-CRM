@@ -297,10 +297,12 @@ class EmailDispatchService:
                     "error": str(ex)
                 })
 
+        first_err = details[0]["error"] if details and "error" in details[0] else "Erreur d'envoi."
         return {
             "status": "success" if errors_count == 0 else ("partial" if sent_count > 0 else "error"),
             "sent_count": sent_count,
             "errors_count": errors_count,
             "total_recipients": len(destinataires),
+            "message": "" if errors_count == 0 else first_err,
             "details": details
         }

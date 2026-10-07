@@ -68,6 +68,24 @@ class TestMobilePWA(unittest.TestCase):
         self.assertIn('editSourcePage', html)
         self.assertIn('openParticipants(savedCompId)', html)
 
+        # Vérifications Écran HelloAsso & Rattachement des paiements
+        self.assertIn('data-page="helloasso"', html)
+        self.assertIn('id="page-helloasso"', html)
+        self.assertIn('id="ha-attach-modal"', html)
+        self.assertIn('openAttachModal', html)
+        self.assertIn('saveAttachment', html)
+        self.assertIn('renderHelloAssoPage', html)
+        self.assertIn('id="ha-items-list"', html)
+
+        # Vérifications Mode Consultation (Lecture Seule) selon l'utilisateur
+        self.assertIn('function isCoachUser()', html)
+        self.assertIn('function isReadOnlyUser()', html)
+        self.assertIn('function isAuthorizedUser()', html)
+        self.assertIn('function applyRolePermissions()', html)
+        self.assertIn('id="setup-role-badge"', html)
+        self.assertIn('id="setup-unauthorized"', html)
+        self.assertIn('id="comp-form-card"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

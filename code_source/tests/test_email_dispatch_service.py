@@ -14,7 +14,7 @@ if _src_dir not in sys.path:
 
 import asyncio
 from infrastructure.email_dispatch_service import EmailDispatchService
-from server import get_email_templates, preview_email, send_email_api
+from server import get_email_templates, preview_email, send_email_api, get_email_status
 
 
 class TestEmailDispatchService(unittest.TestCase):
@@ -92,6 +92,12 @@ class TestEmailDispatchService(unittest.TestCase):
         self.assertEqual(res_p["status"], "success")
         self.assertEqual(res_p["preview"]["subject"], "Test Paul")
         self.assertIn("Bonjour Paul", res_p["preview"]["body_plain"])
+
+        # 3. Email Status
+        res_st = get_email_status()
+        self.assertEqual(res_st["status"], "success")
+        self.assertIn("configured", res_st)
+        self.assertIn("mode", res_st)
 
 
 if __name__ == "__main__":

@@ -7,11 +7,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Vérifie si l'utilisateur est administrateur (custom claim ou domaine du club)
+    // Vérifie si l'utilisateur est administrateur (custom claim, domaine du club ou liste autorisée)
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.admin == true ||
-        request.auth.token.email.matches('.*@alj-escalade\\.fr$')
+        request.auth.token.email.matches('.*@alj-escalade\\.fr$') ||
+        request.auth.token.email in [
+          'lopez.dav@gmail.com'
+        ]
       );
     }
 
@@ -19,37 +22,57 @@ service cloud.firestore {
     function isCoach() {
       return isAuthenticated() && (
         isAdmin() ||
-        request.auth.token.coach == true
+        request.auth.token.coach == true ||
+        request.auth.token.email in [
+          'stephane.loridant@orange.fr'
+        ]
       );
     }
 
-    // 1. Compétitions : Lecture pour utilisateurs connectés, gestion pour les coachs
+    // Utilisateurs autorisés en consultation seule (liste blanche stricte)
+    function isReadOnly() {
+      return isAuthenticated() && (
+        request.auth.token.readonly == true ||
+        request.auth.token.email in [
+          'muah.did@gmail.com',
+          'clement.dlf78@gmail.com',
+          'delphine0910@gmail.com'
+        ]
+      );
+    }
+
+    // Accès au site privé : seuls les administrateurs, coachs ou personnes en consultation
+    function isAuthorizedUser() {
+      return isCoach() || isReadOnly();
+    }
+
+    // 1. Compétitions : Lecture pour utilisateurs autorisés uniquement, gestion pour les coachs
     match /competitions/{competitionId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthorizedUser();
       allow write: if isCoach();
 
       // Sous-collection Participants : sélection et pointage de paiement
       match /participants/{participantId} {
-        allow read: if isAuthenticated();
+        allow read: if isAuthorizedUser();
         allow write: if isCoach();
       }
     }
 
-    // 2. Annuaire des adhérents : Consultation autorisée, mise à jour réservée aux admins
+    // 2. Annuaire des adhérents : Consultation autorisée aux seuls membres whitelistés, mise à jour réservée aux admins
     match /adherents/{adherentId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthorizedUser();
       allow write: if isAdmin();
     }
 
     // 3. Planning et créneaux du club
     match /planning/{creneauId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthorizedUser();
       allow write: if isAdmin();
     }
 
     // 5. Référentiel des coachs (gestion des entraîneurs)
     match /coaches/{coachId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthorizedUser();
       allow write: if isCoach();
     }
 

@@ -131,6 +131,15 @@
     resize: vertical; outline: none;
   }
   textarea.fld-input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+
+  .filter-chip {
+    display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; background: #F1F5F9; color: #475569;
+    border: 1px solid #CBD5E1; cursor: pointer; user-select: none; transition: all .15s;
+  }
+  .filter-chip.active {
+    background: #EFF6FF; color: var(--blue); border-color: var(--blue);
+  }
 </style>
 </head>
 <body>
@@ -161,6 +170,16 @@
       </div>
       <div id="setup-logged" style="display:none">
         <p>Connecté en tant que <b id="setup-email">—</b></p>
+        <div id="setup-role-badge" style="display:inline-block; margin-bottom:10px; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;"></div>
+        
+        <div id="setup-unauthorized" style="display:none; background:#FEE2E2; border:1px solid #FCA5A5; border-radius:8px; padding:12px; margin-bottom:12px; color:#991B1B;">
+          <b>⛔ Accès refusé : Ce site est privé</b>
+          <p style="margin:6px 0 0; font-size:12.5px; color:#B91C1C; line-height:1.5;">
+            L'adresse e-mail avec laquelle vous êtes connecté ne fait pas partie des personnes autorisées par le club ALJ Escalade.<br>
+            Veuillez vous déconnecter et utiliser un compte autorisé, ou contacter le club pour demander un accès.
+          </p>
+        </div>
+
         <div class="btn-row">
           <button class="btn btn-muted" id="logout-btn-page" style="flex:2">🚪 Se déconnecter</button>
         </div>
@@ -170,7 +189,7 @@
 
   <!-- ================= Liste des compétitions ================= -->
   <section class="page" id="page-comps">
-    <div class="card">
+    <div class="card" id="comp-form-card">
       <div class="m-name" id="f-form-title">➕ Nouvelle compétition</div>
       <label class="fld">Nom de l'épreuve *</label>
       <input type="text" id="f-nom" placeholder="Ex : Championnat départemental U13">
@@ -250,11 +269,70 @@
     <div class="count-line" id="p-count">—</div>
     <div id="p-list"></div>
 
-    <div class="section-h">🔎 Recherche étendue (ajouter un adhérent hors groupe compétition)</div>
-    <div class="card">
+    <div class="section-h" id="p-search-h">🔎 Recherche étendue (ajouter un adhérent hors groupe compétition)</div>
+    <div class="card" id="p-search-card">
       <input type="search" id="p-search" placeholder="🔍 Nom, prénom ou licence…">
       <div id="p-search-results" style="margin-top:8px"></div>
     </div>
+  </section>
+
+  <!-- ================= HelloAsso & Rattachements ================= -->
+  <section class="page" id="page-helloasso">
+    <!-- En-tête explicatif (reprend le hint desktop) -->
+    <div class="card" style="background:#F8FAFC; border-left: 4px solid var(--blue);">
+      <div style="font-weight:700; color:#1E293B; margin-bottom:4px;">🔄 Campagne annuelle HelloAsso & Miroir</div>
+      <div style="font-size:12px; color:#64748B; line-height:1.5;">
+        Un seul formulaire HelloAsso pour toutes les compétitions de la saison.
+        Les paiements reçus sont synchronisés ici en temps réel.
+        Vous pouvez vérifier les paiements et rattacher manuellement ceux qui sont en attente d'attribution à un compétiteur ou une épreuve.
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="card" style="display:flex; gap:12px; justify-content:space-between; text-align:center;">
+      <div style="flex:1; border-right:1px solid var(--line);">
+        <div style="font-size:20px; font-weight:800; color:#1E293B;" id="ha-kpi-total">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Articles au total</div>
+      </div>
+      <div style="flex:1; border-right:1px solid var(--line);">
+        <div style="font-size:20px; font-weight:800; color:var(--green);" id="ha-kpi-linked">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Rattachés</div>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:20px; font-weight:800; color:var(--red);" id="ha-kpi-unlinked">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">En attente</div>
+      </div>
+    </div>
+
+    <!-- Boutons d'actions et filtres -->
+    <div class="card">
+      <div class="btn-row" style="margin-bottom:12px;">
+        <button class="btn btn-primary" id="ha-btn-attach-unlinked" style="flex:2;" onclick="attachFirstUnlinked()">
+          🔗 Rattacher les paiements en attente
+        </button>
+        <button class="btn btn-muted" id="ha-btn-sync" style="flex:1.2;" onclick="triggerHelloAssoSync()">
+          🔄 Synchroniser
+        </button>
+      </div>
+
+      <input type="search" id="ha-search" placeholder="🔍 Rechercher payeur, commande, licence, compétition…" oninput="renderHelloAssoPage()">
+
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <label class="filter-chip active" id="ha-chip-unlinked" onclick="setHaFilter('unlinked')">
+          ⚠️ En attente (<span id="ha-count-chip-unlinked">0</span>)
+        </label>
+        <label class="filter-chip" id="ha-chip-linked" onclick="setHaFilter('linked')">
+          ✅ Rattachés (<span id="ha-count-chip-linked">0</span>)
+        </label>
+        <label class="filter-chip" id="ha-chip-all" onclick="setHaFilter('all')">
+          📋 Tous (<span id="ha-count-chip-all">0</span>)
+        </label>
+      </div>
+    </div>
+
+    <div class="section-h">📋 Articles HelloAsso (Miroir)</div>
+    <div class="count-line" id="ha-list-count">—</div>
+    <div id="ha-items-list"></div>
   </section>
 
   <!-- ================= Gestion des Coachs ================= -->
@@ -371,11 +449,53 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal de rattachement / correction d'un paiement HelloAsso -->
+  <div id="ha-attach-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeAttachModal();">
+    <div class="modal-content card" style="max-width:540px">
+      <div class="modal-header">
+        <div class="m-name" style="font-size:16px;">🔗 Rattacher le paiement HelloAsso</div>
+        <button class="icon-btn" onclick="closeAttachModal()" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px;">✕</button>
+      </div>
+
+      <!-- Résumé du paiement reçu -->
+      <div class="card" style="background:#F8FAFC; border:1px solid #E2E8F0; margin-bottom:12px; padding:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <b id="ha-modal-payer" style="font-size:15px; color:#1E293B;">—</b>
+          <span id="ha-modal-amount" style="font-size:16px; font-weight:800; color:var(--green);">0.00 €</span>
+        </div>
+        <div style="font-size:12px; color:#64748B; margin-top:4px;">
+          Commande : <span id="ha-modal-order" style="font-weight:600; color:#334155;">—</span> ·
+          Date : <span id="ha-modal-date" style="font-weight:600; color:#334155;">—</span>
+        </div>
+        <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #CBD5E1; font-size:12px;">
+          <div>🪪 Licence saisie : <b id="ha-modal-licence" style="color:#0F172A;">—</b></div>
+          <div style="margin-top:2px;">🏆 Compétition saisie : <b id="ha-modal-comp-saisie" style="color:#0F172A;">—</b></div>
+        </div>
+      </div>
+
+      <!-- Sélections de rattachement -->
+      <label class="fld">1. Compétition concernée *</label>
+      <select id="ha-modal-comp-select"></select>
+
+      <label class="fld">2. Compétiteur à créditer (marqué « Payé ») *</label>
+      <select id="ha-modal-adh-select"></select>
+
+      <label class="fld">3. Commentaire persistant (optionnel)</label>
+      <input type="text" id="ha-modal-comment" placeholder="Ex : paiement validé par le coach, fratrie…">
+
+      <div class="btn-row" style="margin-top:12px;">
+        <button class="btn btn-muted" onclick="closeAttachModal()">Annuler</button>
+        <button class="btn btn-primary" id="ha-modal-save-btn" onclick="saveAttachment()">💾 Enregistrer le rattachement</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <nav>
   <button data-page="comps" class="active">🏆<br>Compétitions</button>
   <button data-page="participants">👥<br>Compétiteurs</button>
+  <button data-page="helloasso">🔄<br>HelloAsso</button>
   <button data-page="coaches">🏃<br>Coachs</button>
   <button data-page="balance">💶<br>Balance</button>
 </nav>
@@ -407,6 +527,9 @@ let listeners = [];              // fonctions de désabonnement onSnapshot
 let lastSyncAt = null;
 let editCompId = null;           // id de la compétition en cours d'édition
 let editSourcePage = null;       // page d'où l'édition a été déclenchée
+let helloassoItems = [];         // documents de la collection "helloasso_items"
+let haFilter = "unlinked";       // filtre d'affichage : 'unlinked', 'linked', 'all'
+let currentAttachItemId = null;  // identifiant de l'item en cours de rattachement
 
 /* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
@@ -423,12 +546,117 @@ function fmtDate(iso) {
   const d = new Date(iso);
   return isNaN(d) ? String(iso) : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+const COACH_EMAILS = [
+  "lopez.dav@gmail.com",
+  "stephane.loridant@orange.fr"
+];
+
+// Liste blanche des adresses autorisées en consultation (lecture seule)
+const READONLY_EMAILS = [
+  "muah.did@gmail.com",
+  "clement.dlf78@gmail.com",
+  "delphine0910@gmail.com"
+];
+let userClaims = {};
+
+function isCoachUser() {
+  if (!user || !user.email) return false;
+  const email = user.email.toLowerCase().trim();
+  if (email.endsWith("@alj-escalade.fr")) return true;
+  if (COACH_EMAILS.includes(email)) return true;
+  if (userClaims && (userClaims.coach || userClaims.admin)) return true;
+  return false;
+}
+
+function isReadOnlyUser() {
+  if (!user || !user.email) return false;
+  const email = user.email.toLowerCase().trim();
+  if (READONLY_EMAILS.includes(email)) return true;
+  if (userClaims && userClaims.readonly) return true;
+  return false;
+}
+
+function isAuthorizedUser() {
+  return isCoachUser() || isReadOnlyUser();
+}
+
+function applyRolePermissions() {
+  const isAuthorized = isAuthorizedUser();
+  const isCoach = isCoachUser();
+
+  // Si l'utilisateur n'est pas autorisé sur ce site privé :
+  const nav = $("nav");
+  if (!isAuthorized) {
+    if (nav) nav.style.display = "none";
+    showPage("setup");
+    return;
+  }
+  if (nav) nav.style.display = "flex";
+
+  // 1. Boutons de navigation (masquer HelloAsso, Coachs et Balance pour les comptes non coachs)
+  const navHelloAsso = document.querySelector('nav button[data-page="helloasso"]');
+  const navCoaches = document.querySelector('nav button[data-page="coaches"]');
+  const navBalance = document.querySelector('nav button[data-page="balance"]');
+  if (navHelloAsso) navHelloAsso.style.display = isCoach ? "flex" : "none";
+  if (navCoaches) navCoaches.style.display = isCoach ? "flex" : "none";
+  if (navBalance) navBalance.style.display = isCoach ? "flex" : "none";
+
+  // Si l'utilisateur est actuellement sur une page masquée, le renvoyer vers "comps"
+  const currentActive = document.querySelector(".page.active")?.id?.replace("page-", "");
+  if (!isCoach && ["helloasso", "balance", "coaches"].includes(currentActive)) {
+    showPage("comps");
+  }
+
+  // 2. Formulaire de création de compétition sur page-comps
+  const compFormCard = $("#comp-form-card");
+  if (compFormCard) compFormCard.style.display = isCoach ? "block" : "none";
+
+  // 3. Actions sur page-participants
+  const pEditBtn = $("#p-edit-btn");
+  const pLoadGroup = $("#p-load-group");
+  const pEmailBtn = $("#p-email-btn");
+  const pSearchCard = $("#p-search-card");
+  const pSearchH = $("#p-search-h");
+
+  if (pEditBtn) pEditBtn.style.display = isCoach ? "block" : "none";
+  if (pLoadGroup) pLoadGroup.style.display = isCoach ? "block" : "none";
+  if (pEmailBtn) pEmailBtn.style.display = isCoach ? "block" : "none";
+  if (pSearchCard) pSearchCard.style.display = isCoach ? "block" : "none";
+  if (pSearchH) pSearchH.style.display = isCoach ? "block" : "none";
+
+  // 4. Badge de rôle dans la page de connexion
+  const roleBadge = $("#setup-role-badge");
+  if (roleBadge) {
+    if (isCoach) {
+      roleBadge.textContent = "🏆 Rôle : Coach / Administrateur (Accès complet)";
+      roleBadge.style.background = "#DCFCE7";
+      roleBadge.style.color = "#166534";
+    } else {
+      roleBadge.textContent = "👁 Mode Consultation (Lecture seule autorisée)";
+      roleBadge.style.background = "#EFF6FF";
+      roleBadge.style.color = "#1E40AF";
+    }
+  }
+
+  if (user) {
+    const roleTxt = isCoach ? "👤 Coach" : "👁 Consultation";
+    setSyncInfo(`${roleTxt} (${user.email || ""}) — temps réel`);
+  }
+}
+
 function showPage(name) {
+  if (!isCoachUser() && ["helloasso", "balance", "coaches"].includes(name)) {
+    toast("🔒 Accès réservé aux entraîneurs et gestionnaires.");
+    name = "comps";
+  }
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.getElementById("page-" + name).classList.add("active");
+  const target = document.getElementById("page-" + name);
+  if (target) target.classList.add("active");
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === name));
   if (name === "balance") {
     renderBalancePage();
+  } else if (name === "helloasso") {
+    renderHelloAssoPage();
   }
 }
 function setSyncInfo(msg) { $("#sync-info").textContent = msg; }
@@ -480,20 +708,26 @@ function showAuthError(e) {
   toast("❌ " + msg, 9000);
 }
 
-auth.onAuthStateChanged(u => {
+auth.onAuthStateChanged(async u => {
   user = u;
+  userClaims = {};
   if (u) {
+    try {
+      const tokenRes = await u.getIdTokenResult();
+      userClaims = (tokenRes && tokenRes.claims) || {};
+    } catch (e) {}
     $("#setup-email").textContent = u.email || "(compte sans e-mail)";
     $("#setup-not-logged").style.display = "none";
     $("#setup-logged").style.display = "block";
-    setSyncInfo("👤 " + (u.email || "connecté") + " — chargement Firestore…");
+    applyRolePermissions();
     startListeners();
   } else {
     stopListeners();
     $("#setup-not-logged").style.display = "block";
     $("#setup-logged").style.display = "none";
     snapshotsReady = 0;
-    comps = []; coaches = []; adherents = [];
+    comps = []; coaches = []; adherents = []; helloassoItems = [];
+    applyRolePermissions();
     setSyncInfo("Non connecté");
     showPage("setup");
   }
@@ -512,6 +746,12 @@ function startListeners() {
   listeners.push(fsdb.collection("adherents").onSnapshot(
     snap => { adherents = snap.docs.map(d => d.data()); onSnapshotArrived("adherents"); },
     err => onSnapshotError("adherents", err)));
+
+  if (isCoachUser()) {
+    listeners.push(fsdb.collection("helloasso_items").onSnapshot(
+      snap => { helloassoItems = snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id })); onSnapshotArrived("helloasso_items"); },
+      err => onSnapshotError("helloasso_items", err)));
+  }
 }
 function stopListeners() {
   listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
@@ -533,7 +773,8 @@ function normalizeCompDocs(docs) {
 function onSnapshotArrived(name) {
   snapshotsReady++;
   lastSyncAt = new Date();
-  if (snapshotsReady >= 3) {
+  const needed = isCoachUser() ? 4 : 3;
+  if (snapshotsReady >= needed) {
     setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate(lastSyncAt.toISOString()));
     renderAll();
     if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
@@ -545,13 +786,21 @@ function onSnapshotError(name, err) {
   console.error("Firestore " + name + " :", err);
   snapshotsReady++; // une collection en échec ne bloque pas le rendu des autres
   if (err.code === "permission-denied") {
-    setSyncInfo("🔒 Accès refusé par les règles Firestore (" + name + ")");
-    toast("🔒 Lecture « " + name + " » refusée : votre compte doit être coach ou admin.", 9000);
+    setSyncInfo("🔒 Accès restreint (" + name + ")");
   } else {
     setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
     toast("❌ Firestore : " + (err.message || err), 9000);
   }
-  if (snapshotsReady >= 3) {
+  const needed = isCoachUser() ? 4 : 3;
+  if (snapshotsReady >= needed) {
+    renderAll();
+    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
+  }
+}
+    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
+    toast("❌ Firestore : " + (err.message || err), 9000);
+  }
+  if (snapshotsReady >= 4) {
     renderAll();
     if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
   }
@@ -676,7 +925,7 @@ function renderComps() {
       </div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants('${esc(String(c.id))}')">👁 Voir détail — compétiteurs</button>
-        <button class="btn btn-edit btn-mini" onclick="event.stopPropagation(); openEdit('${esc(String(c.id))}')">✏️ Modifier</button>
+        ${isCoachUser() ? `<button class="btn btn-edit btn-mini" onclick="event.stopPropagation(); openEdit('${esc(String(c.id))}')">✏️ Modifier</button>` : ""}
       </div>
     </div>`;
   }).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
@@ -688,6 +937,10 @@ function renderComps() {
   renderParticipants();
 }
 function openEdit(id) {
+  if (!isCoachUser()) {
+    toast("🔒 Modification non autorisée en mode consultation.");
+    return;
+  }
   if (!id) {
     id = currentCompId();
   }
@@ -739,6 +992,10 @@ function readCoachSelection() {
     .filter(v => v !== null);
 }
 async function createCompetition() {
+  if (!isCoachUser()) {
+    toast("🔒 Création non autorisée en mode consultation.");
+    return;
+  }
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
   const coachIds = readCoachSelection();
@@ -775,6 +1032,10 @@ async function createCompetition() {
   }
 }
 async function updateCompetition() {
+  if (!isCoachUser()) {
+    toast("🔒 Modification non autorisée en mode consultation.");
+    return;
+  }
   if (!editCompId) return;
   const c = findComp(editCompId);
   if (!c) return;
@@ -808,6 +1069,10 @@ async function updateCompetition() {
   }
 }
 async function deleteCompetition() {
+  if (!isCoachUser()) {
+    toast("🔒 Suppression non autorisée en mode consultation.");
+    return;
+  }
   if (!editCompId) return;
   if (!confirm("Supprimer cette compétition et sa liste de participants ?")) return;
   const c = findComp(editCompId);
@@ -845,6 +1110,7 @@ function competitionAdherents(compId) {
   });
 }
 function renderParticipants() {
+  const isCoach = isCoachUser();
   const compId = currentCompId();
   const wrap = $("#p-list"), count = $("#p-count");
   if (!compId) { wrap.innerHTML = `<div class="empty">Créez d'abord une compétition.</div>`; count.textContent = "—"; $("#p-search-results").innerHTML = ""; return; }
@@ -867,23 +1133,30 @@ function renderParticipants() {
     ${members.map(p => `
     <div class="card">
       <div class="row-flex">
-        <label class="switch" title="Participe : Oui / Non">
-          <input type="checkbox" ${p.selectionne ? "checked" : ""} onchange="toggleSelection('${esc(String(p.competition_id))}',${Number(p.adherent_id)},this.checked)">
-          <span class="slider"></span>
+        <label class="switch" title="${isCoach ? 'Participe : Oui / Non' : 'Participe (Lecture seule)'}">
+          <input type="checkbox" ${p.selectionne ? "checked" : ""} ${isCoach ? `onchange="toggleSelection('${esc(String(p.competition_id))}',${Number(p.adherent_id)},this.checked)"` : "disabled"}>
+          <span class="slider" style="${isCoach ? '' : 'cursor:not-allowed; opacity:0.8;'}"></span>
         </label>
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(p.nom)} ${esc(p.prenom)}</div>
-          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}${p.note_paiement ? ` · 📝 ${esc(p.note_paiement)}` : ""}</div>
-          ${p.phone ? `<div style="margin-top:4px"><a href="tel:${esc(p.phone)}" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; background:#EFF6FF; color:#2563EB; border:1px solid #BFDBFE; border-radius:6px; padding:2px 8px;">📞 ${esc(p.phone)}</a></div>` : ""}
+          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso && isCoach ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso && isCoach ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}${p.note_paiement && isCoach ? ` · 📝 ${esc(p.note_paiement)}` : ""}</div>
+          ${p.phone && isCoach ? `<div style="margin-top:4px"><a href="tel:${esc(p.phone)}" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; background:#EFF6FF; color:#2563EB; border:1px solid #BFDBFE; border-radius:6px; padding:2px 8px;">📞 ${esc(p.phone)}</a></div>` : ""}
         </div>
         <span class="badge" style="background:${PAIEMENT_BADGE[p.statut_paiement] || "#94A3B8"}"
-              title="Statut de paiement (modifié par la synchro HelloAsso dans l'application de bureau)">${PAIEMENT_LABELS[p.statut_paiement] || esc(p.statut_paiement)}</span>
+              title="Statut de paiement">${PAIEMENT_LABELS[p.statut_paiement] || esc(p.statut_paiement)}</span>
       </div>
     </div>`).join("")}`).join("")
     || `<div class="empty">Aucun compétiteur : utilisez « Charger le groupe Compétition » ou la recherche étendue.</div>`;
-  renderSearchResults();
+  if (isCoach) {
+    renderSearchResults();
+  }
 }
 async function toggleSelection(compId, adherentId, checked) {
+  if (!isCoachUser()) {
+    toast("🔒 Modification non autorisée en mode consultation.");
+    renderParticipants();
+    return;
+  }
   const c = findComp(compId);
   if (!c) return;
   const parts = (c.participants || []).slice();
@@ -965,6 +1238,10 @@ function listAdherents() {
     String(a.prenom || "").localeCompare(String(b.prenom || ""), "fr"));
 }
 async function loadCompetitionGroup() {
+  if (!isCoachUser()) {
+    toast("🔒 Action réservée aux entraîneurs.");
+    return;
+  }
   const compId = currentCompId();
   if (!compId) return;
   const c = findComp(compId);
@@ -1014,6 +1291,10 @@ function renderSearchResults() {
     </div>`).join("") || `<div class="m-sub">Aucun adhérent trouvé (ou déjà ajouté).</div>`;
 }
 async function addAdherent(compId, adherentId) {
+  if (!isCoachUser()) {
+    toast("🔒 Action réservée aux entraîneurs.");
+    return;
+  }
   const c = findComp(compId);
   if (!c) return;
   const parts = (c.participants || []).slice();
@@ -1170,8 +1451,320 @@ async function deleteCoach() {
 function renderAll() {
   renderComps();
   renderCoachesPage();
+  renderHelloAssoPage();
   if ($("#page-balance").classList.contains("active")) {
     renderBalancePage();
+  }
+}
+
+/* ===================== Rendu & Gestion : HelloAsso & Rattachements ===================== */
+function isItemLinked(item) {
+  return item && item.competition_id != null && item.adherent_id != null;
+}
+
+function setHaFilter(filterType) {
+  haFilter = filterType;
+  const chipUnlinked = $("#ha-chip-unlinked");
+  const chipLinked = $("#ha-chip-linked");
+  const chipAll = $("#ha-chip-all");
+  if (chipUnlinked) chipUnlinked.classList.toggle("active", filterType === "unlinked");
+  if (chipLinked) chipLinked.classList.toggle("active", filterType === "linked");
+  if (chipAll) chipAll.classList.toggle("active", filterType === "all");
+  renderHelloAssoPage();
+}
+
+function renderHelloAssoPage() {
+  const total = helloassoItems.length;
+  const linked = helloassoItems.filter(isItemLinked).length;
+  const unlinked = total - linked;
+
+  if ($("#ha-kpi-total")) $("#ha-kpi-total").textContent = total;
+  if ($("#ha-kpi-linked")) $("#ha-kpi-linked").textContent = linked;
+  if ($("#ha-kpi-unlinked")) $("#ha-kpi-unlinked").textContent = unlinked;
+
+  if ($("#ha-count-chip-unlinked")) $("#ha-count-chip-unlinked").textContent = unlinked;
+  if ($("#ha-count-chip-linked")) $("#ha-count-chip-linked").textContent = linked;
+  if ($("#ha-count-chip-all")) $("#ha-count-chip-all").textContent = total;
+
+  const query = normKey($("#ha-search") ? $("#ha-search").value : "");
+  let filtered = helloassoItems.slice();
+
+  if (haFilter === "unlinked") {
+    filtered = filtered.filter(it => !isItemLinked(it));
+  } else if (haFilter === "linked") {
+    filtered = filtered.filter(isItemLinked);
+  }
+
+  if (query) {
+    filtered = filtered.filter(it => {
+      const payer = normKey(`${it.payer_nom || ""} ${it.payer_prenom || ""}`);
+      const order = normKey(it.order_id || "");
+      const lic = normKey(it.licence_saisie || "");
+      const compSaisie = normKey(it.competition_saisie || "");
+      const comp = it.competition_id ? findComp(it.competition_id) : null;
+      const compNom = comp ? normKey(comp.nom) : "";
+      const adh = it.adherent_id ? findAdherent(it.adherent_id) : null;
+      const adhNom = adh ? normKey(`${adh.nom || ""} ${adh.prenom || ""}`) : "";
+      return payer.includes(query) || order.includes(query) || lic.includes(query) ||
+             compSaisie.includes(query) || compNom.includes(query) || adhNom.includes(query);
+    });
+  }
+
+  filtered.sort((a, b) => {
+    const aLinked = isItemLinked(a);
+    const bLinked = isItemLinked(b);
+    if (!aLinked && bLinked) return -1;
+    if (aLinked && !bLinked) return 1;
+    return String(b.date_item || "").localeCompare(String(a.date_item || ""));
+  });
+
+  const countLine = $("#ha-list-count");
+  if (countLine) countLine.textContent = `${filtered.length} paiement${filtered.length > 1 ? "s" : ""}`;
+
+  const container = $("#ha-items-list");
+  if (!container) return;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="empty">Aucun paiement HelloAsso ${haFilter === "unlinked" ? "en attente de rattachement" : "trouvé"}.</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(it => {
+    const linked = isItemLinked(it);
+    const comp = it.competition_id ? findComp(it.competition_id) : null;
+    const adh = it.adherent_id ? findAdherent(it.adherent_id) : null;
+    const compText = comp ? `${esc(comp.nom)}` : "— non rattachée —";
+    const adhText = adh ? `${esc(adh.nom)} ${esc(adh.prenom)}` : "— non rattaché —";
+    const dateTxt = it.date_item ? fmtDate(it.date_item) : "—";
+    const amountTxt = Number(it.montant || 0).toFixed(2) + " €";
+    const itemIdStr = esc(String(it.id_item || it.docId));
+
+    return `
+    <div class="card" style="border-left: 4px solid ${linked ? 'var(--green)' : 'var(--red)'}; margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div class="m-name" style="font-size:15px;">${esc(it.payer_nom)} ${esc(it.payer_prenom)}</div>
+          <div class="m-sub" style="margin-top:2px;">
+            Commande <b>#${esc(it.order_id || "—")}</b> · 📅 ${dateTxt}
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:16px; font-weight:800; color:${linked ? 'var(--green)' : 'var(--red)'};">${amountTxt}</div>
+          <span class="badge" style="background:${linked ? 'var(--green)' : '#F59E0B'}; font-size:10px; margin-top:4px;">
+            ${linked ? '✅ Rattaché' : '⚠️ En attente'}
+          </span>
+        </div>
+      </div>
+
+      <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; padding:8px; margin-top:8px; font-size:12px;">
+        <div>🪪 Licence saisie : <b style="color:#0F172A;">${esc(it.licence_saisie || "— non renseignée —")}</b></div>
+        <div style="margin-top:3px;">🏆 Compétition saisie : <b style="color:#0F172A;">${esc(it.competition_saisie || "— non renseignée —")}</b></div>
+        ${it.commentaire ? `<div style="margin-top:3px; color:#475569;">💬 <i>${esc(it.commentaire)}</i></div>` : ""}
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px;">
+        <div style="font-size:12px; color:#334155; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;">
+          ${linked
+            ? `<b>Épreuve :</b> ${compText}<br><b>Athlète :</b> ${adhText} <span style="color:#64748B; font-size:10px;">(${esc(it.source || 'auto')})</span>`
+            : `<span style="color:var(--red); font-weight:600;">⚠️ À attribuer à une compétition et un athlète</span>`
+          }
+        </div>
+        <button class="btn btn-mini ${linked ? 'btn-edit' : 'btn-primary'}" onclick="openAttachModal('${itemIdStr}')" style="margin-left:8px; white-space:nowrap;">
+          🔗 ${linked ? 'Modifier' : 'Rattacher'}
+        </button>
+      </div>
+    </div>
+    `;
+  }).join("");
+}
+
+function attachFirstUnlinked() {
+  const unlinked = helloassoItems.filter(it => !isItemLinked(it));
+  if (unlinked.length === 0) {
+    toast("🎉 Aucun paiement en attente de rattachement !");
+    return;
+  }
+  openAttachModal(unlinked[0].id_item || unlinked[0].docId);
+}
+
+function openAttachModal(itemId) {
+  if (!isCoachUser()) {
+    toast("🔒 Le rattachement HelloAsso est réservé aux coachs.");
+    return;
+  }
+  currentAttachItemId = itemId;
+  const it = helloassoItems.find(x => String(x.id_item) === String(itemId) || String(x.docId) === String(itemId));
+  if (!it) { toast("⚠️ Article introuvable."); return; }
+
+  $("#ha-modal-payer").textContent = `${it.payer_nom || ""} ${it.payer_prenom || ""}`.trim() || "—";
+  $("#ha-modal-amount").textContent = `${Number(it.montant || 0).toFixed(2)} €`;
+  $("#ha-modal-order").textContent = it.order_id || "—";
+  $("#ha-modal-date").textContent = it.date_item ? fmtDate(it.date_item) : "—";
+  $("#ha-modal-licence").textContent = it.licence_saisie || "— non renseignée —";
+  $("#ha-modal-comp-saisie").textContent = it.competition_saisie || "— non renseignée —";
+  $("#ha-modal-comment").value = it.commentaire || "";
+
+  // 1. Liste des compétitions
+  const compSel = $("#ha-modal-comp-select");
+  const compList = sortedCompetitions();
+  compSel.innerHTML = '<option value="">— Ignorer (ne pas rattacher) —</option>' +
+    compList.map(c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`).join("");
+
+  if (it.competition_id && compList.some(c => String(c.id) === String(it.competition_id))) {
+    compSel.value = String(it.competition_id);
+  } else {
+    const cs = normKey(it.competition_saisie || "");
+    if (cs) {
+      const matchComp = compList.find(c => {
+        const idFfme = normKey(c.id_ffme || "");
+        const nom = normKey(c.nom || "");
+        return (idFfme && cs.includes(idFfme)) || (nom && cs.includes(nom));
+      });
+      if (matchComp) compSel.value = String(matchComp.id);
+    }
+  }
+
+  // 2. Liste des adhérents
+  const adhSel = $("#ha-modal-adh-select");
+  const adhSorted = adherents.slice().sort((a, b) =>
+    String(a.nom || "").localeCompare(String(b.nom || ""), "fr") ||
+    String(a.prenom || "").localeCompare(String(b.prenom || ""), "fr")
+  );
+  adhSel.innerHTML = '<option value="">— Aucun athlète sélectionné —</option>' +
+    adhSorted.map(a => `<option value="${a.id}">${esc(a.nom)} ${esc(a.prenom)} (${esc(a.licence_ffme || "sans licence")})</option>`).join("");
+
+  if (it.adherent_id && adhSorted.some(a => Number(a.id) === Number(it.adherent_id))) {
+    adhSel.value = String(it.adherent_id);
+  } else {
+    const licRaw = String(it.licence_saisie || "").replace(/\D/g, "");
+    let matchAdh = null;
+    if (licRaw) {
+      matchAdh = adhSorted.find(a => String(a.licence_ffme || "").replace(/\D/g, "") === licRaw);
+    }
+    if (!matchAdh) {
+      const payerNorm = normKey(`${it.payer_nom || ""} ${it.payer_prenom || ""}`);
+      matchAdh = adhSorted.find(a => {
+        const aNom = normKey(a.nom || "");
+        const aPre = normKey(a.prenom || "");
+        return (aNom && payerNorm.includes(aNom)) && (!aPre || payerNorm.includes(aPre));
+      });
+    }
+    if (matchAdh) adhSel.value = String(matchAdh.id);
+  }
+
+  $("#ha-attach-modal").style.display = "flex";
+}
+
+function closeAttachModal() {
+  $("#ha-attach-modal").style.display = "none";
+  currentAttachItemId = null;
+}
+
+async function saveAttachment() {
+  if (!currentAttachItemId) return;
+  const it = helloassoItems.find(x => String(x.id_item) === String(currentAttachItemId) || String(x.docId) === String(currentAttachItemId));
+  if (!it) return;
+
+  const compIdVal = $("#ha-modal-comp-select").value;
+  const adhIdVal = $("#ha-modal-adh-select").value;
+  const note = $("#ha-modal-comment").value.trim();
+
+  const compId = compIdVal ? Number(compIdVal) : null;
+  const adhId = adhIdVal ? Number(adhIdVal) : null;
+  const isLinked = compId !== null && adhId !== null;
+
+  const btn = $("#ha-modal-save-btn");
+  btn.disabled = true;
+  btn.textContent = "💾 Enregistrement…";
+
+  try {
+    const canonId = String(it.id_item || it.docId);
+    const nowIso = new Date().toISOString();
+
+    // 1. Mettre à jour helloasso_items
+    await fsdb.collection("helloasso_items").doc(canonId).update({
+      competition_id: compId,
+      adherent_id: adhId,
+      source: isLinked ? "manuel" : null,
+      commentaire: note,
+      link_updated_at: nowIso,
+      updated_at: nowIso
+    });
+
+    // 2. Si rattaché à une compétition et un adhérent, reporter sur la compétition
+    if (isLinked) {
+      const c = findComp(compId);
+      if (c) {
+        const parts = (c.participants || []).slice();
+        const pIdx = parts.findIndex(p => Number(p.adherent_id) === adhId);
+        const itemAmount = parseFloat(it.montant || 0);
+        const orderRef = String(it.order_id || "").trim();
+
+        if (pIdx >= 0) {
+          const prev = parts[pIdx];
+          const orders = (prev.commande_helloasso ? prev.commande_helloasso.split(", ") : []).map(s => s.trim()).filter(Boolean);
+          if (orderRef && !orders.includes(orderRef)) orders.push(orderRef);
+          const currentMontant = Number(prev.montant_paye || 0);
+          const newMontant = currentMontant > 0 ? (currentMontant + itemAmount) : itemAmount;
+
+          parts[pIdx] = Object.assign({}, prev, {
+            selectionne: true,
+            statut_paiement: "paye",
+            montant_paye: Math.round(newMontant * 100) / 100,
+            commande_helloasso: orders.join(", "),
+            updated_at: nowIso
+          });
+        } else {
+          const newP = newParticipant(adhId, true, "paye");
+          newP.montant_paye = Math.round(itemAmount * 100) / 100;
+          newP.commande_helloasso = orderRef;
+          newP.updated_at = nowIso;
+          parts.push(newP);
+        }
+
+        await updateCompetitionDoc(c, {
+          participants: parts,
+          nb_participants: parts.length,
+          nb_selectionnes: parts.filter(p => p.selectionne).length,
+          nb_payes: parts.filter(p => p.statut_paiement === "paye").length,
+          total_collecte: Math.round(parts.reduce((acc, p) => acc + Number(p.montant_paye || 0), 0) * 100) / 100
+        });
+      }
+    }
+
+    toast(isLinked ? "✅ Paiement HelloAsso rattaché avec succès !" : "ℹ️ Paiement marqué comme ignoré.");
+    closeAttachModal();
+  } catch (err) {
+    console.error("Erreur enregistrement rattachement :", err);
+    toast("❌ " + (err.message || err), 9000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "💾 Enregistrer le rattachement";
+  }
+}
+
+async function triggerHelloAssoSync() {
+  const btn = $("#ha-btn-sync");
+  btn.disabled = true;
+  btn.textContent = "🔄 Synchro…";
+  try {
+    const res = await fetch("/api/helloasso/sync", { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "success") {
+        const stats = data.stats || {};
+        toast(`✅ Synchro terminée : ${stats.nb_items || 0} article(s), ${stats.nb_auto || 0} auto, ${stats.nb_unlinked || 0} en attente.`);
+      } else {
+        toast("❌ " + (data.message || "Erreur lors de la synchronisation."));
+      }
+    } else {
+      toast("❌ Impossible de contacter l'API (HTTP " + res.status + ").");
+    }
+  } catch (e) {
+    toast("❌ Erreur réseau : " + (e.message || e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔄 Synchroniser";
   }
 }
 
@@ -1327,6 +1920,10 @@ async function loadEmailTemplates() {
 }
 
 function openEmailModal() {
+  if (!isCoachUser()) {
+    toast("🔒 L'envoi d'e-mails est réservé aux coachs.");
+    return;
+  }
   const compId = currentCompId();
   if (!compId) { toast("⚠️ Veuillez d'abord choisir une compétition."); return; }
 
@@ -1339,6 +1936,12 @@ function openEmailModal() {
   $("#em-count-all").textContent = rows.length;
 
   loadEmailTemplates();
+
+  fetch("/api/email-status").then(r => r.json()).then(st => {
+    if (st && st.configured === false) {
+      toast("⚠️ Envoi d'e-mails non configuré sur Cloud Run (identifiants Gmail manquants).", 8000);
+    }
+  }).catch(() => {});
 
   const radios = document.getElementsByName("dest-filter");
   for (let r of radios) { if (r.value === "selected") r.checked = true; }
@@ -1482,7 +2085,8 @@ async function sendCampaignEmails() {
         toast(`✅ ${data.sent_count} e-mail(s) envoyé(s) avec succès via Gmail !`);
         closeEmailModal();
       } else {
-        toast("❌ Erreur : " + (data.message || "Échec d'envoi."));
+        const detailErr = data.message || (data.details && data.details[0] && data.details[0].error) || "Échec d'envoi.";
+        toast("❌ Erreur : " + detailErr, 9000);
       }
     } else {
       throw new Error(`Serveur indisponible (HTTP ${res.status})`);

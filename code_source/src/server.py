@@ -976,6 +976,28 @@ def preview_email(data: Dict[str, Any] = Body(...)):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/email-status")
+def get_email_status():
+    """Vérifie l'état de la configuration d'envoi d'e-mails (sans exposer de secrets)."""
+    gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
+    gmail_client_id = SecretStore.get_secret("GMAIL_CLIENT_ID")
+    gmail_refresh = SecretStore.get_secret("GMAIL_REFRESH_TOKEN")
+
+    smtp_host = SecretStore.get_secret("SMTP_HOST")
+    smtp_user = SecretStore.get_secret("SMTP_USER")
+    smtp_password = SecretStore.get_secret("SMTP_PASSWORD")
+
+    use_oauth2 = bool(gmail_user and gmail_client_id and gmail_refresh)
+    use_smtp = bool(smtp_host and smtp_user and smtp_password)
+
+    return {
+        "status": "success",
+        "configured": use_oauth2 or use_smtp,
+        "mode": "gmail_oauth2" if use_oauth2 else ("smtp" if use_smtp else "none"),
+        "sender": gmail_user if use_oauth2 else (smtp_user if use_smtp else ""),
+    }
+
+
 @app.post("/api/send-email")
 def send_email_api(data: Dict[str, Any] = Body(...)):
     """Déclenche l'envoi d'e-mails sécurisé via Gmail API ou SMTP avec injection de variables."""
@@ -992,6 +1014,48 @@ def send_email_api(data: Dict[str, Any] = Body(...)):
             add_signature=data.get("add_signature", True)
         )
         return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/helloasso/sync")
+def sync_helloasso_api():
+    """Synchronise la campagne annuelle HelloAsso vers Firestore."""
+    try:
+        from infrastructure.competition_firestore_repository import CompetitionFirestoreRepository as Repo
+        from domain import competition_matching
+
+        slug = Repo.get_app_setting("HELLOASSO_ANNUAL_CAMPAIGN")
+        if not (slug or "").strip():
+            return {"status": "error", "message": "Aucune campagne annuelle configurée. Veuillez configurer le slug de la campagne."}
+
+        ident = competition_matching.parse_campaign_identifier(slug)
+        from helloasso_api import get_items
+        items = get_items(ident["form_type"], ident["slug"]) or []
+        summarized = competition_matching.summarize_items(items)
+
+        Repo.sync_helloasso_mirror(summarized, items, ident["slug"])
+
+        competitions = [{"id": c.id, "id_ffme": c.id_ffme, "nom": c.nom}
+                        for c in Repo.list_competitions()]
+        adherents = Repo.list_adherents()
+        existing = Repo.list_helloasso_links()
+        links = competition_matching.auto_link_items(summarized, competitions, adherents, existing)
+        Repo.replace_auto_links(links)
+
+        applied = Repo.apply_links_to_participants()
+        unlinked = Repo.list_unlinked_items()
+
+        return {
+            "status": "success",
+            "stats": {
+                "nb_items": len(items),
+                "nb_auto": len([l for l in (links or {}).values() if l]),
+                "nb_manual": len([e for e in existing.values() if e.get("source") == "manuel"]),
+                "nb_applied": applied,
+                "nb_unlinked": len(unlinked),
+            }
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
