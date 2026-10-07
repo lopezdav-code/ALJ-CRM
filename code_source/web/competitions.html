@@ -66,6 +66,7 @@
   .btn-green { background: var(--green); color: #fff; }
   .btn-muted { background: #E2E8F0; color: #475569; }
   .btn-danger { background: #FEE2E2; color: var(--red); }
+  .btn-edit { background: #EFF6FF; color: var(--blue); }
   .btn-mini { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
   .btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .btn-row .btn { flex: 1; }
@@ -170,7 +171,7 @@
   <!-- ================= Liste des compétitions ================= -->
   <section class="page" id="page-comps">
     <div class="card">
-      <div class="m-name">➕ Nouvelle compétition</div>
+      <div class="m-name" id="f-form-title">➕ Nouvelle compétition</div>
       <label class="fld">Nom de l'épreuve *</label>
       <input type="text" id="f-nom" placeholder="Ex : Championnat départemental U13">
       <div class="grid3" style="margin-top:2px">
@@ -221,6 +222,7 @@
       <div class="btn-row" id="f-btns" style="display:none">
         <button class="btn btn-primary" id="f-update">💾 Mettre à jour</button>
         <button class="btn btn-danger" id="f-delete">🗑 Supprimer</button>
+        <button class="btn btn-edit" id="f-cancel">✖ Annuler</button>
       </div>
       <div class="btn-row" id="f-btns-new">
         <button class="btn btn-primary" id="f-create">➕ Créer la compétition</button>
@@ -238,6 +240,7 @@
       <label class="fld">Compétition</label>
       <select id="p-comp-select"></select>
       <div class="btn-row">
+        <button class="btn btn-edit btn-mini" id="p-edit-btn" onclick="openEdit(currentCompId())" style="flex:1">✏️ Modifier l'épreuve</button>
         <button class="btn btn-muted btn-mini" id="p-load-group" style="flex:2">🧗 Charger le groupe « Compétition »</button>
         <button class="btn btn-primary btn-mini" id="p-email-btn" onclick="openEmailModal()" style="flex:1.5">✉️ Envoyer un e-mail</button>
       </div>
@@ -611,7 +614,7 @@ function renderComps() {
   $("#comps-list").innerHTML = list.map(c => {
     const coachesText = (c.coaches && c.coaches.length > 0) ? `🏃 Coachs : ${c.coaches.join(", ")}` : "🏃 Aucun coach";
     return `
-    <div class="card" onclick="openEdit('${esc(String(c.id))}')">
+    <div class="card" onclick="openParticipants('${esc(String(c.id))}')" style="cursor:pointer" title="Voir les compétiteurs">
       <div class="row-flex">
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(c.nom)}</div>
@@ -622,6 +625,7 @@ function renderComps() {
       </div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants('${esc(String(c.id))}')">👁 Voir détail — compétiteurs</button>
+        <button class="btn btn-edit btn-mini" onclick="event.stopPropagation(); openEdit('${esc(String(c.id))}')">✏️ Modifier</button>
       </div>
     </div>`;
   }).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
@@ -636,6 +640,7 @@ function openEdit(id) {
   const c = findComp(id);
   if (!c) return;
   editCompId = id;
+  $("#f-form-title").textContent = `✏️ Modifier : ${c.nom || ""}`;
   $("#f-nom").value = c.nom || "";
   $("#f-idffme").value = c.id_ffme || "";
   $("#f-date").value = c.date_competition || "";
@@ -652,6 +657,7 @@ function openEdit(id) {
 }
 function resetCompForm() {
   editCompId = null;
+  $("#f-form-title").textContent = "➕ Nouvelle compétition";
   $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = "";
   $("#f-prix").value = ""; $("#f-statut").value = "en_preparation";
   populateCoachDropdowns();
@@ -1341,6 +1347,7 @@ function wireEvents() {
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);
+  $("#f-cancel").addEventListener("click", () => { resetCompForm(); window.scrollTo({ top: 0, behavior: "smooth" }); });
   
   $("#f-coach-create").addEventListener("click", createCoach);
   $("#f-coach-update").addEventListener("click", updateCoach);
