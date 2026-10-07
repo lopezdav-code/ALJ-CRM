@@ -86,6 +86,16 @@ class TestMobilePWA(unittest.TestCase):
         self.assertIn('id="setup-unauthorized"', html)
         self.assertIn('id="comp-form-card"', html)
 
+        # Vérifications Filtres et Récapitulatif Compétiteurs
+        self.assertIn('id="p-kpi-participe"', html)
+        self.assertIn('id="p-kpi-attente"', html)
+        self.assertIn('id="p-kpi-paye"', html)
+        self.assertIn('id="p-chip-selected"', html)
+        self.assertIn('id="p-chip-unpaid"', html)
+        self.assertIn('setParticipantFilter', html)
+        self.assertIn('participantFilter', html)
+        self.assertIn('en attente ·', html)
+
 
 if __name__ == "__main__":
     unittest.main()

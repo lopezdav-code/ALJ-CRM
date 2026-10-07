@@ -265,6 +265,35 @@
       </div>
     </div>
 
+    <!-- Récapitulatif : Récap en 3 blocs -->
+    <div class="card" style="display:flex; gap:8px; justify-content:space-between; text-align:center; padding:10px 12px; margin-bottom:10px;">
+      <div style="flex:1; border-right:1px solid var(--line);">
+        <div style="font-size:19px; font-weight:800; color:var(--blue);" id="p-kpi-participe">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Participe</div>
+      </div>
+      <div style="flex:1; border-right:1px solid var(--line);">
+        <div style="font-size:19px; font-weight:800; color:var(--amber);" id="p-kpi-attente">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Paiement en attente</div>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:19px; font-weight:800; color:var(--green);" id="p-kpi-paye">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Paiement validé</div>
+      </div>
+    </div>
+
+    <!-- Filtres : Tous / Participe : Oui / Paiement en attente -->
+    <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+      <label class="filter-chip active" id="p-chip-all" onclick="setParticipantFilter('all')">
+        📋 Tous (<span id="p-count-chip-all">0</span>)
+      </label>
+      <label class="filter-chip" id="p-chip-selected" onclick="setParticipantFilter('selected')">
+        ✅ Participe : Oui (<span id="p-count-chip-selected">0</span>)
+      </label>
+      <label class="filter-chip" id="p-chip-unpaid" onclick="setParticipantFilter('unpaid')">
+        ⏳ Paiement en attente (<span id="p-count-chip-unpaid">0</span>)
+      </label>
+    </div>
+
     <div class="section-h">👥 Compétiteurs de l'épreuve</div>
     <div class="count-line" id="p-count">—</div>
     <div id="p-list"></div>
@@ -530,6 +559,7 @@ let editSourcePage = null;       // page d'où l'édition a été déclenchée
 let helloassoItems = [];         // documents de la collection "helloasso_items"
 let haFilter = "unlinked";       // filtre d'affichage : 'unlinked', 'linked', 'all'
 let currentAttachItemId = null;  // identifiant de l'item en cours de rattachement
+let participantFilter = "all";   // filtre des participants : 'all', 'selected', 'unpaid'
 
 /* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
@@ -905,12 +935,20 @@ function renderComps() {
   $("#comps-count").textContent = `${list.length} compétition${list.length > 1 ? "s" : ""}`;
   $("#comps-list").innerHTML = list.map(c => {
     const coachesText = (c.coaches && c.coaches.length > 0) ? `🏃 Coachs : ${c.coaches.join(", ")}` : "🏃 Aucun coach";
+    const parts = c.participants || [];
+    const nbParticipe = parts.filter(p => p.selectionne).length;
+    const nbEnAttente = parts.filter(p => p.statut_paiement === "en_attente").length;
+    const nbPaye = parts.filter(p => p.statut_paiement === "paye").length;
+
     return `
     <div class="card" onclick="openParticipants('${esc(String(c.id))}')" style="cursor:pointer" title="Voir les compétiteurs">
       <div class="row-flex">
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(c.nom)}</div>
           <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(c.date_competition || "sans date")} · 💶 ${Number(c.prix || 0).toFixed(2)} €</div>
+          <div class="m-sub" style="margin-top:2px; color: #1E3A8A; font-weight: 600;">
+            (${nbParticipe} participant${nbParticipe > 1 ? "s" : ""} · ${nbEnAttente} en attente · ${nbPaye} payé${nbPaye > 1 ? "s" : ""})
+          </div>
           <div class="m-sub" style="margin-top:2px; color: #475569;">${esc(coachesText)}</div>
         </div>
         <span class="badge" style="display: none; background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
@@ -1101,14 +1139,60 @@ function competitionAdherents(compId) {
     });
   });
 }
+function setParticipantFilter(filterType) {
+  participantFilter = filterType;
+  const chipAll = $("#p-chip-all");
+  const chipSelected = $("#p-chip-selected");
+  const chipUnpaid = $("#p-chip-unpaid");
+  if (chipAll) chipAll.classList.toggle("active", filterType === "all");
+  if (chipSelected) chipSelected.classList.toggle("active", filterType === "selected");
+  if (chipUnpaid) chipUnpaid.classList.toggle("active", filterType === "unpaid");
+  renderParticipants();
+}
+
 function renderParticipants() {
   const isCoach = isCoachUser();
   const compId = currentCompId();
   const wrap = $("#p-list"), count = $("#p-count");
-  if (!compId) { wrap.innerHTML = `<div class="empty">Créez d'abord une compétition.</div>`; count.textContent = "—"; $("#p-search-results").innerHTML = ""; return; }
-  const rows = competitionAdherents(compId);
-  const nbSel = rows.filter(r => r.selectionne).length;
-  count.textContent = `${nbSel} compétiteur${nbSel > 1 ? "s" : ""} sélectionné${nbSel > 1 ? "s" : ""} sur ${rows.length}`;
+  if (!compId) {
+    wrap.innerHTML = `<div class="empty">Créez d'abord une compétition.</div>`;
+    count.textContent = "—";
+    $("#p-search-results").innerHTML = "";
+    if ($("#p-kpi-participe")) $("#p-kpi-participe").textContent = "0";
+    if ($("#p-kpi-attente")) $("#p-kpi-attente").textContent = "0";
+    if ($("#p-kpi-paye")) $("#p-kpi-paye").textContent = "0";
+    return;
+  }
+  const allRows = competitionAdherents(compId);
+  const nbParticipe = allRows.filter(r => r.selectionne).length;
+  const nbEnAttente = allRows.filter(r => r.statut_paiement === "en_attente").length;
+  const nbPaye = allRows.filter(r => r.statut_paiement === "paye").length;
+
+  // Mise à jour des compteurs KPIs
+  if ($("#p-kpi-participe")) $("#p-kpi-participe").textContent = nbParticipe;
+  if ($("#p-kpi-attente")) $("#p-kpi-attente").textContent = nbEnAttente;
+  if ($("#p-kpi-paye")) $("#p-kpi-paye").textContent = nbPaye;
+
+  // Compteurs sur les puces de filtres
+  if ($("#p-count-chip-all")) $("#p-count-chip-all").textContent = allRows.length;
+  if ($("#p-count-chip-selected")) $("#p-count-chip-selected").textContent = nbParticipe;
+  if ($("#p-count-chip-unpaid")) $("#p-count-chip-unpaid").textContent = nbEnAttente;
+
+  // Filtrage
+  let rows = allRows;
+  if (participantFilter === "selected") {
+    rows = rows.filter(r => r.selectionne);
+  } else if (participantFilter === "unpaid") {
+    rows = rows.filter(r => r.statut_paiement === "en_attente");
+  }
+
+  if (participantFilter === "selected") {
+    count.textContent = `${nbParticipe} compétiteur${nbParticipe > 1 ? "s" : ""} sélectionné${nbParticipe > 1 ? "s" : ""} (filtre Participe : Oui)`;
+  } else if (participantFilter === "unpaid") {
+    count.textContent = `${nbEnAttente} compétiteur${nbEnAttente > 1 ? "s" : ""} avec paiement en attente (filtre Paiement en attente)`;
+  } else {
+    count.textContent = `${nbParticipe} compétiteur${nbParticipe > 1 ? "s" : ""} sélectionné${nbParticipe > 1 ? "s" : ""} sur ${allRows.length}`;
+  }
 
   // Regroupement par groupe de créneau (donnée du planning poussée par le bureau) ;
   // à défaut, par tarif ; « Non identifiés » regroupe les tarifs vides.
@@ -1138,7 +1222,7 @@ function renderParticipants() {
               title="Statut de paiement">${PAIEMENT_LABELS[p.statut_paiement] || esc(p.statut_paiement)}</span>
       </div>
     </div>`).join("")}`).join("")
-    || `<div class="empty">Aucun compétiteur : utilisez « Charger le groupe Compétition » ou la recherche étendue.</div>`;
+    || `<div class="empty">Aucun compétiteur ne correspond aux critères de filtre sélectionnés.</div>`;
   if (isCoach) {
     renderSearchResults();
   }
