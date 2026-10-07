@@ -919,7 +919,7 @@ class CompetitionsPage(QWidget):
 
         btns = QHBoxLayout()
         self.btn_load_group = QPushButton("🧗  Charger le groupe « Compétition »")
-        self.btn_load_group.setToolTip("Ajoute (bascule Oui) tous les adhérents du groupe Compétition de la base principale.")
+        self.btn_load_group.setToolTip("Ajoute tous les adhérents du groupe Compétition dans la liste (non sélectionnés, statut « Non invité »).")
         self.btn_load_group.setCursor(Qt.PointingHandCursor)
         self.btn_load_group.setStyleSheet(self._btn_style(COLOR_ACTION))
         self.btn_load_group.clicked.connect(self.on_load_competition_group)
@@ -1476,24 +1476,11 @@ class CompetitionsPage(QWidget):
                               statut_actuel: str = None, checkbox=None):
         """Bascule « Participe » : lie le statut de paiement sauf pour les
         paiements (payé / annulé) qui relèvent d'une décision du coach."""
-        if checked:
-            nouveau = statut_paiement_apres_bascule(statut_actuel, True)
-            if nouveau:
-                self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, nouveau)
-                self._deferred_refresh()
-            else:
-                self._refresh_count_only()
-            return
-
-        if statut_actuel == PAIEMENT_PAYE:
+        if not checked and statut_actuel == PAIEMENT_PAYE:
             self._cancel_paid_participant(competition_id, adherent_id)
             return
-        nouveau = statut_paiement_apres_bascule(statut_actuel, False)
-        if nouveau:
-            self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, nouveau)
-            self._deferred_refresh()
-        else:
-            self._refresh_count_only()
+        self._guard(CompetitionRepository.set_selection, competition_id, adherent_id, checked)
+        self._deferred_refresh()
 
     def _cancel_paid_participant(self, competition_id: int, adherent_id: int):
         """Décoche un compétiteur qui a déjà payé : choix reporter / encaisser
@@ -1573,10 +1560,17 @@ class CompetitionsPage(QWidget):
         if n is None:
             return
         self._update_participants_view()
-        QMessageBox.information(
-            self, "Groupe « Compétition »",
-            f"{n} compétiteur(s) du groupe « Compétition » sont maintenant rattaché(s) à cette épreuve.",
-        )
+        if n == 0:
+            QMessageBox.information(
+                self, "Groupe « Compétition »",
+                "Tous les compétiteurs du groupe « Compétition » sont déjà présents dans la liste de cette épreuve.",
+            )
+        else:
+            QMessageBox.information(
+                self, "Groupe « Compétition »",
+                f"{n} compétiteur(s) du groupe « Compétition » ont été ajouté(s) à la liste.\n"
+                "(Ils apparaissent non sélectionnés avec le statut « Non invité »).",
+            )
 
     def on_add_extended(self):
         if not self.current_competition:

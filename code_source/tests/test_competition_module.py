@@ -334,13 +334,18 @@ class TestCompetitionRepository(unittest.TestCase):
 
         participants = self.repo.list_participants(comp_id)
         self.assertEqual(len(participants), 2)
-        self.assertTrue(all(p.selectionne for p in participants))
+        self.assertTrue(all(not p.selectionne for p in participants))
+        self.assertTrue(all(p.statut_paiement == "non_invite" for p in participants))
 
         # Bascule Oui/Non
+        self.repo.set_selection(comp_id, 1, True)
+        p1 = [p for p in self.repo.list_participants(comp_id) if p.adherent_id == 1][0]
+        self.assertTrue(p1.selectionne)
+        self.assertEqual(p1.statut_paiement, "en_attente")
         self.repo.set_selection(comp_id, 1, False)
         p1 = [p for p in self.repo.list_participants(comp_id) if p.adherent_id == 1][0]
         self.assertFalse(p1.selectionne)
-        self.repo.set_selection(comp_id, 1, True)
+        self.assertEqual(p1.statut_paiement, "non_invite")
 
         # Ajout hors groupe via recherche étendue
         self.repo.add_participant(comp_id, 3)

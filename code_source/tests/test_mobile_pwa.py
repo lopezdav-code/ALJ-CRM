@@ -59,6 +59,15 @@ class TestMobilePWA(unittest.TestCase):
         # Vérifications Appel 1-clic téléphone
         self.assertIn('href="tel:', html)
 
+        # Vérifications Chargement Groupe Compétition (non sélectionné + non invité)
+        self.assertIn('parts.push(newParticipant(a.id, false, "non_invite"))', html)
+        self.assertIn('statut || (isSelected ? "en_attente" : "non_invite")', html)
+
+        # Vérifications Édition Compétition (navigation showPage, réinitialisation et retour)
+        self.assertIn('showPage("comps");', html)
+        self.assertIn('editSourcePage', html)
+        self.assertIn('openParticipants(savedCompId)', html)
+
 
 if __name__ == "__main__":
     unittest.main()

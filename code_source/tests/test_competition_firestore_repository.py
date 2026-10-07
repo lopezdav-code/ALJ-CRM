@@ -220,8 +220,12 @@ class TestParticipants(FirestoreRepoTestCase):
     def test_load_competition_group_only_competition_tarifs(self):
         n = Repo.load_competition_group_into(self.comp_id)
         self.assertEqual(n, 1)  # seul MARTIN a un tarif « Compétition »
-        aids = {p.adherent_id for p in Repo.list_participants(self.comp_id)}
-        self.assertEqual(aids, {101})
+        parts = Repo.list_participants(self.comp_id)
+        self.assertEqual(len(parts), 1)
+        p = parts[0]
+        self.assertEqual(p.adherent_id, 101)
+        self.assertFalse(p.selectionne)
+        self.assertEqual(p.statut_paiement, PAIEMENT_NON_INVITE)
 
     def test_list_participants_selected_only(self):
         Repo.add_participant(self.comp_id, 101, selectionne=True)

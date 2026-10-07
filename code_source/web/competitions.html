@@ -405,6 +405,8 @@ let adherents = [];              // documents de la collection "adherents"
 let snapshotsReady = 0;          // nombre de premières snapshots reçues
 let listeners = [];              // fonctions de désabonnement onSnapshot
 let lastSyncAt = null;
+let editCompId = null;           // id de la compétition en cours d'édition
+let editSourcePage = null;       // page d'où l'édition a été déclenchée
 
 /* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
@@ -557,7 +559,8 @@ function onSnapshotError(name, err) {
 
 /* ===================== Accès aux données (Firestore) ===================== */
 function findComp(compId) {
-  return comps.find(c => String(c.id) === String(compId)) || null;
+  if (!compId) return null;
+  return comps.find(c => String(c.id) === String(compId) || String(c.docId) === String(compId)) || null;
 }
 function findAdherent(adherentId) {
   return adherents.find(a => String(a.id) === String(adherentId)) || null;
@@ -576,8 +579,10 @@ function sortedCompetitions() {
     String(b.date_competition || "").localeCompare(String(a.date_competition || ""), "fr") ||
     (Number(b.id) || 0) - (Number(a.id) || 0));
 }
-function newParticipant(adherentId, selected) {
+function newParticipant(adherentId, selected, statut = null) {
   const a = findAdherent(adherentId) || {};
+  const isSelected = !!selected;
+  const stat = statut || (isSelected ? "en_attente" : "non_invite");
   return {
     participant_id: null,
     adherent_id: Number(adherentId),
@@ -586,8 +591,8 @@ function newParticipant(adherentId, selected) {
     num_licence: a.licence_ffme || "",
     email: a.email || "",
     phone: a.phone || "",
-    selectionne: !!selected,
-    statut_paiement: "en_attente",
+    selectionne: isSelected,
+    statut_paiement: stat,
     montant_paye: 0,
     commande_helloasso: "",
     note_paiement: "",
@@ -683,14 +688,28 @@ function renderComps() {
   renderParticipants();
 }
 function openEdit(id) {
+  if (!id) {
+    id = currentCompId();
+  }
+  if (!id) {
+    toast("⚠️ Veuillez d'abord sélectionner une compétition.");
+    return;
+  }
   const c = findComp(id);
-  if (!c) return;
-  editCompId = id;
+  if (!c) {
+    toast("⚠️ Compétition introuvable.");
+    return;
+  }
+  const activeSection = document.querySelector(".page.active");
+  editSourcePage = activeSection ? activeSection.id.replace("page-", "") : "comps";
+  showPage("comps");
+
+  editCompId = c.id != null ? c.id : id;
   $("#f-form-title").textContent = `✏️ Modifier : ${c.nom || ""}`;
   $("#f-nom").value = c.nom || "";
   $("#f-idffme").value = c.id_ffme || "";
   $("#f-date").value = c.date_competition || "";
-  $("#f-prix").value = c.prix || 0;
+  $("#f-prix").value = c.prix != null ? c.prix : 0;
   $("#f-statut").value = c.statut || "en_preparation";
   populateCoachDropdowns();
   const ids = c.coach_ids || [];
@@ -703,6 +722,7 @@ function openEdit(id) {
 }
 function resetCompForm() {
   editCompId = null;
+  editSourcePage = null;
   $("#f-form-title").textContent = "➕ Nouvelle compétition";
   $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = "";
   $("#f-prix").value = ""; $("#f-statut").value = "en_preparation";
@@ -734,6 +754,9 @@ async function createCompetition() {
       statut: $("#f-statut").value,
       coach_ids: coachIds,
       coaches: coachNames(coachIds),
+      coach1_id: coachIds[0] != null ? coachIds[0] : null,
+      coach2_id: coachIds[1] != null ? coachIds[1] : null,
+      coach3_id: coachIds[2] != null ? coachIds[2] : null,
       helloasso_ref: "",
       nb_participants: 0,
       nb_selectionnes: 0,
@@ -758,6 +781,8 @@ async function updateCompetition() {
   const nom = $("#f-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
   const coachIds = readCoachSelection();
+  const sourcePage = editSourcePage;
+  const savedCompId = editCompId;
   try {
     await updateCompetitionDoc(c, {
       nom: nom,
@@ -766,11 +791,21 @@ async function updateCompetition() {
       prix: parseFloat($("#f-prix").value || "0") || 0,
       statut: $("#f-statut").value,
       coach_ids: coachIds,
-      coaches: coachNames(coachIds)
+      coaches: coachNames(coachIds),
+      coach1_id: coachIds[0] != null ? coachIds[0] : null,
+      coach2_id: coachIds[1] != null ? coachIds[1] : null,
+      coach3_id: coachIds[2] != null ? coachIds[2] : null,
     });
     renderComps();
+    resetCompForm();
     toast("✅ Compétition mise à jour.");
-  } catch (e) {}
+    if (sourcePage === "participants") {
+      openParticipants(savedCompId);
+    }
+  } catch (e) {
+    console.error("Erreur mise à jour compétition :", e);
+    toast("❌ " + (e.message || e), 9000);
+  }
 }
 async function deleteCompetition() {
   if (!editCompId) return;
@@ -785,6 +820,7 @@ async function deleteCompetition() {
     }
     resetCompForm();
     renderComps();
+    showPage("comps");
     toast("🗑 Compétition supprimée.");
   } catch (e) {
     console.error(e);
@@ -938,17 +974,22 @@ async function loadCompetitionGroup() {
   let added = 0;
   for (const a of group) {
     const idx = parts.findIndex(p => Number(p.adherent_id) === Number(a.id));
-    if (idx < 0) { parts.push(newParticipant(a.id, true)); added++; }
-    else if (!parts[idx].selectionne) { parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: new Date().toISOString() }); added++; }
+    if (idx < 0) {
+      parts.push(newParticipant(a.id, false, "non_invite"));
+      added++;
+    }
   }
-  if (added === 0) { toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà actifs."); return; }
+  if (added === 0) {
+    toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà présents dans la liste.");
+    return;
+  }
   try {
     await updateCompetitionDoc(c, {
       participants: parts,
       nb_participants: parts.length,
       nb_selectionnes: parts.filter(p => p.selectionne).length
     });
-    toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » activé(s).`);
+    toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » ajouté(s) à la liste.`);
   } catch (e) {}
 }
 function renderSearchResults() {
@@ -1465,7 +1506,16 @@ function wireEvents() {
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);
-  $("#f-cancel").addEventListener("click", () => { resetCompForm(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+  $("#f-cancel").addEventListener("click", () => {
+    const src = editSourcePage;
+    const cid = editCompId;
+    resetCompForm();
+    if (src === "participants" && cid) {
+      openParticipants(cid);
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  });
   
   $("#f-coach-create").addEventListener("click", createCoach);
   $("#f-coach-update").addEventListener("click", updateCoach);

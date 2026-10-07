@@ -34,6 +34,7 @@ from domain.competition_models import (
     PAIEMENT_ANNULE_PERDU,
     PAIEMENT_ANNULE_REPORTE,
     PAIEMENT_STATUTS_ANNULES,
+    statut_paiement_apres_bascule,
 )
 from domain.constants import get_active_season
 from domain.age_rules import parse_birth_date, age_at, get_season_start_date
@@ -499,7 +500,8 @@ class CompetitionFirestoreRepository:
 
     @classmethod
     def _new_participant_map(cls, adherent_doc: Dict[str, Any],
-                             selectionne: bool, statut: str = DEFAULT_STATUT_NOUVEAU_PARTICIPANT) -> Dict[str, Any]:
+                             selectionne: bool, statut: Optional[str] = None) -> Dict[str, Any]:
+        stat = statut or (DEFAULT_STATUT_NOUVEAU_PARTICIPANT if selectionne else PAIEMENT_NON_INVITE)
         return {
             "participant_id": adherent_doc.get("id"),
             "adherent_id": adherent_doc.get("id"),
@@ -510,7 +512,7 @@ class CompetitionFirestoreRepository:
             "phone": str(adherent_doc.get("phone") or ""),
             "tarif": str(adherent_doc.get("tarif") or ""),
             "selectionne": bool(selectionne),
-            "statut_paiement": statut,
+            "statut_paiement": stat,
             "montant_paye": 0.0,
             "commande_helloasso": "",
             "note_paiement": "",
@@ -577,6 +579,9 @@ class CompetitionFirestoreRepository:
             for p in parts:
                 if p.get("adherent_id") == adherent_id:
                     p["selectionne"] = bool(selectionne)
+                    nouveau = statut_paiement_apres_bascule(p.get("statut_paiement"), selectionne)
+                    if nouveau:
+                        p["statut_paiement"] = nouveau
                     p["updated_at"] = cls._now_iso()
                     return parts
             adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
@@ -656,7 +661,7 @@ class CompetitionFirestoreRepository:
         for a in cls.list_adherents(competition_only=True):
             if a["id"] in existing:
                 continue
-            p = cls._new_participant_map(a, True)
+            p = cls._new_participant_map(a, False, PAIEMENT_NON_INVITE)
             p["updated_at"] = now
             parts.append(p)
             count += 1

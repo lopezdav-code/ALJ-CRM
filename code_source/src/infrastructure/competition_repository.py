@@ -15,6 +15,8 @@ from domain.competition_models import (
     Competition,
     Participant,
     PAIEMENT_EN_ATTENTE,
+    PAIEMENT_NON_INVITE,
+    statut_paiement_apres_bascule,
 )
 
 DB_FILENAME = "database_Competition.db"
@@ -456,7 +458,8 @@ class CompetitionRepository:
 
     @classmethod
     def add_participant(cls, competition_id: int, adherent_id: int,
-                        selectionne: bool = True) -> int:
+                        selectionne: bool = True,
+                        statut_paiement: str = None) -> int:
         """Ajoute un adhérent à une compétition (idempotent)."""
         cls.setup_database()
         conn = cls.get_connection()
@@ -468,10 +471,11 @@ class CompetitionRepository:
             ).fetchone()
             if existing:
                 return existing["id"]
+            statut = statut_paiement or (PAIEMENT_EN_ATTENTE if selectionne else PAIEMENT_NON_INVITE)
             cur.execute(
                 """INSERT INTO participants (competition_id, adherent_id, selectionne,
                    statut_paiement) VALUES (?,?,?,?)""",
-                (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_EN_ATTENTE),
+                (competition_id, adherent_id, 1 if selectionne else 0, statut),
             )
             conn.commit()
             return cur.lastrowid
@@ -507,11 +511,16 @@ class CompetitionRepository:
             if row:
                 cur.execute("UPDATE participants SET selectionne=? WHERE id=?",
                             (1 if selectionne else 0, row["id"]))
+                nouveau = statut_paiement_apres_bascule(row["statut_paiement"], selectionne)
+                if nouveau:
+                    cur.execute("UPDATE participants SET statut_paiement=? WHERE id=?",
+                                (nouveau, row["id"]))
             else:
                 cur.execute(
                     """INSERT INTO participants (competition_id, adherent_id, selectionne,
                        statut_paiement) VALUES (?,?,?,?)""",
-                    (competition_id, adherent_id, 1 if selectionne else 0, PAIEMENT_EN_ATTENTE),
+                    (competition_id, adherent_id, 1 if selectionne else 0,
+                     PAIEMENT_EN_ATTENTE if selectionne else PAIEMENT_NON_INVITE),
                 )
             conn.commit()
             return True
@@ -559,7 +568,7 @@ class CompetitionRepository:
         """Pré-remplit la liste des participants avec le groupe « Compétition »."""
         count = 0
         for a in cls.list_adherents(competition_only=True):
-            cls.add_participant(competition_id, a["id"], selectionne=True)
+            cls.add_participant(competition_id, a["id"], selectionne=False, statut_paiement=PAIEMENT_NON_INVITE)
             count += 1
         return count
 
