@@ -24,9 +24,9 @@ import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QDateEdit, QDoubleSpinBox, QListWidget, QListWidgetItem, QSplitter, QFrame,
-    QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QCheckBox, QDialog, QProgressDialog, QMessageBox, QAbstractItemView,
+    QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QCheckBox, QDialog, QProgressDialog, QMessageBox, QAbstractItemView, QRadioButton,
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor
 
 from paths import ROOT_DIR
@@ -43,6 +43,13 @@ from infrastructure.competition_firestore_repository import (
     CompetitionFirestoreRepository as CompetitionRepository,
 )
 from domain import competition_matching
+from domain.competition_models import (
+    PAIEMENT_PAYE,
+    PAIEMENT_STATUTS_ANNULES,
+    PAIEMENT_ANNULE_PERDU,
+    PAIEMENT_ANNULE_REPORTE,
+    statut_paiement_apres_bascule,
+)
 from domain.planning_groups import group_for_tarif
 from domain.utils import normalize_string
 
@@ -560,6 +567,71 @@ class ManualCorrectionDialog(QDialog):
                 "montant": float(rev.get("montant") or 0.0),
                 "commentaire": comment
             })
+        self.accept()
+
+
+class CancelPaidDialog(QDialog):
+    """Annulation d'un compétiteur ayant déjà payé (jamais de remboursement).
+
+    Le coach choisit le sort de l'argent — « report » (crédit au bilan pour la
+    prochaine épreuve) ou « perdu » (encaissé définitivement) — et DOIT saisir
+    un commentaire explicatif."""
+
+    def __init__(self, nom_complet: str, montant: float, commande: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Annulation — compétiteur ayant payé")
+        self.resize(560, 300)
+        self.statut_choisi = None
+        self.note = ""
+
+        layout = QVBoxLayout(self)
+        head = QLabel(
+            f"⚠️ <b>{nom_complet}</b> a payé <b>{montant:.2f} €</b>"
+            + (f" (commande {commande})" if commande else "")
+            + " mais ne participe plus à cette épreuve.\n"
+            "Aucun remboursement : choisissez le sort de cet argent."
+        )
+        head.setWordWrap(True)
+        head.setStyleSheet("font-size: 13px; color: #1E293B;")
+        layout.addWidget(head)
+
+        self.radio_report = QRadioButton("➡️  Reporter l'argent sur une prochaine épreuve (crédit au bilan)")
+        self.radio_report.setChecked(True)
+        layout.addWidget(self.radio_report)
+        self.radio_perdu = QRadioButton("💰  Encaisser l'argent (perdu pour le compétiteur)")
+        layout.addWidget(self.radio_perdu)
+
+        layout.addWidget(QLabel("Commentaire (obligatoire) — explique la situation :"))
+        self.note_input = QLineEdit()
+        self.note_input.setPlaceholderText("Ex : blessure, absence imprévue…")
+        self.note_input.setStyleSheet("QLineEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
+        layout.addWidget(self.note_input)
+
+        btns = QHBoxLayout()
+        btn_ok = QPushButton("✔  Valider l'annulation")
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setStyleSheet(self._dlg_btn_style(COLOR_SUCCESS))
+        btn_ok.clicked.connect(self._validate)
+        btns.addWidget(btn_ok)
+        btn_cancel = QPushButton("Annuler")
+        btn_cancel.clicked.connect(self.reject)
+        btns.addWidget(btn_cancel)
+        btns.addStretch()
+        layout.addLayout(btns)
+
+    @staticmethod
+    def _dlg_btn_style(color: str) -> str:
+        return (f"QPushButton {{ background-color: {color}; color: #FFFFFF; border: none; "
+                "border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: bold; }")
+
+    def _validate(self):
+        note = self.note_input.text().strip()
+        if not note:
+            QMessageBox.warning(self, "Commentaire requis",
+                                "Un commentaire est obligatoire pour expliquer l'annulation.")
+            return
+        self.statut_choisi = PAIEMENT_ANNULE_REPORTE if self.radio_report.isChecked() else PAIEMENT_ANNULE_PERDU
+        self.note = note
         self.accept()
 
 
@@ -1306,6 +1378,8 @@ class CompetitionsPage(QWidget):
             "paye": QColor(COLOR_SUCCESS),
             "en_attente": QColor(COLOR_WARNING),
             "non_invite": QColor("#94A3B8"),
+            "annule_perdu": QColor(COLOR_ERROR),
+            "annule_reporte": QColor("#7C3AED"),
         }
         table.setRowCount(len(participants) + len(groups))
         row = 0
@@ -1331,8 +1405,11 @@ class CompetitionsPage(QWidget):
                 cb = QCheckBox()
                 cb.setChecked(p.selectionne)
                 cb.setStyleSheet("QCheckBox { margin-left: 12px; }")
-                cb.toggled.connect(lambda checked, cid=self.current_competition.id, aid=p.adherent_id:
-                                   self._on_selection_toggled(cid, aid, checked))
+                cb.toggled.connect(
+                    lambda checked, cid=self.current_competition.id, aid=p.adherent_id,
+                           statut=p.statut_paiement, box=None:
+                    self._on_selection_toggled(cid, aid, checked, statut, None)
+                )
                 table.setCellWidget(row, 0, cb)
 
                 for col, val in ((1, p.nom), (2, p.prenom), (3, p.num_licence or ""),
@@ -1345,6 +1422,8 @@ class CompetitionsPage(QWidget):
                 for lib in LIBELLES_STATUT_PAIEMENT.values():
                     combo.addItem(lib)
                 combo.setCurrentText(LIBELLES_STATUT_PAIEMENT.get(p.statut_paiement, "Non invité"))
+                if p.note_paiement:
+                    combo.setToolTip(f"📝 {p.note_paiement}")
                 combo.currentTextChanged.connect(
                     lambda lib, cid=self.current_competition.id, aid=p.adherent_id:
                     self._on_paiement_changed(cid, aid, lib)
@@ -1388,9 +1467,48 @@ class CompetitionsPage(QWidget):
         f.setBold(True)
         return f
 
-    def _on_selection_toggled(self, competition_id: int, adherent_id: int, checked: bool):
-        self._guard(CompetitionRepository.set_selection, competition_id, adherent_id, checked)
-        self._refresh_count_only()
+    def _deferred_refresh(self):
+        """Recharge la vue participants HORS de l'émission du signal (le widget
+        à l'origine du signal est détruit pendant la reconstruction de la table)."""
+        QTimer.singleShot(0, self._update_participants_view)
+
+    def _on_selection_toggled(self, competition_id: int, adherent_id: int, checked: bool,
+                              statut_actuel: str = None, checkbox=None):
+        """Bascule « Participe » : lie le statut de paiement sauf pour les
+        paiements (payé / annulé) qui relèvent d'une décision du coach."""
+        if checked:
+            nouveau = statut_paiement_apres_bascule(statut_actuel, True)
+            if nouveau:
+                self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, nouveau)
+                self._deferred_refresh()
+            else:
+                self._refresh_count_only()
+            return
+
+        if statut_actuel == PAIEMENT_PAYE:
+            self._cancel_paid_participant(competition_id, adherent_id)
+            return
+        nouveau = statut_paiement_apres_bascule(statut_actuel, False)
+        if nouveau:
+            self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, nouveau)
+            self._deferred_refresh()
+        else:
+            self._refresh_count_only()
+
+    def _cancel_paid_participant(self, competition_id: int, adherent_id: int):
+        """Décoche un compétiteur qui a déjà payé : choix reporter / encaisser
+        + commentaire obligatoire."""
+        participants = self._guard(CompetitionRepository.list_participants, competition_id)
+        info = next((p for p in (participants or []) if p.adherent_id == adherent_id), None)
+        nom = f"{info.nom} {info.prenom}" if info else "Compétiteur"
+        montant = info.montant_paye if info else 0.0
+        commande = info.commande_helloasso if info else ""
+        dlg = CancelPaidDialog(nom, montant, commande, self)
+        if dlg.exec() and dlg.statut_choisi:
+            self._guard(CompetitionRepository.mark_cancelled, competition_id, adherent_id,
+                        dlg.statut_choisi, dlg.note)
+        # Dans tous les cas on recharge (annulé : la case est recochée par la vue)
+        self._deferred_refresh()
 
     def _on_delete_participant(self, competition_id: int, adherent_id: int, nom_complet: str):
         """Retire un compétiteur de l'épreuve (confirmation avant suppression)."""
@@ -1410,6 +1528,10 @@ class CompetitionsPage(QWidget):
 
     def _on_paiement_changed(self, competition_id: int, adherent_id: int, libelle: str):
         statut = LIBELLE_VERS_STATUT_PAIEMENT.get(libelle, PAIEMENT_NON_INVITE)
+        if statut in PAIEMENT_STATUTS_ANNULES:
+            self._guard(CompetitionRepository.mark_cancelled, competition_id, adherent_id, statut)
+            self._deferred_refresh()
+            return
         self._guard(CompetitionRepository.set_payment_status, competition_id, adherent_id, statut)
 
     def _refresh_count_only(self):

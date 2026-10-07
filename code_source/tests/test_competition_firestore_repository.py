@@ -17,7 +17,15 @@ from infrastructure.firestore_client import FirestoreClient
 from infrastructure import firestore_client as fc
 from infrastructure import competition_firestore_repository as repo_module
 from infrastructure.competition_firestore_repository import CompetitionFirestoreRepository as Repo
-from domain.competition_models import Competition
+from domain.competition_models import (
+    Competition,
+    statut_paiement_apres_bascule,
+    PAIEMENT_NON_INVITE,
+    PAIEMENT_EN_ATTENTE,
+    PAIEMENT_PAYE,
+    PAIEMENT_ANNULE_PERDU,
+    PAIEMENT_ANNULE_REPORTE,
+)
 
 
 class FakeFirestore:
@@ -423,6 +431,85 @@ class TestBatchUpsertCommitBody(unittest.TestCase):
         # Le :commit est bien appelé sur l'URL absolue du service
         self.assertIn("https://firestore.googleapis.com/v1/", mock_post.call_args.args[0])
         self.assertIn(":commit", mock_post.call_args.args[0])
+
+
+class TestBasculeParticipePaiement(unittest.TestCase):
+    """Règle de liaison « Participe » ↔ statut de paiement (hors décisions coach)."""
+
+    def test_checking(self):
+        self.assertEqual(statut_paiement_apres_bascule(PAIEMENT_NON_INVITE, True), PAIEMENT_EN_ATTENTE)
+        self.assertIsNone(statut_paiement_apres_bascule(PAIEMENT_EN_ATTENTE, True))
+        self.assertIsNone(statut_paiement_apres_bascule(PAIEMENT_PAYE, True))
+        # Réactivation d'un annulé : retour « payé » (l'argent est déjà là)
+        self.assertEqual(statut_paiement_apres_bascule(PAIEMENT_ANNULE_REPORTE, True), PAIEMENT_PAYE)
+        self.assertEqual(statut_paiement_apres_bascule(PAIEMENT_ANNULE_PERDU, True), PAIEMENT_PAYE)
+        # Statut inconnu/vide traité comme « non invité » -> « en attente »
+        self.assertEqual(statut_paiement_apres_bascule(None, True), PAIEMENT_EN_ATTENTE)
+
+    def test_unchecking(self):
+        self.assertEqual(statut_paiement_apres_bascule(PAIEMENT_EN_ATTENTE, False), PAIEMENT_NON_INVITE)
+        self.assertIsNone(statut_paiement_apres_bascule(PAIEMENT_NON_INVITE, False))
+        # « payé » décoché = décision coach (dialog reporter/encaisser), pas de statut auto
+        self.assertIsNone(statut_paiement_apres_bascule(PAIEMENT_PAYE, False))
+        self.assertIsNone(statut_paiement_apres_bascule(PAIEMENT_ANNULE_REPORTE, False))
+
+
+class TestAnnulationParticipantPaye(FirestoreRepoTestCase):
+    """Annulation d'un participant ayant payé : report = crédit, perdu = écarté."""
+
+    def setUp(self):
+        super().setUp()
+        self.seed_adherent(101)
+        self.comp_id = Repo.save_competition(
+            Competition(nom="Épreuve", date_competition="2026-03-15", prix=15.0))
+        Repo.add_participant(self.comp_id, 101, selectionne=True)
+        Repo.apply_helloasso_payment(self.comp_id, 101, 15.0, order_ref="CMD-1")
+
+    def test_annule_reporte_garde_le_montant_en_credit(self):
+        self.assertTrue(Repo.mark_cancelled(self.comp_id, 101, PAIEMENT_ANNULE_REPORTE, "blessure"))
+        p = Repo.list_participants(self.comp_id)[0]
+        self.assertFalse(p.selectionne)
+        self.assertEqual(p.statut_paiement, PAIEMENT_ANNULE_REPORTE)
+        self.assertEqual(p.montant_paye, 15.0)
+        self.assertEqual(p.note_paiement, "blessure")
+
+        bilan = Repo.get_bilan()
+        # Pas de participation due
+        self.assertNotIn((101, self.comp_id), bilan["participations"])
+        # Mais un crédit : montant payé conservé, prix dû à 0
+        self.assertEqual(bilan["payments"][(101, self.comp_id)],
+                         {"montant_paye": 15.0, "prix": 0.0})
+        self.assertIn(101, bilan["students"])
+        self.assertEqual(bilan["seasons"], ["2025-2026"])
+
+    def test_annule_perdu_exclu_du_bilan(self):
+        self.assertTrue(Repo.mark_cancelled(self.comp_id, 101, PAIEMENT_ANNULE_PERDU, "absence"))
+        p = Repo.list_participants(self.comp_id)[0]
+        self.assertFalse(p.selectionne)
+        self.assertEqual(p.statut_paiement, PAIEMENT_ANNULE_PERDU)
+        self.assertEqual(p.montant_paye, 15.0)
+
+        bilan = Repo.get_bilan()
+        self.assertNotIn((101, self.comp_id), bilan["participations"])
+        self.assertNotIn((101, self.comp_id), bilan["payments"])
+
+    def test_resync_helloasso_ne_pas_repayer_un_annule(self):
+        Repo.mark_cancelled(self.comp_id, 101, PAIEMENT_ANNULE_REPORTE, "blessure")
+        # Re-synchronisation HelloAsso (l'article payé est toujours validé) :
+        # l'annulation explicite du coach ne doit pas être écrasée.
+        self.assertFalse(Repo.apply_helloasso_payment(self.comp_id, 101, 15.0, order_ref="CMD-1"))
+        p = Repo.list_participants(self.comp_id)[0]
+        self.assertEqual(p.statut_paiement, PAIEMENT_ANNULE_REPORTE)
+        self.assertFalse(p.selectionne)
+
+    def test_reactivation_par_re_ajout(self):
+        Repo.mark_cancelled(self.comp_id, 101, PAIEMENT_ANNULE_REPORTE, "blessure")
+        Repo.add_participant(self.comp_id, 101, selectionne=True)
+        p = Repo.list_participants(self.comp_id)[0]
+        self.assertTrue(p.selectionne)
+        self.assertEqual(p.statut_paiement, PAIEMENT_PAYE)
+        self.assertEqual(p.montant_paye, 15.0)
+        self.assertEqual(p.note_paiement, "blessure")
 
 
 if __name__ == "__main__":

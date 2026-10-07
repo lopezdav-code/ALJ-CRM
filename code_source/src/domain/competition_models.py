@@ -22,13 +22,48 @@ LIBELLES_STATUT_COMPETITION = {
 PAIEMENT_NON_INVITE = "non_invite"
 PAIEMENT_EN_ATTENTE = "en_attente"
 PAIEMENT_PAYE = "paye"
-STATUTS_PAIEMENT = (PAIEMENT_NON_INVITE, PAIEMENT_EN_ATTENTE, PAIEMENT_PAYE)
+# Annulation d'un participant ayant payé : jamais de remboursement.
+# - perdu : l'argent est encaissé définitivement (pas de crédit) ;
+# - report : l'argent reste comptabilisé -> crédit visible au bilan de la saison,
+#   qui compensera la prochaine épreuve de l'athlète.
+PAIEMENT_ANNULE_PERDU = "annule_perdu"
+PAIEMENT_ANNULE_REPORTE = "annule_reporte"
+STATUTS_PAIEMENT = (
+    PAIEMENT_NON_INVITE, PAIEMENT_EN_ATTENTE, PAIEMENT_PAYE,
+    PAIEMENT_ANNULE_PERDU, PAIEMENT_ANNULE_REPORTE,
+)
 
 LIBELLES_STATUT_PAIEMENT = {
     PAIEMENT_NON_INVITE: "Non invité",
     PAIEMENT_EN_ATTENTE: "En attente",
     PAIEMENT_PAYE: "Payé",
+    PAIEMENT_ANNULE_PERDU: "Annulé — perdu",
+    PAIEMENT_ANNULE_REPORTE: "Annulé — report",
 }
+
+# Statuts « payé » réellement encaissés (money in) — l'annulation reportée
+# garde l'argent côté club mais ne compte plus comme participation due.
+PAIEMENT_STATUTS_ANNULES = (PAIEMENT_ANNULE_PERDU, PAIEMENT_ANNULE_REPORTE)
+
+
+def statut_paiement_apres_bascule(statut_paiement: str, selectionne: bool):
+    """Statut de paiement résultant de la bascule « Participe ».
+
+    Règle : le paiement « payé » et les annulations ne sont JAMAIS modifiés par
+    la bascule (décision du coach via l'IHM). Un participant non invité coché
+    passe « en attente » ; un « en attente » décoché repasse « non invité » ;
+    un participant annulé re-coché repasse « payé » (réactivation).
+    Retourne le nouveau statut, ou None s'il n'y a rien à changer."""
+    statut = str(statut_paiement or PAIEMENT_NON_INVITE)
+    if selectionne:
+        if statut == PAIEMENT_NON_INVITE:
+            return PAIEMENT_EN_ATTENTE
+        if statut in PAIEMENT_STATUTS_ANNULES:
+            return PAIEMENT_PAYE
+        return None
+    if statut == PAIEMENT_EN_ATTENTE:
+        return PAIEMENT_NON_INVITE
+    return None
 
 LIBELLE_VERS_STATUT_PAIEMENT = {v: k for k, v in LIBELLES_STATUT_PAIEMENT.items()}
 LIBELLE_VERS_STATUT_COMPETITION = {v: k for k, v in LIBELLES_STATUT_COMPETITION.items()}
@@ -105,6 +140,7 @@ class Participant:
     date_synchro_helloasso: str = ""
     montant_paye: float = 0.0
     commande_helloasso: str = ""     # n° de commande HelloAsso (renseigné à la synchro)
+    note_paiement: str = ""          # commentaire du coach (annulation, régularisation…)
 
     def to_dict(self) -> dict:
         return {
@@ -121,6 +157,7 @@ class Participant:
             "date_synchro_helloasso": self.date_synchro_helloasso,
             "montant_paye": self.montant_paye,
             "commande_helloasso": self.commande_helloasso,
+            "note_paiement": self.note_paiement,
         }
 
     @classmethod
@@ -140,4 +177,5 @@ class Participant:
             date_synchro_helloasso=str(row.get("date_synchro_helloasso") or ""),
             montant_paye=float(row.get("montant_paye") or 0.0),
             commande_helloasso=str(row.get("commande_helloasso") or ""),
+            note_paiement=str(row.get("note_paiement") or ""),
         )

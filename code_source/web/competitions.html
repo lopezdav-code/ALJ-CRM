@@ -346,6 +346,31 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal d'annulation d'un participant ayant payé (report / encaissement + commentaire obligatoire) -->
+  <div id="cancel-modal" class="modal-overlay" style="display:none">
+    <div class="modal-content card" style="max-width:460px">
+      <div class="modal-header">
+        <div class="m-name" style="font-size:16px;">⚠️ Annulation d'un participant ayant payé</div>
+        <button class="icon-btn" onclick="closeCancelModal()" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px;">✕</button>
+      </div>
+      <p id="cm-text" style="font-size:13px; color:#1E293B; line-height:1.5; margin:0 0 10px;"></p>
+      <label class="radio-pill">
+        <input type="radio" name="cm-choice" value="annule_reporte" checked>
+        <span>➡️ <b>Reporter l'argent</b> sur une prochaine épreuve (crédit au bilan)</span>
+      </label>
+      <label class="radio-pill">
+        <input type="radio" name="cm-choice" value="annule_perdu">
+        <span>💰 <b>Encaisser l'argent</b> (perdu pour le compétiteur)</span>
+      </label>
+      <label class="fld" style="margin-top:10px;">Commentaire (obligatoire)</label>
+      <input type="text" id="cm-note" placeholder="Ex : blessure, absence imprévue…">
+      <div class="btn-row" style="margin-top:10px;">
+        <button class="btn btn-muted" onclick="closeCancelModal()">Annuler</button>
+        <button class="btn btn-primary" id="cm-ok" onclick="applyCancelModal()">✔ Valider l'annulation</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <nav>
@@ -565,10 +590,25 @@ function newParticipant(adherentId, selected) {
     statut_paiement: "en_attente",
     montant_paye: 0,
     commande_helloasso: "",
+    note_paiement: "",
     urgence_nom: a.emergency_name || "",
     urgence_tel: a.emergency_phone || "",
     updated_at: new Date().toISOString()
   };
+}
+/* Règle de bascule « Participe » (miroir de domain.competition_models.statut_paiement_apres_bascule) :
+   un participant non invité coché passe « en attente » ; un « en attente » décoché repasse
+   « non invité » ; un annulé re-coché repasse « payé ». « payé » décoché = décision du coach
+   (modal reporter/encaisser) — None ici. */
+function statutApresBascule(statut, checked) {
+  statut = statut || "non_invite";
+  if (checked) {
+    if (statut === "non_invite") return "en_attente";
+    if (statut === "annule_perdu" || statut === "annule_reporte") return "paye";
+    return null;
+  }
+  if (statut === "en_attente") return "non_invite";
+  return null;
 }
 async function updateCompetitionDoc(comp, patch) {
   /* Écrit toujours l'identifiant canonique String(comp.id) (même convention que
@@ -594,8 +634,14 @@ async function updateCompetitionDoc(comp, patch) {
 /* ===================== Rendu : compétitions ===================== */
 const STATUT_LABELS = { en_preparation: "En préparation", en_cours: "En cours", close: "Clos" };
 const STATUT_COLORS = { en_preparation: "#64748B", en_cours: "#D97706", close: "#16A34A" };
-const PAIEMENT_LABELS = { non_invite: "Non invité", en_attente: "En attente", paye: "Payé" };
-const PAIEMENT_BADGE = { paye: "#16A34A", en_attente: "#D97706", non_invite: "#94A3B8" };
+const PAIEMENT_LABELS = {
+  non_invite: "Non invité", en_attente: "En attente", paye: "Payé",
+  annule_perdu: "Annulé — perdu", annule_reporte: "Annulé — report"
+};
+const PAIEMENT_BADGE = {
+  paye: "#16A34A", en_attente: "#D97706", non_invite: "#94A3B8",
+  annule_perdu: "#DC2626", annule_reporte: "#7C3AED"
+};
 
 function populateCoachDropdowns() {
   const sorted = coaches.slice().sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || ""), "fr"));
@@ -791,7 +837,7 @@ function renderParticipants() {
         </label>
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(p.nom)} ${esc(p.prenom)}</div>
-          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}</div>
+          <div class="m-sub">🪪 ${esc(p.num_licence || "sans licence")} · ${esc(p.tarif || "—")}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}${p.date_synchro_helloasso ? ` · 🔄 ${esc(p.date_synchro_helloasso)}` : ""}${p.note_paiement ? ` · 📝 ${esc(p.note_paiement)}` : ""}</div>
           ${p.phone ? `<div style="margin-top:4px"><a href="tel:${esc(p.phone)}" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; background:#EFF6FF; color:#2563EB; border:1px solid #BFDBFE; border-radius:6px; padding:2px 8px;">📞 ${esc(p.phone)}</a></div>` : ""}
         </div>
         <span class="badge" style="background:${PAIEMENT_BADGE[p.statut_paiement] || "#94A3B8"}"
@@ -806,8 +852,19 @@ async function toggleSelection(compId, adherentId, checked) {
   if (!c) return;
   const parts = (c.participants || []).slice();
   const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
+  const existing = idx >= 0 ? parts[idx] : null;
+  if (!checked && existing && existing.statut_paiement === "paye") {
+    // Compétiteur ayant payé : décision du coach (report ou encaissement) + commentaire obligatoire
+    openCancelModal(compId, adherentId, c);
+    return;
+  }
+  const newStatut = statutApresBascule(existing ? existing.statut_paiement : "non_invite", checked);
   const stamp = new Date().toISOString();
-  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: !!checked, updated_at: stamp });
+  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], {
+    selectionne: !!checked,
+    statut_paiement: newStatut || (parts[idx].statut_paiement || "non_invite"),
+    updated_at: stamp
+  });
   else parts.push(newParticipant(adherentId, checked));
   try {
     await updateCompetitionDoc(c, {
@@ -816,6 +873,55 @@ async function toggleSelection(compId, adherentId, checked) {
       nb_selectionnes: parts.filter(p => p.selectionne).length
     });
   } catch (e) {}
+}
+
+/* ============ Modal d'annulation d'un participant ayant payé ============ */
+let cancelModalCtx = null;
+function openCancelModal(compId, adherentId, c) {
+  const p = ((c.participants || []).find(x => Number(x.adherent_id) === Number(adherentId))) || {};
+  cancelModalCtx = { compId, adherentId };
+  $("#cm-text").innerHTML =
+    `<b>${esc(p.nom || "")} ${esc(p.prenom || "")}</b> a payé <b>${Number(p.montant_paye || 0).toFixed(2)} €</b>`
+    + (p.commande_helloasso ? ` (commande ${esc(p.commande_helloasso)})` : "")
+    + " mais ne participe plus à cette épreuve.<br>Aucun remboursement : choisissez le sort de cet argent.";
+  $("#cm-note").value = "";
+  $("#cm-ok").disabled = false;
+  document.querySelector('input[name="cm-choice"][value="annule_reporte"]').checked = true;
+  $("#cancel-modal").style.display = "flex";
+}
+function closeCancelModal() {
+  $("#cancel-modal").style.display = "none";
+  cancelModalCtx = null;
+  renderParticipants();
+}
+async function applyCancelModal() {
+  if (!cancelModalCtx) return;
+  const note = ($("#cm-note").value || "").trim();
+  if (!note) { toast("⚠️ Un commentaire est obligatoire pour expliquer l'annulation."); return; }
+  const statut = document.querySelector('input[name="cm-choice"]:checked').value;
+  const c = findComp(cancelModalCtx.compId);
+  if (!c) { closeCancelModal(); return; }
+  const parts = (c.participants || []).slice();
+  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(cancelModalCtx.adherentId));
+  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], {
+    selectionne: false,
+    statut_paiement: statut,
+    note_paiement: note,
+    updated_at: new Date().toISOString()
+  });
+  const ctx = cancelModalCtx;
+  cancelModalCtx = null;
+  $("#cancel-modal").style.display = "none";
+  try {
+    await updateCompetitionDoc(c, {
+      participants: parts,
+      nb_participants: parts.length,
+      nb_selectionnes: parts.filter(p => p.selectionne).length
+    });
+    toast("🗑 Participation annulée (" + PAIEMENT_LABELS[statut] + ").");
+  } catch (e) {
+    cancelModalCtx = ctx;
+  }
 }
 function listAdherents() {
   return adherents.slice().sort((a, b) =>
@@ -1031,19 +1137,31 @@ function renderAll() {
 /* ===================== Rendu : balance financière ===================== */
 function computeBalances() {
   const map = new Map();
+  const entry = (aid, p) => map.get(aid) || {
+    id: aid, nom: String(p.nom || "").toUpperCase(), prenom: p.prenom || "",
+    num_licence: p.num_licence || "", nb_competitions: 0,
+    total_du: 0, total_paye: 0, details: []
+  };
   for (const c of comps) {
     for (const p of (c.participants || [])) {
-      if (!p.selectionne) continue;
+      const statut = p.statut_paiement || "non_invite";
       const aid = Number(p.adherent_id);
-      const e = map.get(aid) || {
-        id: aid, nom: String(p.nom || "").toUpperCase(), prenom: p.prenom || "",
-        num_licence: p.num_licence || "", nb_competitions: 0,
-        total_du: 0, total_paye: 0, details: []
-      };
+      if (statut === "annule_perdu") continue;
+      if (statut === "annule_reporte") {
+        // Épreuve annulée, argent reporté : pas de dû, le montant reste un
+        // CRÉDIT pour l'athlète (compensera sa prochaine épreuve).
+        const e = entry(aid, p);
+        e.total_paye += Number(p.montant_paye || 0);
+        e.details.push({ nom: c.nom + " (annulée — report)", prix: 0, montant_paye: p.montant_paye, statut_paiement: statut });
+        map.set(aid, e);
+        continue;
+      }
+      if (!p.selectionne) continue;
+      const e = entry(aid, p);
       e.nb_competitions++;
       e.total_du += Number(c.prix || 0);
       e.total_paye += Number(p.montant_paye || 0);
-      e.details.push({ nom: c.nom, prix: c.prix, montant_paye: p.montant_paye, statut_paiement: p.statut_paiement });
+      e.details.push({ nom: c.nom, prix: c.prix, montant_paye: p.montant_paye, statut_paiement: statut });
       map.set(aid, e);
     }
   }
@@ -1091,7 +1209,7 @@ function renderBalancePage() {
     const detailsHtml = (r.details || []).map(d => `
       <div style="font-size: 12px; color: #475569; padding: 4px 0; border-bottom: 1px dashed #F1F5F9; display: flex; justify-content: space-between; align-items: center;">
         <span>🏆 ${esc(d.nom)}</span>
-        <span>Dû: <b>${Number(d.prix || 0).toFixed(2)} €</b> | Payé: <span style="color: ${d.statut_paiement === 'paye' ? '#16A34A' : '#D97706'}">${Number(d.montant_paye || 0).toFixed(2)} €</span></span>
+        <span>Dû: <b>${Number(d.prix || 0).toFixed(2)} €</b> | Payé: <span style="color: ${PAIEMENT_BADGE[d.statut_paiement] || "#D97706"}">${Number(d.montant_paye || 0).toFixed(2)} €</span></span>
       </div>
     `).join("") || `<div style="font-size: 12px; color: #94A3B8; font-style: italic;">Aucune compétition active.</div>`;
 

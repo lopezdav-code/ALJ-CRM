@@ -31,6 +31,9 @@ from domain.competition_models import (
     Participant,
     PAIEMENT_EN_ATTENTE,
     PAIEMENT_NON_INVITE,
+    PAIEMENT_ANNULE_PERDU,
+    PAIEMENT_ANNULE_REPORTE,
+    PAIEMENT_STATUTS_ANNULES,
 )
 from domain.constants import get_active_season
 from domain.age_rules import parse_birth_date, age_at, get_season_start_date
@@ -510,6 +513,7 @@ class CompetitionFirestoreRepository:
             "statut_paiement": statut,
             "montant_paye": 0.0,
             "commande_helloasso": "",
+            "note_paiement": "",
             "urgence_nom": str(adherent_doc.get("emergency_name") or ""),
             "urgence_tel": str(adherent_doc.get("emergency_phone") or ""),
             "updated_at": cls._now_iso(),
@@ -541,6 +545,8 @@ class CompetitionFirestoreRepository:
                 if p.get("adherent_id") == adherent_id:
                     if selectionne:
                         p["selectionne"] = True
+                        if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                            p["statut_paiement"] = "paye"   # réactivation : l'argent est déjà là
                         p["updated_at"] = cls._now_iso()
                     return parts
             adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
@@ -592,6 +598,31 @@ class CompetitionFirestoreRepository:
         return cls._mutate_participants(competition_id, mutate) is not None
 
     @classmethod
+    def mark_cancelled(cls, competition_id: int, adherent_id: int,
+                       statut_annulation: str, note: str = "") -> bool:
+        """Annule la participation d'un compétiteur ayant payé.
+
+        - `statut_annulation` : 'annule_perdu' (argent encaissé définitivement)
+          ou 'annule_reporte' (crédit pour une prochaine épreuve) ;
+        - le montant payé reste comptabilisé sur l'épreuve ;
+        - un commentaire explicatif est enregistré (note_paiement)."""
+        if statut_annulation not in PAIEMENT_STATUTS_ANNULES:
+            statut_annulation = PAIEMENT_ANNULE_PERDU
+
+        def mutate(parts):
+            changed = False
+            for p in parts:
+                if p.get("adherent_id") == adherent_id:
+                    p["selectionne"] = False
+                    p["statut_paiement"] = statut_annulation
+                    if note:
+                        p["note_paiement"] = str(note)
+                    p["updated_at"] = cls._now_iso()
+                    changed = True
+            return parts if changed else None
+        return cls._mutate_participants(competition_id, mutate) is not None
+
+    @classmethod
     def apply_helloasso_payment(cls, competition_id: int, adherent_id: int,
                                 montant_paye: float, date_synchro: str = "",
                                 order_ref: str = "") -> bool:
@@ -600,6 +631,10 @@ class CompetitionFirestoreRepository:
             changed = False
             for p in parts:
                 if p.get("adherent_id") == adherent_id:
+                    if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                        # Annulation explicite du coach : la re-synchronisation
+                        # HelloAsso ne doit pas l'écraser.
+                        return parts if changed else None
                     p["statut_paiement"] = "paye"
                     p["montant_paye"] = float(montant_paye or 0.0)
                     p["commande_helloasso"] = str(order_ref or "")
@@ -658,6 +693,30 @@ class CompetitionFirestoreRepository:
         for c in comps:
             doc = doc_by_id.get(c.id) or {}
             for p in (doc.get("participants") or []):
+                statut = p.get("statut_paiement") or PAIEMENT_NON_INVITE
+                montant = float(p.get("montant_paye") or 0.0)
+
+                if statut == PAIEMENT_ANNULE_REPORTE:
+                    # Argent encaissé mais épreuve annulée : pas de participation due,
+                    # le montant reste un CRÉDIT pour l'athlète (compense la prochaine
+                    # épreuve de la saison dans la balance des paiements).
+                    key = p.get("adherent_id")
+                    if key is None:
+                        continue
+                    a = adh.get(key) or {}
+                    students.setdefault(key, {
+                        "nom": p.get("nom") or a.get("nom") or "",
+                        "prenom": p.get("prenom") or a.get("prenom") or "",
+                        "num_licence": p.get("num_licence") or a.get("num_licence") or "",
+                        "tarif": p.get("tarif") or a.get("tarif") or "",
+                    })
+                    payments_map[(key, c.id)] = {"montant_paye": montant, "prix": 0.0}
+                    continue
+
+                if statut == PAIEMENT_ANNULE_PERDU:
+                    # Argent encaissé définitivement : ni participation ni crédit.
+                    continue
+
                 if not p.get("selectionne"):
                     continue
                 key = p.get("adherent_id")
@@ -670,9 +729,9 @@ class CompetitionFirestoreRepository:
                     "num_licence": p.get("num_licence") or a.get("num_licence") or "",
                     "tarif": p.get("tarif") or a.get("tarif") or "",
                 })
-                participants_map[(key, c.id)] = p.get("statut_paiement") or PAIEMENT_NON_INVITE
+                participants_map[(key, c.id)] = statut
                 payments_map[(key, c.id)] = {
-                    "montant_paye": float(p.get("montant_paye") or 0.0),
+                    "montant_paye": montant,
                     "prix": float(c.prix or 0.0),
                 }
 
@@ -968,6 +1027,8 @@ class CompetitionFirestoreRepository:
                     p["updated_at"] = now
                     parts.append(p)
                     index[adherent_id] = p
+                elif (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                    continue
                 else:
                     p["selectionne"] = True
                 p["statut_paiement"] = "paye"
