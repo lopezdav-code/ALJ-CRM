@@ -12,7 +12,9 @@ _src_dir = os.path.join(os.path.dirname(_tests_dir), "src")
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from server import get_manifest, get_sw, get_competitions_page
+import re
+
+from server import get_manifest, get_sw, get_competitions_page, get_web_version
 
 
 class TestMobilePWA(unittest.TestCase):
@@ -34,8 +36,20 @@ class TestMobilePWA(unittest.TestCase):
         self.assertTrue(os.path.exists(resp.path))
         with open(resp.path, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("alj-escalade-v4", content)
+        self.assertRegex(content, r'CACHE_NAME = "alj-escalade-v\d+"')
         self.assertIn("addEventListener(\"fetch\"", content)
+
+    def test_web_version_matches_service_worker_cache(self):
+        """La version affichée par la page doit suivre le nom du cache du service worker."""
+        version = get_web_version()["web_version"]
+        self.assertRegex(version, r"^\d+$")
+        with open(get_sw().path, "r", encoding="utf-8") as f:
+            sw = f.read()
+        self.assertIn(f'CACHE_NAME = "alj-escalade-v{version}"', sw)
+        with open(get_competitions_page().path, "r", encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn(f"(v{version})</title>", html)
+        self.assertIn(f'id="web-version">v{version}<', html)
 
     def test_competitions_html_pwa_and_email_features(self):
         resp = get_competitions_page()

@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ALJ Escalade — Gestion des Compétitions</title>
+<!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
+<meta name="alj-web-version" content="6">
+<title>ALJ Escalade — Gestion des Compétitions (v6)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,6 +35,8 @@
   }
   header .title { flex: 1; min-width: 0; }
   header .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .title .web-version { font-size: 11px; font-weight: 600; color: #94A3B8; margin-left: 4px; }
+  header .title .web-version.outdated { color: #FBBF24; cursor: pointer; text-decoration: underline; }
   header .title small { display: block; color: #94A3B8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .icon-btn {
     flex: 0 0 auto; min-width: 40px; height: 40px; border: none; border-radius: 10px;
@@ -146,7 +150,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions</b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v6</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
@@ -2244,6 +2248,45 @@ function wireEvents() {
   $("#bal-search").addEventListener("input", renderBalancePage);
 }
 
+// ---------- Version de la page ----------
+// La version affichée est celle de la page réellement chargée (éventuellement
+// servie depuis le cache du service worker). On la compare à la version en ligne
+// (/api/* n'est jamais mis en cache) pour signaler une mise à jour disponible.
+const WEB_VERSION = (document.querySelector('meta[name="alj-web-version"]') || {}).content || "?";
+
+async function checkWebVersion() {
+  const badge = $("#web-version");
+  badge.textContent = "v" + WEB_VERSION;
+  badge.title = "Version de la page : v" + WEB_VERSION;
+  try {
+    const r = await fetch("/api/web-version", { cache: "no-store" });
+    if (!r.ok) return;
+    const online = String((await r.json()).web_version || "");
+    if (online && online !== WEB_VERSION) {
+      badge.textContent = "v" + WEB_VERSION + " ⬆ v" + online;
+      badge.title = "Une nouvelle version est en ligne : toucher pour mettre à jour";
+      badge.classList.add("outdated");
+      badge.onclick = forceWebUpdate;
+    } else {
+      badge.title = "Version de la page : v" + WEB_VERSION + " (à jour)";
+    }
+  } catch (e) { /* hors-ligne : on garde la version locale */ }
+}
+
+async function forceWebUpdate() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) { console.warn("Mise à jour forcée :", e); }
+  location.reload();
+}
+
 (async function boot() {
   // Enregistrement PWA Service Worker (mode hors-ligne & installation smartphone)
   if ('serviceWorker' in navigator) {
@@ -2251,6 +2294,7 @@ function wireEvents() {
       console.warn("⚠️ Enregistrement Service Worker PWA :", err);
     });
   }
+  checkWebVersion();
 
   wireEvents();
 

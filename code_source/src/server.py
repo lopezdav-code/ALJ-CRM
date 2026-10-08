@@ -902,6 +902,23 @@ def root_route():
     }
 
 
+def _read_web_version() -> str:
+    """Version de la page web (balise <meta name="alj-web-version"> de competitions.html)."""
+    import re
+    try:
+        with open(_competitions_page_path, "r", encoding="utf-8") as f:
+            m = re.search(r'<meta name="alj-web-version" content="([^"]+)"', f.read(4000))
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+@app.get("/api/web-version")
+def get_web_version():
+    """Version en ligne de la page web (jamais mise en cache par le service worker)."""
+    return {"web_version": _read_web_version(), "app_version": APP_VERSION}
+
+
 @app.get("/competitions", response_class=HTMLResponse)
 def get_competitions_page():
     """Page web de gestion des compétitions : données en temps réel depuis
