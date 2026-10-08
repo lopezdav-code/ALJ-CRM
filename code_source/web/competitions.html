@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="8">
-<title>ALJ Escalade — Gestion des Compétitions (v8)</title>
+<meta name="alj-web-version" content="9">
+<title>ALJ Escalade — Gestion des Compétitions (v9)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -150,7 +150,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v8</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v9</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
@@ -192,7 +192,7 @@
   </section>
 
   <!-- ================= Liste des compétitions ================= -->
-  <section class="page" id="page-comps">
+  <section class="page active" id="page-comps">
     <div class="btn-row" id="comp-create-row" style="display:none; margin-bottom:10px">
       <button class="btn btn-primary" id="f-open-create">➕ Créer une compétition</button>
     </div>
@@ -220,7 +220,7 @@
           <select id="f-statut">
             <option value="en_preparation">En préparation</option>
             <option value="en_cours">En cours</option>
-            <option value="close">Clos</option>
+            <option value="close">Archivée</option>
           </select>
         </div>
       </div>
@@ -258,7 +258,15 @@
 
     <div class="section-h">📋 Compétitions enregistrées</div>
     <div class="count-line" id="comps-count">—</div>
-    <div id="comps-list"></div>
+    <div class="btn-row" id="comps-archive-tools" style="margin-bottom:10px">
+      <button class="btn btn-edit btn-mini" id="comps-archive-past" style="display:none">📦 Archiver les compétitions passées</button>
+      <button class="btn btn-muted btn-mini" id="comps-toggle-archived" style="display:none">🗂 Afficher les archives</button>
+    </div>
+    <div id="comps-list"><div class="empty">⏳ Chargement des compétitions…</div></div>
+    <div id="comps-archived-wrap" style="display:none">
+      <div class="section-h" style="background:#E2E8F0;color:#475569">📦 Compétitions archivées</div>
+      <div id="comps-archived-list"></div>
+    </div>
   </section>
 
   <!-- ================= Sélection des compétiteurs ================= -->
@@ -779,6 +787,7 @@ auth.onAuthStateChanged(async u => {
     $("#setup-not-logged").style.display = "none";
     $("#setup-logged").style.display = "block";
     applyRolePermissions();
+    if (isAuthorizedUser() && isSetupPageActive()) showPage("comps");
     startListeners();
   } else {
     stopListeners();
@@ -836,7 +845,7 @@ function onSnapshotArrived(name) {
   if (snapshotsReady >= needed) {
     setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate(lastSyncAt.toISOString()));
     renderAll();
-    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
+    if (isSetupPageActive()) showPage("comps");
   } else {
     renderAll();
   }
@@ -853,8 +862,14 @@ function onSnapshotError(name, err) {
   const needed = isCoachUser() ? 4 : 3;
   if (snapshotsReady >= needed) {
     renderAll();
-    if (document.querySelector(".page.active").id === "page-setup") showPage("comps");
+    if (isSetupPageActive()) showPage("comps");
   }
+}
+/* Page active absente (premier rendu) ou page de connexion : la liste des
+   compétitions doit s'afficher dès que l'utilisateur est reconnu (F5). */
+function isSetupPageActive() {
+  const a = document.querySelector(".page.active");
+  return !a || a.id === "page-setup";
 }
 
 /* ===================== Accès aux données (Firestore) ===================== */
@@ -983,7 +998,47 @@ function mutateParticipants(comp, fn) {
 }
 
 /* ===================== Rendu : compétitions ===================== */
-const STATUT_LABELS = { en_preparation: "En préparation", en_cours: "En cours", close: "Clos" };
+const STATUT_LABELS = { en_preparation: "En préparation", en_cours: "En cours", close: "Archivée" };
+/* Archivage : statut « close » (déjà prévu dans le modèle, cf. domain.competition_models). */
+const STATUT_ARCHIVE = "close";
+let showArchivedComps = false;
+function isArchivedComp(c) { return (c && c.statut) === STATUT_ARCHIVE; }
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+/* Épreuve passée = date strictement antérieure à aujourd'hui (les épreuves sans date ne le sont jamais). */
+function isPastComp(c) { return !!(c && c.date_competition) && String(c.date_competition) < todayIso(); }
+/* <option> du sélecteur d'épreuves : actives d'abord, archivées dans un groupe à part. */
+function compOptionsHtml(list) {
+  const opt = c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`;
+  const actives = list.filter(c => !isArchivedComp(c));
+  const archived = list.filter(isArchivedComp);
+  return actives.map(opt).join("") +
+    (archived.length ? `<optgroup label="📦 Archivées">${archived.map(opt).join("")}</optgroup>` : "");
+}
+async function setCompArchived(id, archived) {
+  if (!isCoachUser()) { toast("🔒 Archivage réservé aux entraîneurs et gestionnaires."); return; }
+  const c = findComp(id);
+  if (!c) return;
+  try {
+    await updateCompetitionDoc(c, { statut: archived ? STATUT_ARCHIVE : "en_preparation" });
+    toast(archived ? `📦 « ${c.nom} » archivée.` : `♻️ « ${c.nom} » désarchivée.`);
+  } catch (e) { /* message déjà affiché par txCompetitionDoc */ }
+}
+async function archivePastComps() {
+  if (!isCoachUser()) { toast("🔒 Archivage réservé aux entraîneurs et gestionnaires."); return; }
+  const past = comps.filter(c => !isArchivedComp(c) && isPastComp(c));
+  if (!past.length) { toast("Aucune compétition passée à archiver."); return; }
+  if (!confirm(`Archiver ${past.length} compétition${past.length > 1 ? "s" : ""} passée${past.length > 1 ? "s" : ""} ?\n\n` +
+               past.map(c => "• " + c.nom + " (" + c.date_competition + ")").join("\n") +
+               "\n\nElles resteront consultables via « Afficher les archives » et comptées dans la balance.")) return;
+  let ok = 0;
+  for (const c of past) {
+    try { await updateCompetitionDoc(c, { statut: STATUT_ARCHIVE }); ok++; } catch (e) { /* toast déjà affiché */ }
+  }
+  toast(`📦 ${ok} compétition${ok > 1 ? "s" : ""} archivée${ok > 1 ? "s" : ""}.`);
+}
 const STATUT_COLORS = { en_preparation: "#64748B", en_cours: "#D97706", close: "#16A34A" };
 const PAIEMENT_LABELS = {
   non_invite: "Non invité", en_attente: "En attente", paye: "Payé",
@@ -1005,10 +1060,8 @@ function currentCompId() {
   const sel = $("#p-comp-select");
   return sel.value ? sel.value : null;
 }
-function renderComps() {
-  const list = sortedCompetitions();
-  $("#comps-count").textContent = `${list.length} compétition${list.length > 1 ? "s" : ""}`;
-  $("#comps-list").innerHTML = list.map(c => {
+function compCardHtml(c) {
+    const archived = isArchivedComp(c);
     const coachesText = (c.coaches && c.coaches.length > 0) ? `🏃 Coachs : ${c.coaches.join(", ")}` : "🏃 Aucun coach";
     const parts = c.participants || [];
     const nbParticipe = parts.filter(p => p.selectionne).length;
@@ -1026,18 +1079,41 @@ function renderComps() {
           </div>
           <div class="m-sub" style="margin-top:2px; color: #475569;">${esc(coachesText)}</div>
         </div>
-        <span class="badge" style="display: none; background:${STATUT_COLORS[c.statut] || "#94A3B8"}">${STATUT_LABELS[c.statut] || esc(c.statut)}</span>
+        <span class="badge" style="display: ${archived ? "inline-block" : "none"}; background:#64748B">📦 Archivée</span>
       </div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-primary btn-mini" onclick="event.stopPropagation(); openParticipants('${esc(String(c.id))}')">👁 Voir détail — compétiteurs</button>
         ${isCoachUser() ? `<button class="btn btn-edit btn-mini" onclick="event.stopPropagation(); openEdit('${esc(String(c.id))}')">✏️ Modifier</button>` : ""}
+        ${isCoachUser() ? (archived
+          ? `<button class="btn btn-muted btn-mini" onclick="event.stopPropagation(); setCompArchived('${esc(String(c.id))}', false)">♻️ Désarchiver</button>`
+          : `<button class="btn btn-muted btn-mini" onclick="event.stopPropagation(); setCompArchived('${esc(String(c.id))}', true)">📦 Archiver</button>`) : ""}
       </div>
     </div>`;
-  }).join("") || `<div class="empty">Aucune compétition : créez la première avec le bouton « Créer une compétition » ci-dessus.</div>`;
+}
+function renderComps() {
+  const list = sortedCompetitions();
+  const actives = list.filter(c => !isArchivedComp(c));
+  const archived = list.filter(isArchivedComp);
+  const nbPast = actives.filter(isPastComp).length;
+  $("#comps-count").textContent = `${actives.length} compétition${actives.length > 1 ? "s" : ""}` +
+    (archived.length ? ` · ${archived.length} archivée${archived.length > 1 ? "s" : ""}` : "");
+  $("#comps-list").innerHTML = actives.map(compCardHtml).join("") ||
+    (archived.length
+      ? `<div class="empty">Aucune compétition en cours : toutes sont archivées.</div>`
+      : `<div class="empty">Aucune compétition : créez la première avec le bouton « Créer une compétition » ci-dessus.</div>`);
+
+  const archBtn = $("#comps-archive-past");
+  archBtn.style.display = (isCoachUser() && nbPast > 0) ? "" : "none";
+  archBtn.textContent = `📦 Archiver les compétitions passées (${nbPast})`;
+  const togBtn = $("#comps-toggle-archived");
+  togBtn.style.display = archived.length ? "" : "none";
+  togBtn.textContent = showArchivedComps ? `🙈 Masquer les archives` : `🗂 Afficher les archives (${archived.length})`;
+  $("#comps-archived-wrap").style.display = (showArchivedComps && archived.length) ? "block" : "none";
+  $("#comps-archived-list").innerHTML = showArchivedComps ? archived.map(compCardHtml).join("") : "";
 
   const sel = $("#p-comp-select");
   const prev = sel.value;
-  sel.innerHTML = list.map(c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`).join("");
+  sel.innerHTML = compOptionsHtml(list);
   if (prev && list.some(c => String(c.id) === prev)) sel.value = prev;
   renderParticipants();
 }
@@ -1773,8 +1849,7 @@ function openAttachModal(itemId) {
   // 1. Liste des compétitions
   const compSel = $("#ha-modal-comp-select");
   const compList = sortedCompetitions();
-  compSel.innerHTML = '<option value="">— Ignorer (ne pas rattacher) —</option>' +
-    compList.map(c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`).join("");
+  compSel.innerHTML = '<option value="">— Ignorer (ne pas rattacher) —</option>' + compOptionsHtml(compList);
 
   if (it.competition_id && compList.some(c => String(c.id) === String(it.competition_id))) {
     compSel.value = String(it.competition_id);
@@ -2278,6 +2353,8 @@ function wireEvents() {
   $("#logout-btn-page").addEventListener("click", logout);
   $("#f-open-create").addEventListener("click", openCreateForm);
   $("#f-close-new").addEventListener("click", resetCompForm);
+  $("#comps-archive-past").addEventListener("click", archivePastComps);
+  $("#comps-toggle-archived").addEventListener("click", () => { showArchivedComps = !showArchivedComps; renderComps(); });
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);

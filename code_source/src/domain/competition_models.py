@@ -15,7 +15,7 @@ STATUTS_COMPETITION = (STATUT_EN_PREPARATION, STATUT_EN_COURS, STATUT_CLOSE)
 LIBELLES_STATUT_COMPETITION = {
     STATUT_EN_PREPARATION: "En préparation",
     STATUT_EN_COURS: "En cours",
-    STATUT_CLOSE: "Clos",
+    STATUT_CLOSE: "Archivée",
 }
 
 # Statuts de paiement d'un participant
