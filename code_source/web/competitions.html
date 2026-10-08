@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="10">
-<title>ALJ Escalade — Gestion des Compétitions (v10)</title>
+<meta name="alj-web-version" content="11">
+<title>ALJ Escalade — Gestion des Compétitions (v11)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -156,9 +156,10 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v10</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v11</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
+  <a class="icon-btn" id="annuaire-link" href="/index" title="Annuaire des adhérents" style="display:none;align-items:center;text-decoration:none">📇</a>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
   <button class="icon-btn" id="config-btn" title="Compte / Configuration">⚙️</button>
 </header>
@@ -672,6 +673,12 @@ function applyRolePermissions() {
     return;
   }
   if (nav) nav.style.display = "flex";
+  // Lien vers l'annuaire des adhérents (données réservées aux coachs)
+  const annLink = $("#annuaire-link");
+  if (annLink) {
+    annLink.style.display = isCoach ? "inline-flex" : "none";
+    if (/github\.io$/.test(location.hostname)) annLink.href = "index.html";
+  }
 
   // 1. Boutons de navigation (masquer HelloAsso, Coachs et Balance pour les comptes non coachs)
   const navHelloAsso = document.querySelector('nav button[data-page="helloasso"]');
@@ -2650,6 +2657,15 @@ async function forceWebUpdate() {
       setSyncInfo("Connexion Firebase…");
       const credential = firebase.auth.GoogleAuthProvider.credential(null, oauthToken);
       await auth.signInWithCredential(credential);
+      // Connexion demandée depuis une autre page du site (annuaire) : on y retourne
+      const back = sessionStorage.getItem("alj_after_login") || "";
+      sessionStorage.removeItem("alj_after_login");
+      if (/^\/[^\/\\]/.test(back)) { location.replace(back); return; }
+    } else if (new URLSearchParams(location.search).get("login") === "1") {
+      // Arrivée depuis l'annuaire (bouton « Se connecter ») : lance la connexion Google
+      history.replaceState(null, "", location.pathname);
+      login();
+      return;
     }
   } catch (e) {
     showAuthError(e);

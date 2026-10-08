@@ -76,7 +76,7 @@ class TestRoles(unittest.TestCase):
 
     def test_required_role(self):
         r = api_auth.required_role
-        for path in ("/", "/health", "/competitions", "/sw.js", "/manifest.webmanifest",
+        for path in ("/", "/health", "/competitions", "/index", "/sw.js", "/manifest.webmanifest",
                      "/api/web-version", "/webhooks/helloasso", "/annuaire/", "/annuaire/index.html"):
             self.assertIsNone(r("GET", path), path)
         self.assertIsNone(r("POST", "/webhooks/helloasso"))
@@ -119,15 +119,16 @@ class TestRoles(unittest.TestCase):
         for d in api_auth.ADMIN_EMAIL_DOMAINS:
             self.assertIn(d.replace(".", "\\\\."), rules)
 
-        with open(os.path.join(_code_root, "web", "competitions.html"), encoding="utf-8") as f:
-            html = f.read()
+        for page in ("competitions.html", "index.html"):
+            with open(os.path.join(_code_root, "web", page), encoding="utf-8") as f:
+                html = f.read()
 
-        def js_list(name):
-            body = re.search(r"const %s = \[(.*?)\];" % name, html, re.S).group(1)
-            return set(re.findall(r'"([^"]+)"', body))
+            def js_list(name):
+                body = re.search(r"const %s = \[(.*?)\];" % name, html, re.S).group(1)
+                return set(re.findall(r'"([^"]+)"', body))
 
-        self.assertEqual(js_list("COACH_EMAILS"), set(api_auth.ADMIN_EMAILS) | set(api_auth.COACH_EMAILS))
-        self.assertEqual(js_list("READONLY_EMAILS"), set(api_auth.READONLY_EMAILS))
+            self.assertEqual(js_list("COACH_EMAILS"), set(api_auth.ADMIN_EMAILS) | set(api_auth.COACH_EMAILS), page)
+            self.assertEqual(js_list("READONLY_EMAILS"), set(api_auth.READONLY_EMAILS), page)
 
 
 class TestTokenVerification(_CertsMixin, unittest.TestCase):

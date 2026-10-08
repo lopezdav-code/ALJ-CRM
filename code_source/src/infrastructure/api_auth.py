@@ -65,6 +65,7 @@ PUBLIC_PATHS = frozenset({
     "/",
     "/health",
     "/competitions",
+    "/index",
     "/sw.js",
     "/manifest.webmanifest",
     "/favicon.ico",

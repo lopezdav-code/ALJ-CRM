@@ -29,8 +29,23 @@ Les collections `adherents` et `planning` (annuaire lu par la PWA et le webhook)
   « Télécharger » / synchronisation HelloAsso.
 - Hors connexion : l'application travaille sur la copie locale ; les modifications
   partent au retour du réseau (pied de page : « ⏳ N modification(s) à envoyer »).
-- Une copie du cache est toujours déposée sur Google Drive (`GOOGLE_DRIVE_DB_ID`), en
-  lecture seule, pour l'annuaire web `index.html`.
+- Une copie du cache est encore déposée sur Google Drive (`GOOGLE_DRIVE_DB_ID`), en
+  lecture seule (sauvegarde) ; l'annuaire web ne l'utilise plus.
+
+## Annuaire web (`web/index.html`, URL `/index`)
+
+- Lit directement les collections `crm_seasons`, `crm_users`, `crm_orders`,
+  `crm_purchases` et `crm_planning` et reconstruit la vue `v_adherents_legacy`
+  (purchases ⨝ users ⨝ orders ⨝ seasons) dans le navigateur.
+- Réservé aux coachs/admins (règle `crm_*`). Connexion Google commune avec
+  `/competitions` : le bouton « Se connecter » passe par `/competitions?login=1`
+  (URI de redirection OAuth déjà autorisée) puis revient sur l'annuaire
+  (`sessionStorage.alj_after_login`).
+- Lecture incrémentale : 1er chargement complet (mis en cache hors-ligne par le SDK),
+  ensuite seuls les documents dont `_modified_at` ≥ dernier vu − 5 min sont relus.
+  Le bouton 🔄 force une relecture complète.
+- Même numéro de version que `competitions.html` (meta `alj-web-version`, titre,
+  badge, `CACHE_NAME` de `sw.js`).
 
 Code : `src/infrastructure/cloud_database.py`.
 

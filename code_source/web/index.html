@@ -3,13 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ALJ Escalade — Annuaire Adhérents (lecture seule)</title>
+<!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
+<meta name="alj-web-version" content="11">
+<title>ALJ Escalade — Annuaire des adhérents (v11)</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1E293B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/annuaire/logo.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
+  /* Charte identique à competitions.html */
   :root {
     --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
     --line: #E2E8F0; --blue: #2563EB; --blue-dark: #1D4ED8;
+    --green: #16A34A; --amber: #D97706; --red: #DC2626;
     --header-h: 58px; --nav-h: 62px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -25,81 +36,88 @@
   }
   header .title { flex: 1; min-width: 0; }
   header .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .title .web-version { font-size: 11px; font-weight: 600; color: #94A3B8; margin-left: 4px; }
+  header .title .web-version.outdated { color: #FBBF24; cursor: pointer; text-decoration: underline; }
   header .title small { display: block; color: #94A3B8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .icon-btn {
-    flex: 0 0 auto; width: 40px; height: 40px; border: none; border-radius: 10px;
-    background: rgba(255,255,255,.12); color: #F8FAFC; font-size: 18px; cursor: pointer;
+    flex: 0 0 auto; min-width: 40px; height: 40px; border: none; border-radius: 10px;
+    background: rgba(255,255,255,.12); color: #F8FAFC; font-size: 17px; cursor: pointer; padding: 0 10px;
+    font-weight: 600; display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
   }
   .icon-btn:active { background: rgba(255,255,255,.3); }
   .icon-btn.spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  main { max-width: 640px; margin: 0 auto; padding: calc(var(--header-h) + 10px) 12px calc(var(--nav-h) + 18px); }
+  main { max-width: 720px; margin: 0 auto; padding: calc(var(--header-h) + 10px) 12px calc(var(--nav-h) + 18px); }
   .page { display: none; }
   .page.active { display: block; }
 
-  /* Cartes adhérents */
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-    padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.06);
-    cursor: pointer;
-  }
-  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+  .card.member { cursor: pointer; }
   .m-name { font-weight: 700; font-size: 15px; }
-  .m-tarif { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .badge { font-size: 10px; font-weight: 700; color: #fff; border-radius: 999px; padding: 3px 9px; white-space: nowrap; margin-top: 2px; flex: 0 0 auto; }
+  .m-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge { font-size: 10px; font-weight: 700; color: #fff; border-radius: 999px; padding: 3px 9px; white-space: nowrap; flex: 0 0 auto; }
+  .row-flex { display: flex; align-items: center; gap: 8px; }
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+
   .m-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
-  .m-links a {
+  .link-btn {
     text-decoration: none; color: var(--blue); background: #EFF6FF; border: 1px solid #BFDBFE;
-    border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600;
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
   }
   .m-detail { display: none; margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 9px; }
   .card.open .m-detail { display: block; }
-  .m-detail .row { display: flex; gap: 6px; font-size: 12.5px; color: #475569; margin-bottom: 4px; }
-  .m-detail .row b { flex: 0 0 auto; }
+  .kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .kv th { text-align: left; vertical-align: top; color: #64748B; font-weight: 600; padding: 3px 8px 3px 0; white-space: nowrap; width: 1%; }
+  .kv td { color: #0F172A; padding: 3px 0; word-break: break-word; }
 
-  /* Filtres */
-  .filters-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
-  .filters-card h3 { margin: 0 0 10px; font-size: 13px; }
-  .filters-card .hint { margin: 0 0 4px; font-size: 11.5px; color: var(--muted); }
-  select, input[type="text"], input[type="search"] {
-    width: 100%; padding: 10px 12px; border: 1px solid #CBD5E1; border-radius: 10px;
+  input[type="text"], input[type="search"], select {
+    width: 100%; padding: 9px 11px; border: 1px solid #CBD5E1; border-radius: 9px;
     font-size: 14px; color: var(--ink); background: #fff; outline: none;
   }
-  .search input { margin-bottom: 10px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip { padding: 7px 11px; border: 1px solid #CBD5E1; border-radius: 999px; background: #F8FAFC; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
-  .section-h {
-    margin: 13px 0 5px; padding: 7px 12px; border-radius: 8px;
-    background: #DBEAFE; color: #1E3A8A; font-weight: 700; font-size: 12.5px;
-  }
+  .btn { border: none; border-radius: 9px; padding: 10px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-muted { background: #E2E8F0; color: #475569; }
+  .btn-mini { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn-row .btn { flex: 1; }
+
+  .section-h { margin: 13px 0 5px; padding: 7px 12px; border-radius: 8px; background: #DBEAFE; color: #1E3A8A; font-weight: 700; font-size: 12.5px; }
   .subsection-h { margin: 7px 0 2px 10px; color: #1D4ED8; font-weight: 700; font-style: italic; font-size: 12px; }
+  .count-line { color: #64748B; font-size: 12px; margin: 6px 2px 10px; }
+  .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 0; }
+  .card h3 { margin: 0 0 10px; font-size: 13px; }
+  .hint { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+
+  .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .filter-chip {
+    display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; background: #F1F5F9; color: #475569;
+    border: 1px solid #CBD5E1; cursor: pointer; user-select: none; transition: all .15s;
+  }
+  .filter-chip.active { background: #EFF6FF; color: var(--blue); border-color: var(--blue); }
+
+  .kpis { display: flex; gap: 8px; justify-content: space-between; text-align: center; padding: 10px 12px; }
+  .kpis > div { flex: 1; }
+  .kpis > div + div { border-left: 1px solid var(--line); }
+  .kpis .v { font-size: 19px; font-weight: 800; }
+  .kpis .l { font-size: 11px; color: #64748B; font-weight: 600; }
+
   .opt { display: flex; align-items: center; gap: 9px; padding: 8px 10px 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
   .opt:active { background: #F1F5F9; }
   .opt input { width: 19px; height: 19px; accent-color: var(--blue); flex: 0 0 auto; }
   .opt .n { margin-left: auto; color: var(--muted); font-size: 11px; }
-  .indent1 { padding-left: 18px; }
-  .indent2 { padding-left: 32px; }
-  .mini-row { display: flex; gap: 8px; margin-top: 10px; }
-  .mini { flex: 1; padding: 9px 10px; border: 1px solid #CBD5E1; border-radius: 9px; background: #F8FAFC; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .mini:active { background: #E2E8F0; }
 
-  /* Configuration */
-  .setup-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
-  .setup-box h2 { margin: 0 0 8px; font-size: 16px; }
-  .setup-box p, .setup-box li { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
-  .setup-box code { background: #F1F5F9; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; word-break: break-all; }
-  .setup-box label { display: block; font-size: 12px; font-weight: 700; margin: 13px 0 4px; }
-  .primary { width: 100%; margin-top: 16px; padding: 12px; border: none; border-radius: 10px; background: var(--blue); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
-  .primary:active { background: var(--blue-dark); }
+  .urg-row { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+  .urg-row b { flex: 0 0 auto; color: #B91C1C; }
+  .urg-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .urg-row .link-btn { margin-left: auto; }
 
   nav {
     position: fixed; inset: auto 0 0 0; height: var(--nav-h); display: flex; z-index: 30;
     background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
   }
   nav button { flex: 1; border: none; background: none; display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--muted); padding-top: 8px; cursor: pointer; }
-  nav button .ico { font-size: 19px; }
   nav button.active { color: var(--blue); }
 
   #toast {
@@ -108,87 +126,93 @@
     font-size: 12.5px; max-width: 90vw; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 60;
   }
   #toast.show { opacity: 1; }
-  .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; }
+
+  .setup-box h2 { margin: 0 0 8px; font-size: 16px; }
+  .setup-box p, .setup-box li { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+  .setup-box code { background: #F1F5F9; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; word-break: break-all; }
 </style>
 </head>
 <body>
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire</b>
-    <small style="color:#94A3B8;font-size:11px">Lecture seule · <span id="sync-info">Aucune donnée chargée</span></small>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v11</span></b>
+    <small id="sync-info">Connexion à Firebase…</small>
   </div>
-  <button class="icon-btn" id="refresh-btn" title="Rafraîchir depuis Google Drive">🔄</button>
-  <button class="icon-btn" id="config-btn" title="Configuration">⚙️</button>
+  <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
+  <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
+  <button class="icon-btn" id="config-btn" title="Compte">⚙️</button>
 </header>
 
 <main>
-  <!-- ================= Configuration (première utilisation) ================= -->
+  <!-- ================= Connexion (Firebase Auth) ================= -->
   <section class="page" id="page-setup">
-    <div class="setup-box">
-      <h2 style="margin:0 0 8px;font-size:17px">⚙️ Configuration</h2>
-      <p style="font-size:13px;color:#475569;line-height:1.55">
-        Cette page affiche l'annuaire des adhérents en <b>lecture seule</b>. Elle télécharge la base
-        <code>database.db</code> depuis <b>votre Google Drive</b> (connexion Google), puis la garde en
-        <b>cache du navigateur</b> (IndexedDB). Le bouton 🔄 recharge une version à jour ; sans connexion,
-        la dernière base en cache reste utilisable. Les identifiants du club sont <b>pré-chargés</b> :
-        appuyez sur 🔄 pour vous connecter. Modifiez-les ci-dessous seulement si nécessaire.</p>
-      <p style="font-size:13px;color:#475569"><b>Si vous devez reconfigurer (une seule fois) :</b></p>
-      <ol style="font-size:12.5px;color:#64748B;line-height:1.6;padding-left:18px">
-        <li><b>ID client OAuth</b> : Google Cloud Console → API &amp; Services → Identifiants →
-            créer un <i>ID client OAuth</i> de type <b>Application Web</b> (API Google Drive activée),
-            puis <b>publier l'application</b> (Écran de consentement OAuth → Audience → Publier l'application)
-            pour que tous les comptes Google puissent se connecter sans être listés en « test ».</li>
-        <li>Dans cet ID client, ajoutez en <b>URI de redirection autorisée</b> l'adresse exacte
-            de cette page : <code id="redirect-hint"></code><br>
-            (et pour un usage local : <code>http://localhost:8000/annuaire/</code>)</li>
-        <li><b>ID du fichier database.db</b> sur le Drive : visible dans l'application de bureau
-            (onglet Paramètres → secret <code>GOOGLE_DRIVE_DB_ID</code>)</li>
-        <li>Collez les deux valeurs ci-dessous puis appuyez sur « Se connecter » :
-            le navigateur est <b>redirigé vers la page d'authentification Google</b>, puis revient
-            automatiquement ici avec la base.</li>
-      </ol>
-      <label>Identifiant client OAuth (Google)</label>
-      <input type="text" id="cfg-client-id" placeholder="123456789-xxxx.apps.googleusercontent.com" autocomplete="off">
-      <label>ID du fichier database.db sur Google Drive</label>
-      <input type="text" id="cfg-file-id" placeholder="1AbC…xYz" autocomplete="off">
-      <button class="primary" id="cfg-save">💾 Enregistrer &amp; se connecter</button>
+    <div class="card setup-box">
+      <h2>🔐 Connexion</h2>
+      <p>L'annuaire des adhérents est réservé aux coachs et gestionnaires du club. Les données
+         sont lues en <b>temps réel</b> dans la base du club (Google Cloud Firestore) : toute
+         modification faite dans l'application de bureau apparaît ici automatiquement.
+         Cette page est en <b>lecture seule</b>.</p>
+      <div id="setup-not-logged">
+        <div class="btn-row">
+          <button class="btn btn-primary" id="login-btn" style="flex:2">🔑 Se connecter avec Google</button>
+        </div>
+        <p style="margin-top:8px">Utilisez votre compte <code>@alj-escalade.fr</code> ou un compte coach
+           autorisé par le club. La connexion est commune avec la page des compétitions.</p>
+      </div>
+      <div id="setup-logged" style="display:none">
+        <p>Connecté en tant que <b id="setup-email">—</b></p>
+        <div id="setup-role-badge" style="display:inline-block; margin-bottom:10px; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;"></div>
+        <div id="setup-unauthorized" style="display:none; background:#FEE2E2; border:1px solid #FCA5A5; border-radius:8px; padding:12px; margin-bottom:12px; color:#991B1B;">
+          <b>⛔ Accès refusé</b>
+          <p style="margin:6px 0 0; font-size:12.5px; color:#B91C1C; line-height:1.5;" id="setup-unauthorized-msg">
+            L'annuaire contient des données personnelles (contacts d'urgence, santé) : il est réservé aux coachs
+            et administrateurs du club. Déconnectez-vous et utilisez un compte autorisé, ou contactez le club.
+          </p>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-muted" id="logout-btn" style="flex:2">🚪 Se déconnecter</button>
+        </div>
+      </div>
     </div>
   </section>
 
   <!-- ================= Liste adhérents ================= -->
-  <section class="page" id="page-members">
-    <input type="search" id="search" placeholder="🔍 Nom, prénom ou tarif…" style="width:100%;padding:11px 13px;border:1px solid #CBD5E1;border-radius:10px;font-size:14px;background:#fff">
-    <div style="color:#64748B;font-size:12px;margin:6px 2px 10px" id="count-line">—</div>
+  <section class="page active" id="page-members">
+    <div class="card kpis">
+      <div><div class="v" style="color:var(--blue)" id="kpi-shown">—</div><div class="l">Affichés</div></div>
+      <div><div class="v" style="color:#1E293B" id="kpi-season">—</div><div class="l">Inscrits saison</div></div>
+      <div><div class="v" style="color:var(--red)" id="kpi-cancel">—</div><div class="l">Annulés saison</div></div>
+    </div>
+    <input type="search" id="search" placeholder="🔍 Nom, prénom, tarif ou licence…">
+    <div class="count-line" id="count-line">⏳ Chargement de l'annuaire…</div>
     <div id="members-list"></div>
   </section>
 
   <!-- ================= Contacts d'urgence ================= -->
   <section class="page" id="page-urgency">
-    <input type="search" id="urgency-search" placeholder="🔍 Nom de l'adhérent (élève)…" style="width:100%;padding:11px 13px;border:1px solid #CBD5E1;border-radius:10px;font-size:14px;background:#fff">
-    <div style="color:#64748B;font-size:12px;margin:6px 2px 10px" id="urgency-count">Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts (téléphone adhérent + contacts d'urgence cliquables).</div>
+    <input type="search" id="urgency-search" placeholder="🔍 Nom de l'adhérent…">
+    <div class="count-line" id="urgency-count">Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts.</div>
     <div id="urgency-list"></div>
   </section>
 
   <!-- ================= Filtres ================= -->
   <section class="page" id="page-filters">
-    <div class="filters-card">
+    <div class="card">
       <h3>📅 Saison</h3>
       <select id="season-select"></select>
     </div>
-    <div class="filters-card">
-      <h3>📌 Statut</h3>
-      <div class="chips" id="status-chips"></div>
+    <div class="card">
+      <h3>📌 Statut de l'inscription</h3>
+      <div class="filter-chips" id="status-chips"></div>
     </div>
-    <div class="filters-card">
+    <div class="card">
       <h3>🧗 Créneaux affichés</h3>
-      <p class="hint">Cochez les créneaux à inclure. Un créneau regroupe un ou plusieurs tarifs HelloAsso.
-         Appuyez longuement… non, simple clic sur une ligne pour cocher. Le détail (téléphone, urgences)
-         s'affiche en touchant une fiche.</p>
+      <p class="hint">Un créneau regroupe un ou plusieurs tarifs HelloAsso. Touchez une ligne pour la cocher ou la décocher.</p>
       <div id="creneau-list"></div>
-      <div class="mini-row">
-        <button class="mini" id="cren-all">Tout cocher</button>
-        <button class="mini" id="cren-none">Tout décocher</button>
+      <div class="btn-row">
+        <button class="btn btn-muted btn-mini" id="cren-all">Tout cocher</button>
+        <button class="btn btn-muted btn-mini" id="cren-none">Tout décocher</button>
       </div>
     </div>
   </section>
@@ -205,34 +229,44 @@
 <script>
 "use strict";
 
-/* ===================== Configuration (localStorage) ===================== */
-const CFG_KEY = "alj_annuaire_config";
-const CACHE_KEY = "database";
+/* ===================== Firebase (Auth + Firestore) ===================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDtwH7A6XokZZjUcyoL83gx9ZjyuN4IJoQ",
+  authDomain: "smart-amplifier-510811-n6.firebaseapp.com",
+  projectId: "smart-amplifier-510811-n6",
+  storageBucket: "smart-amplifier-510811-n6.firebasestorage.app",
+  messagingSenderId: "796572126711",
+  appId: "1:796572126711:web:a827fd60c313ba2c46f2f2"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const fsdb = firebase.firestore();
+
+/* Base principale des adhérents (ex-database.db) : collections crm_<table>.
+   L'annuaire reconstruit la vue v_adherents_legacy :
+   purchases ⨝ users ⨝ orders ⨝ seasons (+ planning pour les créneaux). */
+const CRM = ["crm_seasons", "crm_users", "crm_orders", "crm_purchases", "crm_planning"];
 const FILTER_KEY = "alj_annuaire_filters";
-const DB_NAME = "alj_annuaire", DB_STORE = "kv";
-const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
-// Valeurs pré-chargées pour le club (modifiables via ⚙️) :
-// l'ID client OAuth est public par conception ; l'accès au fichier database.db
-// reste contrôlé par les autorisations de partage Drive du fichier.
-const DEFAULT_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com";
-const LEGACY_CLIENT_ID = "224808708472-rj3v78ilvmd0i4hse35pdo5ln72p6b3b.apps.googleusercontent.com";
-const DEFAULT_FILE_ID = "1ctJi08b33sr5l5WZjflExGbALo3Au8U7";
+let user = null;
+let userClaims = {};
+let listeners = [];
+let raw = {};          // { collection: Map(docId -> data) }
+let ready = new Set(); // collections reçues au moins une fois
+let lastSyncAt = null;
+let renderTimer = null;
 
-let cfg = Object.assign(
-  { clientId: DEFAULT_CLIENT_ID, fileId: DEFAULT_FILE_ID },
-  JSON.parse(localStorage.getItem(CFG_KEY) || "{}")
-);
-if (cfg.clientId === LEGACY_CLIENT_ID) cfg.clientId = DEFAULT_CLIENT_ID;
-let filters = Object.assign(
-  { status: "", season: "2026-2027", groups: {}, others: {} },
-  JSON.parse(localStorage.getItem(FILTER_KEY) || "{}")
-);
-let currentSeason = filters.season || "2026-2027";
+let DATA = { members: [], creneaux: [], seasons: [], activeSeason: "", itemsCache: [], filterCache: null };
+let filters = Object.assign({ status: "", season: "", groups: {}, others: {}, search: "" },
+  (function () { try { return JSON.parse(localStorage.getItem(FILTER_KEY) || "{}"); } catch (e) { return {}; } })());
+let currentSeason = filters.season || "";
 
+/* ===================== Utilitaires ===================== */
 const $ = s => document.querySelector(s);
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function normKey(s) {
+  return String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
 function toast(msg, ms = 3500) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms);
@@ -242,82 +276,223 @@ function fmtDate(iso) {
   const d = new Date(iso);
   return isNaN(d) ? String(iso) : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+function fmtDay(s) {
+  const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s || "");
+}
+function setSyncInfo(msg) { $("#sync-info").textContent = msg; }
 function showPage(name) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById("page-" + name).classList.add("active");
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === name));
 }
-
-/* ===================== Cache IndexedDB (navigateur) ===================== */
-function idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(DB_NAME, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-}
-async function idbGet(key) {
-  const db = await idbOpen();
-  return new Promise((res, rej) => {
-    const t = db.transaction(DB_STORE).objectStore(DB_STORE).get(key);
-    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
-  });
-}
-async function idbSet(key, val) {
-  const db = await idbOpen();
-  return new Promise((res, rej) => {
-    const tx = db.transaction(DB_STORE, "readwrite");
-    tx.objectStore(DB_STORE).put(val, key);
-    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
-  });
+function isSetupPageActive() {
+  const a = document.querySelector(".page.active");
+  return !a || a.id === "page-setup";
 }
 
-/* ===================== Parsing SQLite (sql.js, lecture pure) ===================== */
-let SQL = null;
-let DATA = { members: [], creneaux: [], seasons: [], meta: null, filterCache: null };
-
-async function initSql() {
-  if (!SQL) SQL = await initSqlJs({ locateFile: f => SQLJS_BASE + f });
-  return SQL;
+/* ===================== Rôles (mêmes listes que competitions.html / firestore.rules) ===================== */
+const COACH_EMAILS = [
+  "lopez.dav@gmail.com",
+  "stephane.loridant@orange.fr"
+];
+const READONLY_EMAILS = [
+  "muah.did@gmail.com",
+  "clement.dlf78@gmail.com",
+  "delphine0910@gmail.com"
+];
+function isCoachUser() {
+  if (!user || !user.email) return false;
+  const email = user.email.toLowerCase().trim();
+  if (email.endsWith("@alj-escalade.fr")) return true;
+  if (COACH_EMAILS.includes(email)) return true;
+  return !!(userClaims && (userClaims.coach || userClaims.admin));
 }
-function queryRows(db, sql, params) {
-  const stmt = db.prepare(sql);
-  if (params) stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+function isReadOnlyUser() {
+  if (!user || !user.email) return false;
+  const email = user.email.toLowerCase().trim();
+  return READONLY_EMAILS.includes(email) || !!(userClaims && userClaims.readonly);
 }
 
+/* ===================== Authentification ===================== */
+/* La connexion Google se fait via la page des compétitions (même origine, même
+   compte Firebase, URI de redirection OAuth déjà autorisée), qui renvoie ensuite ici. */
+const COMPETITIONS_URL = /github\.io$/.test(location.hostname) ? "competitions.html" : "/competitions";
+function login() {
+  sessionStorage.setItem("alj_after_login", location.pathname + location.search);
+  location.assign(COMPETITIONS_URL + (COMPETITIONS_URL.includes("?") ? "&" : "?") + "login=1");
+}
+function logout() { auth.signOut().catch(() => {}); }
+
+function applyRole() {
+  const coach = isCoachUser();
+  const nav = $("nav");
+  $("#setup-unauthorized").style.display = (user && !coach) ? "block" : "none";
+  const badge = $("#setup-role-badge");
+  if (user) {
+    const r = coach ? ["🏃 Coach / administrateur", "#DCFCE7", "#166534"]
+            : isReadOnlyUser() ? ["👁 Consultation (compétitions seulement)", "#FEF3C7", "#92400E"]
+            : ["⛔ Non autorisé", "#FEE2E2", "#991B1B"];
+    badge.textContent = r[0]; badge.style.background = r[1]; badge.style.color = r[2];
+  }
+  nav.style.display = coach ? "flex" : "none";
+  if (!coach) showPage("setup");
+}
+
+auth.onAuthStateChanged(async u => {
+  user = u;
+  userClaims = {};
+  if (u) {
+    try { userClaims = ((await u.getIdTokenResult()) || {}).claims || {}; } catch (e) {}
+    $("#setup-email").textContent = u.email || "(compte sans e-mail)";
+    $("#setup-not-logged").style.display = "none";
+    $("#setup-logged").style.display = "block";
+    applyRole();
+    if (isCoachUser()) {
+      if (isSetupPageActive()) showPage("members");
+      startListeners(false);
+    } else {
+      stopListeners();
+      setSyncInfo("⛔ Accès réservé aux coachs");
+    }
+  } else {
+    stopListeners();
+    $("#setup-not-logged").style.display = "block";
+    $("#setup-logged").style.display = "none";
+    applyRole();
+    setSyncInfo("Non connecté");
+    showPage("setup");
+  }
+});
+
+/* ===================== Lecture Firestore (incrémentale) ===================== */
+/* Au premier chargement, chaque collection est lue en entier puis conservée dans
+   le cache hors-ligne de Firestore. Aux chargements suivants, seules les fiches
+   modifiées depuis (champ _modified_at) sont relues : peu de lectures facturées.
+   Le bouton 🔄 force une relecture complète. */
+function stopListeners() {
+  listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
+  listeners = [];
+}
+function tsMillis(v) {
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  const t = Date.parse(v); return isNaN(t) ? 0 : t;
+}
+async function startListeners(full) {
+  stopListeners();
+  raw = {}; ready = new Set();
+  setSyncInfo(full ? "Relecture complète de la base…" : "Chargement de la base…");
+  for (const name of CRM) {
+    const col = fsdb.collection(name);
+    const map = new Map();
+    raw[name] = map;
+    let watermark = 0;
+    if (!full) {
+      try {
+        const cached = await col.get({ source: "cache" });
+        cached.forEach(d => { const x = d.data(); map.set(d.id, x); watermark = Math.max(watermark, tsMillis(x._modified_at)); });
+      } catch (e) { /* pas de cache */ }
+    }
+    let query = col;
+    if (watermark > 0) {
+      // marge de 5 min pour les horloges / écritures en cours
+      query = col.where("_modified_at", ">=", firebase.firestore.Timestamp.fromMillis(watermark - 300000));
+    }
+    listeners.push(query.onSnapshot(
+      snap => {
+        snap.docChanges().forEach(ch => {
+          if (ch.type === "removed" && watermark === 0) map.delete(ch.doc.id);
+          else if (ch.type !== "removed") map.set(ch.doc.id, ch.doc.data());
+        });
+        onSnapshotArrived(name, snap.metadata.fromCache);
+      },
+      err => onSnapshotError(name, err)));
+  }
+}
+function onSnapshotArrived(name, fromCache) {
+  ready.add(name);
+  if (!fromCache) lastSyncAt = new Date();
+  if (ready.size < CRM.length) { setSyncInfo(`Chargement de la base… (${ready.size}/${CRM.length})`); return; }
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => {
+    rebuild();
+    setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate((lastSyncAt || new Date()).toISOString()));
+    $("#refresh-btn").classList.remove("spin");
+  }, 150);
+}
+function onSnapshotError(name, err) {
+  console.error("Firestore " + name + " :", err);
+  $("#refresh-btn").classList.remove("spin");
+  if (err.code === "permission-denied") {
+    setSyncInfo("🔒 Accès refusé à la base des adhérents");
+    $("#count-line").textContent = "Accès refusé : l'annuaire est réservé aux coachs.";
+  } else {
+    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
+    toast("❌ Firestore : " + (err.message || err), 9000);
+  }
+}
+
+/* ===================== Reconstruction de la vue adhérents ===================== */
 const STATUS_MAP = {
   "processed": "Traité", "validated": "Validé", "validé": "Validé", "valide": "Validé",
   "terminé": "Terminé", "termine": "Terminé", "annulé": "Annulé", "annule": "Annulé",
   "canceled": "Annulé", "en cours": "En cours",
 };
-const STATUS_COLORS = { "Validé": "#10B981", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#F59E0B", "Annulé": "#EF4444" };
+const STATUS_COLORS = { "Validé": "#16A34A", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#D97706", "Annulé": "#DC2626" };
 function normalizeStatus(s) {
-  const raw = String(s || "").trim();
-  return STATUS_MAP[raw.toLowerCase()] || raw;
+  const r = String(s || "").trim();
+  return STATUS_MAP[r.toLowerCase()] || r;
+}
+function alive(map) {
+  const out = [];
+  for (const [id, d] of map) if (d && d._deleted !== true) out.push(Object.assign({ _id: id }, d));
+  return out;
+}
+function byId(list) {
+  const o = {};
+  for (const d of list) o[String(d.id != null ? d.id : d._id)] = d;
+  return o;
 }
 
-function parseDatabase(bytes) {
-  const db = new SQL.Database(new Uint8Array(bytes));
+function buildData() {
+  const seasons = alive(raw.crm_seasons);
+  const seasonById = byId(seasons);
+  const users = byId(alive(raw.crm_users));
+  const orders = byId(alive(raw.crm_orders));
+  const members = [];
+  for (const p of alive(raw.crm_purchases)) {
+    const u = users[String(p.user_id)], o = orders[String(p.order_id)];
+    if (!u || !o) continue;
+    const s = seasonById[String(o.season_id)];
+    if (!s) continue;
+    members.push({
+      user_id: u.id, last_name: u.last_name || "", first_name: u.first_name || "",
+      birth_date: u.birth_date || "", gender: u.gender || "", address: u.address || "",
+      zip_code: u.zip_code || "", city: u.city || "", phone: u.phone || "",
+      email_primary: u.email_primary || "", email_secondary: u.email_secondary || "",
+      emergency1_name: u.emergency1_name || "", emergency1_phone: u.emergency1_phone || "",
+      emergency2_name: u.emergency2_name || "", emergency2_phone: u.emergency2_phone || "",
+      licence_ffme: u.licence_ffme || "", health_commitment: u.health_commitment || "",
+      photo_auth: u.photo_auth || "", badge_rouge: u.badge_rouge || "", autonomie_bloc: u.autonomie_bloc || "",
+      payer: [o.payer_first_name, o.payer_last_name].filter(Boolean).join(" "), payer_email: o.payer_email || "",
+      order_ref: o.order_ref || "", order_date: o.order_date || "",
+      tarif_name: p.tarif_name || "", amount: p.amount, status: p.status || "",
+      status_norm: normalizeStatus(p.status), document_sante: p.document_sante || "",
+      season_name: s.name || "",
+    });
+  }
+  const coll = new Intl.Collator("fr", { sensitivity: "base" });
+  members.sort((a, b) => coll.compare(a.last_name, b.last_name) || coll.compare(a.first_name, b.first_name));
 
-  const members = queryRows(db, `
-    SELECT last_name, first_name, tarif_name, status, order_date, order_ref, phone,
-           email_primary, email_secondary, birth_date, city, licence_ffme,
-           emergency1_name, emergency1_phone, emergency2_name, emergency2_phone, season_name
-    FROM v_adherents_legacy
-    ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE
-  `).map(m => Object.assign(m, { status_norm: normalizeStatus(m.status) }));
-
-  const seasons = queryRows(db, "SELECT name FROM seasons ORDER BY name DESC").map(r => r.name).filter(Boolean);
+  const seasonNames = seasons.map(s => s.name).filter(Boolean).sort().reverse();
+  const act = seasons.find(s => String(s.is_active) === "1" || s.is_active === true);
+  const activeSeason = act ? act.name : (seasonNames[0] || "");
 
   // Un groupe de créneau peut regrouper plusieurs tarifs HelloAsso
-  const creneaux = [];
-  const byName = {};
-  for (const item of queryRows(db, "SELECT groupe, jour, horaires, helloasso_tarifs FROM planning ORDER BY id")) {
+  const creneaux = [], byName = {};
+  const planning = alive(raw.crm_planning).sort((a, b) => Number(a.id) - Number(b.id));
+  for (const item of planning) {
     const g = String(item.groupe || "").trim();
     if (!g) continue;
     let c = byName[g];
@@ -330,14 +505,28 @@ function parseDatabase(bytes) {
     }
   }
   creneaux.sort((a, b) => a.groupe.localeCompare(b.groupe, "fr"));
-  db.close();
-  return { members, creneaux, seasons };
+  return { members, seasons: seasonNames, activeSeason, creneaux };
+}
+
+function rebuild() {
+  const built = buildData();
+  DATA = Object.assign(DATA, built);
+  DATA.itemsCache = buildCreneauItems(DATA.creneaux);
+  if (!DATA.seasons.includes(currentSeason)) currentSeason = DATA.activeSeason || DATA.seasons[0] || "";
+  computeFilterCache();
+  for (const it of DATA.itemsCache)
+    if (it.kind === "group" && filters.groups[it.raw] === undefined)
+      filters.groups[it.raw] = !isWaiting(it.raw, it.label);
+  for (const t of Object.keys(DATA.filterCache.others))
+    if (filters.others["other:" + t] === undefined)
+      filters.others["other:" + t] = !isWaiting(t, t);
+  renderFilters();
+  saveFilters();
+  applyFilters();
+  renderUrgency();
 }
 
 /* =============== Hiérarchie des créneaux (portage du bureau) =============== */
-function normKey(s) {
-  return String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
 function accentClassPattern(word) {
   const tr = { "e": "[eèéêë]", "a": "[aàâä]", "i": "[iîï]", "o": "[oôö]", "u": "[uùûü]", "c": "[cç]", "y": "[yÿ]" };
   return word.split("").map(ch => tr[ch] || ch).join("");
@@ -350,8 +539,8 @@ function shortenGroupLabel(name, keyword, dropPatterns) {
   if (rest.startsWith("(") && rest.endsWith(")")) rest = rest.slice(1, -1).trim();
   return rest || name;
 }
-function isWaiting(raw, label) {
-  return normKey(raw).includes("attente") || normKey(label).includes("attente");
+function isWaiting(rawName, label) {
+  return normKey(rawName).includes("attente") || normKey(label).includes("attente");
 }
 function buildCreneauItems(creneaux) {
   const SECTION_ORDER = ["Collège", "Enfants", "Perfectionnement", "Compétition"];
@@ -392,254 +581,16 @@ function buildCreneauItems(creneaux) {
   return items;
 }
 
-/* ===================== État des filtres + rendu ===================== */
-function saveFilters() {
-  filters.season = currentSeason;
-  filters.search = $("#search").value;
-  localStorage.setItem(FILTER_KEY, JSON.stringify(filters));
-}
-
-function statusBadge(st) {
-  const c = { "Validé": "#10B981", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#F59E0B", "Annulé": "#EF4444" }[st] || "#94A3B8";
-  return `<span class="badge" style="background:${c}">${esc(st || "—")}</span>`;
-}
-
-function memberCard(m) {
-  const tel = String(m.phone || "").replace(/[^\d+]/g, "");
-  const mail = String(m.email_primary || "").trim();
-  let detail = "";
-  if (m.birth_date) detail += row("🎂 Naissance", m.birth_date);
-  if (m.city) detail += row("📍 Ville", m.city);
-  if (m.licence_ffme) detail += row("🪪 Licence FFME", m.licence_ffme);
-  if (m.emergency1_name) detail += row("🚨 Urgence", (m.emergency1_name || "") + " " + (m.emergency1_phone || ""));
-  if (m.emergency2_name) detail += row("🚨 Urgence 2", (m.emergency2_name || "") + " " + (m.emergency2_phone || ""));
-  if (m.email_secondary) detail += row("✉️ E-mail 2", m.email_secondary);
-  if (m.order_date) detail += row("🧾 Inscription", m.order_date + (m.order_ref ? " (" + m.order_ref + ")" : ""));
-  return `<div class="card" onclick="this.classList.toggle('open')">
-    <div class="card-top" style="display:flex;justify-content:space-between;gap:8px">
-      <div><div class="m-name">${esc(m.first_name)} ${esc(m.last_name)}</div>
-      <div class="m-tarif">${esc(m.tarif_name || "—")}</div></div>
-      ${statusBadge(m.status_norm)}
-    </div>
-    ${(tel || mail) ? `<div class="m-links">${tel ? `<a href="tel:${esc(tel)}">📞 Appeler</a>` : ""}${mail ? `<a href="mailto:${esc(mail)}">✉️ E-mail</a>` : ""}</div>` : ""}
-    ${detail ? `<div class="m-detail">${detail}</div>` : ""}
-  </div>`;
-  function row(label, val) { return `<div class="row"><b>${label} :</b><span>${esc(val)}</span></div>`; }
-}
-
-function isGroupChecked(it) {
-  if (filters.groups[it.raw] !== undefined) return filters.groups[it.raw];
-  return !isWaiting(it.raw, it.label);  // Défaut : tout coché sauf liste d'attente
-}
-
-function renderFilters() {
-  // Saison
-  const sel = $("#season-select");
-  sel.innerHTML = DATA.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
-  sel.value = DATA.seasons.includes(currentSeason) ? currentSeason : (DATA.seasons[0] || "2026-2027");
-  currentSeason = sel.value;
-
-  // Statuts présents
-  const chips = $("#status-chips");
-  chips.innerHTML = "";
-  addChip(chips, "Tous", "");
-  for (const st of ["Validé", "Traité", "Terminé", "En cours", "Annulé"]) {
-    const n = DATA.filterCache.members.filter(m => m.status_norm === st).length;
-    if (n > 0) addChip(chips, st, st, ` (${n})`);
-  }
-  updateChips();
-
-  // Hiérarchie des créneaux
-  const wrap = $("#creneau-list");
-  wrap.innerHTML = "";
-  for (const it of DATA.itemsCache) {
-    if (it.kind === "section") {
-      const d = document.createElement("div");
-      d.className = "section-h"; d.textContent = "📁 " + it.label;
-      wrap.appendChild(d);
-    } else if (it.kind === "sub") {
-      const d = document.createElement("div");
-      d.className = "subsection-h"; d.textContent = "📂 " + it.label;
-      wrap.appendChild(d);
-    } else {
-      wrap.appendChild(creneauRow(it.label, it.raw, it.tarifs, it.count, false));
-    }
-  }
-  const otherKeys = Object.keys(DATA.filterCache.others).sort((a, b) => a.localeCompare(b, "fr"));
-  if (otherKeys.length) {
-    const d = document.createElement("div");
-    d.className = "section-h"; d.textContent = "📁 Autres tarifs (hors créneau)";
-    wrap.appendChild(d);
-    for (const t of otherKeys)
-      wrap.appendChild(creneauRow(t, "other:" + t, [t], DATA.filterCache.others[t], true));
-  }
-}
-
-function addChip(parent, label, value, suffix) {
-  const b = document.createElement("button");
-  b.type = "button"; b.className = "chip";
-  b.dataset.value = value; b.textContent = label + (suffix || "");
-  b.addEventListener("click", () => {
-    filters.status = value;
-    saveFilters(); updateChips(); applyFilters();
-  });
-  parent.appendChild(b);
-}
-function updateChips() {
-  document.querySelectorAll("#status-chips .chip").forEach(c =>
-    c.classList.toggle("on", (c.dataset.value || "") === (filters.status || "")));
-}
-
-function creneauRow(label, raw, tarifs, count, isOther) {
-  const div = document.createElement("label");
-  div.className = "opt indent1";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.checked = isOther
-    ? (filters.others[raw] !== undefined ? filters.others[raw] : !isWaiting(raw, label))
-    : (filters.groups[raw] !== undefined ? filters.groups[raw] : !isWaiting(raw, label));
-  cb.addEventListener("change", () => {
-    if (isOther) filters.others[raw] = cb.checked;
-    else filters.groups[raw] = cb.checked;
-    saveFilters(); applyFilters();
-  });
-  const span = document.createElement("span");
-  span.textContent = label;
-  const n = document.createElement("span");
-  n.className = "n"; n.textContent = count;
-  div.append(cb, span, n);
-  return div;
-}
-
-function allowedTarifKeys() {
-  const allowed = new Set();
-  for (const it of DATA.itemsCache) {
-    if (it.kind !== "group") continue;
-    const on = filters.groups[it.raw] !== undefined ? filters.groups[it.raw] : !isWaiting(it.raw, it.label);
-    if (on) for (const t of it.tarifs) allowed.add(normKey(t));
-  }
-  for (const [raw, on] of Object.entries(filters.others)) {
-    if (!on) continue;
-    const t = raw.startsWith("other:") ? raw.slice(6) : raw;
-    allowed.add(normKey(t));
-  }
-  return allowed;
-}
-
-function applyFilters() {
-  const q = normKey($("#search").value);
-  const allowed = allowedTarifKeys();
-  const st = filters.status || "";
-  const rows = DATA.filterCache.members.filter(m => {
-    const k = normKey(m.tarif_name);
-    if (k && !allowed.has(k)) return false;
-    if (st && m.status_norm !== st) return false;
-    if (q && !(normKey(m.last_name).includes(q) || normKey(m.first_name).includes(q) || normKey(m.tarif_name).includes(q))) return false;
-    return true;
-  });
-  $("#count-line").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} affiché${rows.length > 1 ? "s" : ""}`;
-  $("#members-list").innerHTML = rows.map(memberCard).join("") ||
-    `<div class="empty">Aucun adhérent ne correspond aux filtres.</div>`;
-}
-
-/* ===================== Google Drive (auth par redirection plein écran) ===================== */
-const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-let accessToken = null;
-let tokenExpiresAt = 0;
-
-function redirectUri() {
-  return location.origin + location.pathname;  // hash exclu
-}
-
-function startGoogleAuth() {
-  // Redirection vers la page d'authentification Google ; le retour se fait sur
-  // cette même page avec le token dans le fragment (#access_token=...)
-  const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
-    b => b.toString(16).padStart(2, "0")).join("");
-  sessionStorage.setItem("alj_oauth_state", state);
-  const url = OAUTH_AUTH_URL
-    + "?client_id=" + encodeURIComponent(cfg.clientId)
-    + "&redirect_uri=" + encodeURIComponent(redirectUri())
-    + "&response_type=token"
-    + "&scope=" + encodeURIComponent(DRIVE_SCOPE)
-    + "&state=" + state
-    + "&prompt=select_account";
-  location.assign(url);
-}
-
-function readTokenFromHash() {
-  if (!location.hash || location.hash.length < 2) return null;
-  const params = new URLSearchParams(location.hash.slice(1));
-  history.replaceState(null, "", location.pathname + location.search);  // nettoie l'URL
-  if (params.get("error")) throw new Error("Connexion Google refusée : " + params.get("error"));
-  const token = params.get("access_token");
-  const state = params.get("state");
-  const expected = sessionStorage.getItem("alj_oauth_state");
-  sessionStorage.removeItem("alj_oauth_state");
-  if (!token) throw new Error("Réponse Google invalide (token absent)");
-  if (!state || state !== expected) throw new Error("Réponse Google invalide (state) — réessayez");
-  const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
-  tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
-  return token;
-}
-
-function sessionToken() {
-  // Token mémorisé dans l'onglet (évite de repasser par Google à chaque 🔄)
-  try {
-    const o = JSON.parse(sessionStorage.getItem("alj_oauth_token") || "null");
-    if (o && o.token && o.exp > Date.now()) return o.token;
-  } catch (e) {}
-  return null;
-}
-
-async function downloadDb(token) {
-  const headers = { Authorization: "Bearer " + token };
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.fileId)}?fields=name,modifiedTime`, { headers });
-  if (!metaRes.ok) throw new Error("Fichier Drive introuvable (ID invalide ou accès refusé) [" + metaRes.status + "]");
-  const meta = await metaRes.json();
-  const mediaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.fileId)}?alt=media`, { headers });
-  if (!mediaRes.ok) throw new Error("Téléchargement de database.db échoué [" + mediaRes.status + "]");
-  return { bytes: await mediaRes.arrayBuffer(), meta };
-}
-
-/* ===================== Cycle de vie ===================== */
-async function loadData(bytes, metaInfo) {
-  await initSql();
-  const parsed = parseDatabase(bytes);
-  parsed.meta = metaInfo;
-  DATA = parsed;
-  DATA.itemsCache = buildCreneauItems(DATA.creneaux);
-  if (!DATA.seasons.includes(currentSeason)) currentSeason = DATA.seasons.includes("2026-2027") ? "2026-2027" : (DATA.seasons[0] || "2026-2027");
-  filters.season = currentSeason;
-  DATA.filterCache = null;
-  computeFilterCache();
-  // Sélections par défaut (première fois) : tout coché sauf liste d'attente
-  for (const it of DATA.itemsCache)
-    if (it.kind === "group" && filters.groups[it.raw] === undefined)
-      filters.groups[it.raw] = !isWaiting(it.raw, it.label);
-  for (const t of Object.keys(DATA.filterCache.others))
-    if (filters.others["other:" + t] === undefined)
-      filters.others["other:" + t] = !isWaiting(t, t);
-  renderFilters();
-  saveFilters();
-  applyFilters();
-  renderUrgency();
-  showPage("members");
-}
-
 function computeFilterCache() {
   const seasonMembers = DATA.members.filter(m => (m.season_name || "") === currentSeason);
   const covered = new Set();
   for (const c of DATA.creneaux) for (const t of c.tarifs) covered.add(normKey(t));
-  const others = {};
+  const others = {}, tarifIndex = {};
   for (const m of seasonMembers) {
     const k = normKey(m.tarif_name);
-    if (k && !covered.has(k)) others[m.tarif_name] = (others[m.tarif_name] || 0) + 1;
-  }
-  const tarifIndex = {};
-  for (const m of seasonMembers) {
-    const k = normKey(m.tarif_name);
-    if (k) tarifIndex[k] = (tarifIndex[k] || 0) + 1;
+    if (!k) continue;
+    tarifIndex[k] = (tarifIndex[k] || 0) + 1;
+    if (!covered.has(k)) others[m.tarif_name] = (others[m.tarif_name] || 0) + 1;
   }
   for (const it of DATA.itemsCache) {
     if (it.kind !== "group") continue;
@@ -648,193 +599,253 @@ function computeFilterCache() {
   DATA.filterCache = { members: seasonMembers, others };
 }
 
-async function loadFromCache() {
-  const cached = await idbGet(CACHE_KEY);
-  if (!cached || !cached.bytes) return false;
-  await initSql();
-  await loadData(cached.bytes, cached);
-  $("#sync-info").textContent = "💾 Cache du " + fmtDate(cached.savedAt) +
-    (cached.driveModified ? " · Drive : " + fmtDate(cached.driveModified) : "");
-  return true;
+/* ===================== Filtres + rendu ===================== */
+function saveFilters() {
+  filters.season = currentSeason;
+  filters.search = $("#search").value;
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch (e) {}
+}
+function statusBadge(st) {
+  return `<span class="badge" style="background:${STATUS_COLORS[st] || "#94A3B8"}">${esc(st || "—")}</span>`;
+}
+function telHref(phone) { return String(phone || "").replace(/[^\d+]/g, ""); }
+
+function memberCard(m) {
+  const tel = telHref(m.phone);
+  const mail = String(m.email_primary || "").trim();
+  const rows = [];
+  const add = (k, v) => { if (v !== "" && v != null) rows.push(`<tr><th>${k}</th><td>${esc(v)}</td></tr>`); };
+  add("🎂 Naissance", fmtDay(m.birth_date));
+  add("📍 Adresse", [m.address, [m.zip_code, m.city].filter(Boolean).join(" ")].filter(Boolean).join(", "));
+  add("📞 Téléphone", m.phone);
+  add("✉️ E-mail", m.email_primary);
+  add("✉️ E-mail 2", m.email_secondary);
+  add("🪪 Licence FFME", m.licence_ffme);
+  if (m.emergency1_name || m.emergency1_phone) add("🚨 Urgence 1", [m.emergency1_name, m.emergency1_phone].filter(Boolean).join(" · "));
+  if (m.emergency2_name || m.emergency2_phone) add("🚨 Urgence 2", [m.emergency2_name, m.emergency2_phone].filter(Boolean).join(" · "));
+  add("🩺 Santé", [m.health_commitment && ("engagement : " + m.health_commitment), m.document_sante && ("document : " + m.document_sante)].filter(Boolean).join(" · "));
+  add("📷 Droit à l'image", m.photo_auth);
+  add("🔴 Badge rouge", m.badge_rouge);
+  add("🧗 Autonomie bloc", m.autonomie_bloc);
+  if (m.payer && normKey(m.payer) !== normKey(m.first_name + " " + m.last_name)) add("💳 Payeur", m.payer + (m.payer_email ? " (" + m.payer_email + ")" : ""));
+  add("🧾 Inscription", [fmtDay(m.order_date), m.order_ref, m.amount != null && m.amount !== "" ? m.amount + " €" : ""].filter(Boolean).join(" · "));
+  return `<div class="card member" onclick="this.classList.toggle('open')">
+    <div class="card-top">
+      <div><div class="m-name">${esc(m.first_name)} ${esc(m.last_name)}</div>
+      <div class="m-sub">${esc(m.tarif_name || "—")}</div></div>
+      ${statusBadge(m.status_norm)}
+    </div>
+    ${(tel || mail) ? `<div class="m-links" onclick="event.stopPropagation()">${tel ? `<a class="link-btn" href="tel:${esc(tel)}">📞 Appeler</a>` : ""}${mail ? `<a class="link-btn" href="mailto:${esc(mail)}">✉️ E-mail</a>` : ""}</div>` : ""}
+    ${rows.length ? `<div class="m-detail"><table class="kv">${rows.join("")}</table></div>` : ""}
+  </div>`;
 }
 
-async function refreshFromDrive() {
-  if (!cfg || !cfg.clientId || !cfg.fileId) { showPage("setup"); return; }
-  const btn = $("#refresh-btn"); btn.classList.add("spin");
-  try {
-    // 1. Réutiliser le token de session, sinon redirection vers la connexion Google
-    if (!accessToken) accessToken = sessionToken();
-    if (!accessToken) {
-      $("#sync-info").textContent = "Redirection vers la page d'authentification Google…";
-      $("#refresh-btn").classList.remove("spin");
-      startGoogleAuth();
-      return;
-    }
-    $("#sync-info").textContent = "Téléchargement de database.db depuis Google Drive…";
-    const { bytes, meta } = await downloadDb(accessToken);
-    const info = { bytes, fileId: cfg.fileId, driveModified: meta.modifiedTime, savedAt: new Date().toISOString() };
-    await idbSet(CACHE_KEY, info);
-    await initSql();
-    await loadData(bytes, info);
-    $("#sync-info").textContent = "☁️ Base Drive du " + fmtDate(meta.modifiedTime);
-    sessionStorage.removeItem("alj_auth_retry_done");  // succès : réautorise une reconnexion future
-    toast("✅ Base chargée depuis Google Drive (" + DATA.filterCache.members.length + " lignes, " + fmtDate(meta.modifiedTime) + ")");
-  } catch (e) {
-    console.error(e);
-    accessToken = null;
-    sessionStorage.removeItem("alj_oauth_token");
-    // Distinguer les erreurs : 401 = reconnexion, 403/404 = config à corriger
-    // (jamais de redirection automatique dans ces cas-là, sinon boucle infinie)
-    const msg = String(e.message || e);
-    const m = msg.match(/\[(\d{3})\]/);
-    const status = m ? parseInt(m[1], 10) : 0;
-    let friendly = msg;
-    if (status === 404) {
-      friendly = "Fichier Drive introuvable : vérifiez l'ID du fichier database.db (⚙️ Configuration).";
-    } else if (status === 403) {
-      friendly = "Accès refusé : le compte Google connecté n'a pas accès à database.db. "
-        + "Connectez le compte propriétaire du fichier (ou partagez-le avec le compte utilisé).";
-    } else if (status === 401) {
-      friendly = "Session Google expirée — reconnexion…";
-    }
-    $("#sync-info").textContent = "⚠️ " + friendly;
-    toast("❌ " + friendly, 9000);
-    if (status === 401 && !sessionStorage.getItem("alj_auth_retry_done")) {
-      // Une seule reconnexion automatique (garde persistante même après redirection)
-      sessionStorage.setItem("alj_auth_retry_done", "1");
-      $("#refresh-btn").classList.remove("spin");
-      startGoogleAuth();
-      return;
-    }
-    if (status === 404) showPage("setup");
-    return;
-  } finally {
-    $("#refresh-btn").classList.remove("spin");
+function renderFilters() {
+  const sel = $("#season-select");
+  sel.innerHTML = DATA.seasons.map(s => `<option value="${esc(s)}">${esc(s)}${s === DATA.activeSeason ? " (saison active)" : ""}</option>`).join("");
+  sel.value = currentSeason;
+
+  const chips = $("#status-chips");
+  chips.innerHTML = "";
+  addChip(chips, "Tous", "", ` (${DATA.filterCache.members.length})`);
+  for (const st of ["Validé", "Traité", "Terminé", "En cours", "Annulé"]) {
+    const n = DATA.filterCache.members.filter(m => m.status_norm === st).length;
+    if (n > 0) addChip(chips, st, st, ` (${n})`);
   }
+  updateChips();
+
+  const wrap = $("#creneau-list");
+  wrap.innerHTML = "";
+  for (const it of DATA.itemsCache) {
+    if (it.kind === "section" || it.kind === "sub") {
+      const d = document.createElement("div");
+      d.className = it.kind === "section" ? "section-h" : "subsection-h";
+      d.textContent = (it.kind === "section" ? "📁 " : "📂 ") + it.label;
+      wrap.appendChild(d);
+    } else {
+      wrap.appendChild(creneauRow(it.label, it.raw, it.count, false));
+    }
+  }
+  const otherKeys = Object.keys(DATA.filterCache.others).sort((a, b) => a.localeCompare(b, "fr"));
+  if (otherKeys.length) {
+    const d = document.createElement("div");
+    d.className = "section-h"; d.textContent = "📁 Autres tarifs (hors créneau)";
+    wrap.appendChild(d);
+    for (const t of otherKeys) wrap.appendChild(creneauRow(t, "other:" + t, DATA.filterCache.others[t], true));
+  }
+}
+function addChip(parent, label, value, suffix) {
+  const b = document.createElement("span");
+  b.className = "filter-chip";
+  b.dataset.value = value; b.textContent = label + (suffix || "");
+  b.addEventListener("click", () => { filters.status = value; saveFilters(); updateChips(); applyFilters(); });
+  parent.appendChild(b);
+}
+function updateChips() {
+  document.querySelectorAll("#status-chips .filter-chip").forEach(c =>
+    c.classList.toggle("active", (c.dataset.value || "") === (filters.status || "")));
+}
+function creneauRow(label, rawName, count, isOther) {
+  const div = document.createElement("label");
+  div.className = "opt";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const store = isOther ? filters.others : filters.groups;
+  cb.checked = store[rawName] !== undefined ? store[rawName] : !isWaiting(rawName, label);
+  cb.addEventListener("change", () => { store[rawName] = cb.checked; saveFilters(); applyFilters(); });
+  const span = document.createElement("span"); span.textContent = label;
+  const n = document.createElement("span"); n.className = "n"; n.textContent = count || 0;
+  div.append(cb, span, n);
+  return div;
+}
+function allowedTarifKeys() {
+  const allowed = new Set();
+  for (const it of DATA.itemsCache) {
+    if (it.kind !== "group") continue;
+    const on = filters.groups[it.raw] !== undefined ? filters.groups[it.raw] : !isWaiting(it.raw, it.label);
+    if (on) for (const t of it.tarifs) allowed.add(normKey(t));
+  }
+  // Tarifs hors créneau de la saison affichée (cochés par défaut, sauf liste d'attente)
+  for (const t of Object.keys(DATA.filterCache.others)) {
+    const k = "other:" + t;
+    const on = filters.others[k] !== undefined ? filters.others[k] : !isWaiting(t, t);
+    if (on) allowed.add(normKey(t));
+  }
+  return allowed;
+}
+function applyFilters() {
+  if (!DATA.filterCache) return;
+  const q = normKey($("#search").value);
+  const allowed = allowedTarifKeys();
+  const st = filters.status || "";
+  const rows = DATA.filterCache.members.filter(m => {
+    const k = normKey(m.tarif_name);
+    if (k && !allowed.has(k)) return false;
+    if (st && m.status_norm !== st) return false;
+    if (q && !(normKey(m.last_name).includes(q) || normKey(m.first_name).includes(q)
+      || normKey(m.first_name + " " + m.last_name).includes(q) || normKey(m.last_name + " " + m.first_name).includes(q)
+      || normKey(m.tarif_name).includes(q) || normKey(m.licence_ffme).includes(q))) return false;
+    return true;
+  });
+  $("#kpi-shown").textContent = rows.length;
+  $("#kpi-season").textContent = DATA.filterCache.members.filter(m => m.status_norm !== "Annulé").length;
+  $("#kpi-cancel").textContent = DATA.filterCache.members.filter(m => m.status_norm === "Annulé").length;
+  $("#count-line").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} affiché${rows.length > 1 ? "s" : ""} · saison ${currentSeason}`
+    + (st ? ` · statut ${st}` : "");
+  $("#members-list").innerHTML = rows.map(memberCard).join("") ||
+    `<div class="empty">Aucun adhérent ne correspond aux filtres.</div>`;
 }
 
 /* ===================== Onglet Urgences ===================== */
 function renderUrgency() {
   const q = normKey($("#urgency-search").value);
   const listEl = $("#urgency-list");
-  if (q.length < 2) {
-    $("#urgency-count").textContent = "Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts (téléphone adhérent + contacts d'urgence cliquables).";
+  if (q.length < 2 || !DATA.filterCache) {
+    $("#urgency-count").textContent = "Tapez au moins 2 lettres du nom de l'adhérent pour afficher ses contacts (téléphone et contacts d'urgence cliquables).";
     listEl.innerHTML = "";
     return;
   }
   const rows = DATA.filterCache.members.filter(m => {
     const last = normKey(m.last_name), first = normKey(m.first_name);
-    return last.includes(q) || first.includes(q)
-      || normKey(first + " " + last).includes(q)
-      || normKey(last + " " + first).includes(q);
+    return last.includes(q) || first.includes(q) || normKey(first + " " + last).includes(q) || normKey(last + " " + first).includes(q);
   });
-  $("#urgency-count").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} trouvé${rows.length > 1 ? "s" : ""} (saison ${esc(currentSeason)})`;
-  listEl.innerHTML = rows.map(urgencyCard).join("") ||
-    `<div class="empty">Aucun adhérent ne correspond à cette recherche.</div>`;
+  $("#urgency-count").textContent = `${rows.length} adhérent${rows.length > 1 ? "s" : ""} trouvé${rows.length > 1 ? "s" : ""} (saison ${currentSeason})`;
+  listEl.innerHTML = rows.map(urgencyCard).join("") || `<div class="empty">Aucun adhérent ne correspond à cette recherche.</div>`;
 }
-
-function telHref(phone) {
-  return String(phone || "").replace(/[^\d+]/g, "");
-}
-
 function urgencyRow(label, name, phone) {
-  const parts = [];
-  if (name) parts.push(esc(name));
-  if (phone) parts.push(esc(phone));
+  const parts = [name, phone].filter(Boolean).map(esc);
   if (!parts.length) return "";
   const href = telHref(phone);
-  return `<div style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:0">
-    <b style="flex:0 0 auto;color:#B91C1C">${label}</b>
-    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${parts.join(" · ")}</span>
-    ${href ? `<a href="tel:${esc(href)}" style="margin-left:auto;flex:0 0 auto;text-decoration:none;color:#2563EB;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600">📞 Appeler</a>` : ""}
-  </div>`;
+  return `<div class="urg-row"><b>${label}</b><span>${parts.join(" · ")}</span>
+    ${href ? `<a class="link-btn" href="tel:${esc(href)}">📞 Appeler</a>` : ""}</div>`;
 }
-
 function urgencyCard(m) {
   const rows = [];
   if (m.phone) rows.push(urgencyRow("👤 Adhérent", "", m.phone));
   if (m.emergency1_name || m.emergency1_phone) rows.push(urgencyRow("🚨 Urgence 1", m.emergency1_name, m.emergency1_phone));
   if (m.emergency2_name || m.emergency2_phone) rows.push(urgencyRow("🚨 Urgence 2", m.emergency2_name, m.emergency2_phone));
-  return `<div class="card" style="cursor:default">
-    <div class="card-top" style="display:flex;justify-content:space-between;gap:8px">
+  return `<div class="card">
+    <div class="card-top">
       <div><div class="m-name">${esc(m.first_name)} ${esc(m.last_name)}</div>
-      <div class="m-tarif">${esc(m.tarif_name || "—")}</div></div>
+      <div class="m-sub">${esc(m.tarif_name || "—")}</div></div>
       ${statusBadge(m.status_norm)}
     </div>
-    <div style="margin-top:9px;border-top:1px dashed #E2E8F0;padding-top:9px;display:flex;flex-direction:column;gap:7px">
+    <div style="margin-top:9px;border-top:1px dashed var(--line);padding-top:9px;display:flex;flex-direction:column;gap:7px">
       ${rows.length ? rows.join("") : `<div style="color:#94A3B8;font-size:12px">Aucun contact enregistré pour cet adhérent.</div>`}
     </div>
   </div>`;
 }
 
-/* ===================== Init & événements ===================== */
+/* ===================== Événements ===================== */
+function setAllCreneaux(on) {
+  for (const it of DATA.itemsCache) if (it.kind === "group") filters.groups[it.raw] = on;
+  if (DATA.filterCache) for (const t of Object.keys(DATA.filterCache.others)) filters.others["other:" + t] = on;
+  saveFilters(); renderFilters(); applyFilters();
+}
 function wireEvents() {
-  document.querySelectorAll("nav button").forEach(b =>
-    b.addEventListener("click", () => showPage(b.dataset.page)));
-  $("#refresh-btn").addEventListener("click", refreshFromDrive);
-  $("#config-btn").addEventListener("click", () => {
-    $("#cfg-client-id").value = cfg ? cfg.clientId : "";
-    $("#cfg-file-id").value = cfg ? cfg.fileId : "";
-    showPage("setup");
+  document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showPage(b.dataset.page)));
+  $("#comps-link").href = COMPETITIONS_URL;
+  $("#refresh-btn").addEventListener("click", () => {
+    if (!isCoachUser()) { showPage("setup"); return; }
+    $("#refresh-btn").classList.add("spin");
+    startListeners(true);
   });
-  $("#cfg-save").addEventListener("click", () => {
-    cfg = { clientId: $("#cfg-client-id").value.trim(), fileId: $("#cfg-file-id").value.trim() };
-    if (!cfg.clientId || !cfg.fileId) { toast("⚠️ Renseignez les deux identifiants."); return; }
-    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
-    toast("💾 Configuration enregistrée");
-    refreshFromDrive();
-  });
+  $("#config-btn").addEventListener("click", () => showPage("setup"));
+  $("#login-btn").addEventListener("click", login);
+  $("#logout-btn").addEventListener("click", logout);
   $("#search").addEventListener("input", () => { saveFilters(); applyFilters(); });
   $("#urgency-search").addEventListener("input", renderUrgency);
   $("#season-select").addEventListener("change", e => {
-    currentSeason = e.target.value; filters.season = currentSeason;
-    computeFilterCache(); renderFilters(); applyFilters();
+    currentSeason = e.target.value; saveFilters();
+    computeFilterCache(); renderFilters(); applyFilters(); renderUrgency();
   });
-  $("#cren-all").addEventListener("click", () => { setAllCreneaux(true); });
+  $("#cren-all").addEventListener("click", () => setAllCreneaux(true));
   $("#cren-none").addEventListener("click", () => setAllCreneaux(false));
 }
-function setAllCreneaux(on) {
-  for (const it of DATA.itemsCache)
-    if (it.kind === "group") filters.groups[it.raw] = on;
-  for (const t of Object.keys(DATA.filterCache.others)) filters.others["other:" + t] = on;
-  saveFilters(); renderFilters(); applyFilters();
+
+/* ===================== Version de la page ===================== */
+const WEB_VERSION = (document.querySelector('meta[name="alj-web-version"]') || {}).content || "?";
+async function checkWebVersion() {
+  const badge = $("#web-version");
+  badge.textContent = "v" + WEB_VERSION;
+  badge.title = "Version de la page : v" + WEB_VERSION;
+  try {
+    const r = await fetch("/api/web-version", { cache: "no-store" });
+    if (!r.ok) return;
+    const online = String((await r.json()).web_version || "");
+    if (online && online !== WEB_VERSION) {
+      badge.textContent = "v" + WEB_VERSION + " ⬆ v" + online;
+      badge.title = "Une nouvelle version est en ligne : toucher pour mettre à jour";
+      badge.classList.add("outdated");
+      badge.onclick = forceWebUpdate;
+    } else {
+      badge.title = "Version de la page : v" + WEB_VERSION + " (à jour)";
+    }
+  } catch (e) { /* hors-ligne */ }
+}
+async function forceWebUpdate() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) { console.warn("Mise à jour forcée :", e); }
+  location.reload();
 }
 
 (async function boot() {
-  $("#redirect-hint").textContent = redirectUri();
+  if ("serviceWorker" in navigator && !/github\.io$/.test(location.hostname)) {
+    navigator.serviceWorker.register("/sw.js").catch(err => console.warn("Service Worker :", err));
+  }
+  checkWebVersion();
   wireEvents();
   $("#search").value = filters.search || "";
-  try { await initSql(); } catch (e) {
-    $("#sync-info").textContent = "⚠️ sql.js indisponible (hors ligne ?)";
-    toast("❌ Impossible de charger sql.js (connexion internet requise au premier lancement)");
-  }
-
-  // Retour de Google après la redirection : token dans le fragment (#access_token=…)
-  try {
-    const hashToken = readTokenFromHash();
-    if (hashToken) {
-      accessToken = hashToken;
-      sessionStorage.setItem("alj_oauth_token",
-        JSON.stringify({ token: hashToken, exp: tokenExpiresAt }));
-      await refreshFromDrive();
-      return;
-    }
-  } catch (e) {
-    $("#sync-info").textContent = "⚠️ Authentification Google interrompue";
-    toast("❌ " + (e.message || e));
-  }
-
-  const ok = await loadFromCache();
-  if (!cfg || !cfg.clientId || !cfg.fileId) {
-    $("#cfg-client-id").value = cfg ? (cfg.clientId || "") : "";
-    $("#cfg-file-id").value = cfg ? (cfg.fileId || "") : "";
-    showPage("setup");
-  } else if (!ok) {
-    // Pas de cache et configuration valide (valeurs pré-chargées) :
-    // connexion automatique via la page d'authentification Google.
-    $("#sync-info").textContent = "Connexion à Google Drive…";
-    startGoogleAuth();
-  }
+  try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
+  catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 })();
 </script>
 </body>

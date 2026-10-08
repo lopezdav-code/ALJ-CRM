@@ -879,9 +879,8 @@ def get_planning():
     except Exception as e:
         return {"error": str(e)}
 
-# Annuaire mobile (page web en lecture seule : télécharge database.db depuis
-# Google Drive après connexion Google, cache navigateur, filtres par créneaux).
-# Nécessaire pour l'authentification Google OAuth (origine http://localhost:8000).
+# Fichiers web statiques (annuaire, logo...) également servis sous /annuaire/.
+# L'annuaire lit la base des adhérents dans Firestore (connexion Google du coach).
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 _web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -889,6 +888,15 @@ if os.path.isdir(_web_dir):
     app.mount("/annuaire", StaticFiles(directory=_web_dir, html=True), name="annuaire")
 
 _competitions_page_path = os.path.join(_web_dir, "competitions.html")
+_annuaire_page_path = os.path.join(_web_dir, "index.html")
+
+@app.get("/index", response_class=HTMLResponse)
+def get_annuaire_page():
+    """Annuaire des adhérents (lecture seule) : lit la base principale dans
+    Firestore (collections crm_*) avec le compte Google du coach."""
+    if os.path.exists(_annuaire_page_path):
+        return FileResponse(_annuaire_page_path, media_type="text/html")
+    return HTMLResponse("<h1>Page web/index.html introuvable</h1>", status_code=404)
 
 @app.get("/manifest.webmanifest")
 def get_manifest():
@@ -929,7 +937,7 @@ def root_route():
         "docs_url": "/docs",
         "health_url": "/health",
         "competitions_url": "/competitions",
-        "annuaire_url": "/annuaire"
+        "annuaire_url": "/index"
     }
 
 

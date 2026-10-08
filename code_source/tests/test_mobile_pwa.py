@@ -14,7 +14,7 @@ if _src_dir not in sys.path:
 
 import re
 
-from server import get_manifest, get_sw, get_competitions_page, get_web_version
+from server import get_manifest, get_sw, get_competitions_page, get_web_version, get_annuaire_page
 
 
 class TestMobilePWA(unittest.TestCase):
@@ -50,6 +50,22 @@ class TestMobilePWA(unittest.TestCase):
             html = f.read()
         self.assertIn(f"(v{version})</title>", html)
         self.assertIn(f'id="web-version">v{version}<', html)
+        # L'annuaire partage le même service worker : même numéro de version
+        with open(get_annuaire_page().path, "r", encoding="utf-8") as f:
+            ann = f.read()
+        self.assertIn(f'<meta name="alj-web-version" content="{version}">', ann)
+        self.assertIn(f"(v{version})</title>", ann)
+        self.assertIn(f'id="web-version">v{version}<', ann)
+
+    def test_annuaire_reads_firestore(self):
+        """L'annuaire lit la base principale dans Firestore (plus de database.db sur Drive)."""
+        with open(get_annuaire_page().path, "r", encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("firebase-firestore-compat.js", html)
+        for col in ("crm_users", "crm_orders", "crm_purchases", "crm_seasons", "crm_planning"):
+            self.assertIn(f'"{col}"', html)
+        self.assertNotIn("sql-wasm", html)
+        self.assertNotIn("drive.readonly", html)
 
     def test_competitions_html_pwa_and_email_features(self):
         resp = get_competitions_page()
