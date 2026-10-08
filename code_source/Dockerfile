@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     ALJ_DATA_DIR=/app/data \
+    ALJ_API_AUTH=required \
     PYTHONPATH=/app/src:/app
 
 WORKDIR /app

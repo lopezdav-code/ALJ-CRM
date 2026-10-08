@@ -115,3 +115,47 @@ def get_items(campaign_type, campaign_slug):
     url = f"{BASE_URL}/organizations/{ORG_SLUG}/forms/{campaign_type}/{campaign_slug}/items"
     headers = {"Authorization": f"Bearer {token}"}
     return fetch_all_pages(url, headers, params={"withDetails": "true"})
+
+
+# ---------------------------------------------------------------------------
+# Lecture unitaire (vérification des notifications webhook)
+# ---------------------------------------------------------------------------
+class HelloAssoApiError(Exception):
+    """Appel à l'API HelloAsso impossible (identifiants, réseau, erreur serveur)."""
+
+
+def credentials_configured():
+    """Les identifiants API HelloAsso sont-ils disponibles ?"""
+    return bool(CLIENT_ID and CLIENT_SECRET)
+
+
+def _get_resource(path, params=None):
+    """GET authentifié sur l'API v5. Renvoie None si la ressource n'existe pas (404)."""
+    token = get_access_token()
+    if not token:
+        raise HelloAssoApiError("Jeton d'accès HelloAsso indisponible")
+    try:
+        response = requests.get(f"{BASE_URL}{path}", headers={"Authorization": f"Bearer {token}"},
+                                params=params or {}, timeout=15)
+    except requests.exceptions.RequestException as e:
+        raise HelloAssoApiError(f"API HelloAsso injoignable : {e}")
+    if response.status_code in (400, 403, 404):
+        return None  # identifiant inexistant ou n'appartenant pas à l'organisation
+    if response.status_code >= 300:
+        raise HelloAssoApiError(f"API HelloAsso : HTTP {response.status_code}")
+    return response.json()
+
+
+def get_item(item_id):
+    """Article (inscription) avec champs personnalisés, payeur, commande et état."""
+    return _get_resource(f"/items/{int(item_id)}", {"withDetails": "true"})
+
+
+def get_order(order_id):
+    """Commande et ses articles."""
+    return _get_resource(f"/orders/{int(order_id)}", {"withDetails": "true"})
+
+
+def get_payment(payment_id):
+    """Paiement (référence la commande et les articles réglés)."""
+    return _get_resource(f"/payments/{int(payment_id)}")

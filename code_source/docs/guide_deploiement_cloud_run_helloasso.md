@@ -112,15 +112,28 @@ Dès que votre URL Cloud Run est active, configurez les notifications HelloAsso 
 1. Rendez-vous sur l'espace d'administration HelloAsso : [https://admin.helloasso.com/](https://admin.helloasso.com/)
 2. Dans le menu de gauche, rendez-vous dans **Mon association** puis **Intégrations & API** (ou **Paramètres / Notifications Webhook**).
 3. Cliquez sur **Ajouter une URL de notification** ou **Nouveau Webhook**.
-4. Renseignez l'URL publique générée :
+4. Renseignez l'URL publique générée, **avec le jeton secret** :
    ```
-   https://alj-escalade-api-xxxxxxxx-ew.a.run.app/webhooks/helloasso
+   https://alj-escalade-api-xxxxxxxx-ew.a.run.app/webhooks/helloasso?token=<HELLOASSO_WEBHOOK_TOKEN>
    ```
 5. Cochez les événements à surveiller :
    - ✅ **Paiement (Payment)** : Déclenché lors de tout règlement par carte bancaire.
    - ✅ **Commande (Order)** : Déclenché lors de la finalisation d'un panier d'inscription.
 6. Cliquez sur **Enregistrer** (ou **Tester le webhook**).
    - Le serveur FastAPI répond instantanément `HTTP 200 OK` avec le statut actif grâce à la route de probe `GET /webhooks/helloasso`.
+
+### 🔒 Sécurité de l'API et du webhook
+
+- **Jeton du webhook** : stocké dans Secret Manager (secret `helloasso-webhook-token`) et injecté dans la variable `HELLOASSO_WEBHOOK_TOKEN` :
+  ```bash
+  gcloud secrets versions access latest --secret helloasso-webhook-token   # lire le jeton
+  gcloud run services update alj-escalade-api --region europe-west1 \
+      --update-secrets HELLOASSO_WEBHOOK_TOKEN=helloasso-webhook-token:latest
+  ```
+  Une notification sans le bon `?token=` est refusée (`401`).
+- **Relecture HelloAsso** : si `HELLOASSO_CLIENT_ID` / `HELLOASSO_CLIENT_SECRET` sont configurés sur Cloud Run, le serveur ne lit que les identifiants d'articles dans la notification et relit montant, état, payeur et champs personnalisés auprès de l'API HelloAsso. Un contenu falsifié est donc sans effet.
+- **Fail-closed** : en production, une notification qui ne peut être vérifiée ni par le jeton ni par l'API est refusée (`503`).
+- **API `/api/*`, `/map`, `/pivot`, `/docs`** : réservées aux comptes connectés à la PWA. La PWA envoie le jeton Firebase (`Authorization: Bearer …`) ; le serveur vérifie sa signature et applique les rôles de `firestore.rules` (coach requis, admin pour `POST /api/planning`). Restent publics : `/`, `/competitions`, `/annuaire`, `/health`, `/api/web-version`, `/sw.js`, `/manifest.webmanifest` et le webhook. Contrôle actif dans l'image Docker (`ALJ_API_AUTH=required`), désactivé pour le serveur local de l'application de bureau.
 
 ---
 
@@ -169,10 +182,12 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "https://alj-escalade-api-xxxxxxxx-ew.a.run.app/webhooks/helloasso" `
+Invoke-RestMethod -Uri "https://alj-escalade-api-xxxxxxxx-ew.a.run.app/webhooks/helloasso?token=<HELLOASSO_WEBHOOK_TOKEN>" `
     -Method Post -ContentType "application/json" -Body $body
 ```
 Vérifiez dans la PWA mobile que l'adhérent Lucas MARTIN passe immédiatement en badge vert **« Payé (15.00 €) »**.
+
+*Si les identifiants API HelloAsso sont configurés, ce paiement simulé est ignoré (l'article 99901 n'existe pas chez HelloAsso) : c'est le comportement attendu de la protection.*
 
 ### Test D : Envoi d'E-mail depuis Smartphone
 1. Dans la PWA `/competitions`, cliquez sur une compétition.

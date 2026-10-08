@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="7">
-<title>ALJ Escalade — Gestion des Compétitions (v7)</title>
+<meta name="alj-web-version" content="8">
+<title>ALJ Escalade — Gestion des Compétitions (v8)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -150,7 +150,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v7</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v8</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
@@ -578,6 +578,24 @@ function normKey(s) {
 function toast(msg, ms = 3500) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms);
+}
+/* Appels à l'API Cloud Run : jeton d'identité Firebase joint à chaque requête
+   (le serveur vérifie la signature et le rôle coach/admin). */
+async function apiFetch(url, opts = {}) {
+  const send = async (forceRefresh) => {
+    const headers = Object.assign({}, opts.headers || {});
+    if (user) headers["Authorization"] = "Bearer " + await user.getIdToken(forceRefresh);
+    return fetch(url, Object.assign({}, opts, { headers }));
+  };
+  let res = await send(false);
+  if (res.status === 401 && user) res = await send(true);  // jeton expiré : on le renouvelle
+  return res;
+}
+async function apiErrorText(res) {
+  try { const d = await res.clone().json(); if (d && d.message) return d.message; } catch (e) {}
+  return res.status === 401 ? "Authentification requise : reconnectez-vous."
+       : res.status === 403 ? "Accès refusé pour ce compte."
+       : "Impossible de contacter l'API (HTTP " + res.status + ").";
 }
 function fmtDate(iso) {
   if (!iso) return "";
@@ -1889,7 +1907,7 @@ async function triggerHelloAssoSync() {
   btn.disabled = true;
   btn.textContent = "🔄 Synchro…";
   try {
-    const res = await fetch("/api/helloasso/sync", { method: "POST" });
+    const res = await apiFetch("/api/helloasso/sync", { method: "POST" });
     if (res.ok) {
       const data = await res.json();
       if (data.status === "success") {
@@ -1899,7 +1917,7 @@ async function triggerHelloAssoSync() {
         toast("❌ " + (data.message || "Erreur lors de la synchronisation."));
       }
     } else {
-      toast("❌ Impossible de contacter l'API (HTTP " + res.status + ").");
+      toast("❌ " + await apiErrorText(res));
     }
   } catch (e) {
     toast("❌ Erreur réseau : " + (e.message || e));
@@ -2033,7 +2051,7 @@ async function loadEmailTemplates() {
   ];
 
   try {
-    const res = await fetch("/api/email-templates");
+    const res = await apiFetch("/api/email-templates");
     if (res.ok) {
       const data = await res.json();
       if (data && data.templates && data.templates.length > 0) {
@@ -2078,7 +2096,7 @@ function openEmailModal() {
 
   loadEmailTemplates();
 
-  fetch("/api/email-status").then(r => r.json()).then(st => {
+  apiFetch("/api/email-status").then(r => r.json()).then(st => {
     if (st && st.configured === false) {
       toast("⚠️ Envoi d'e-mails non configuré sur Cloud Run (identifiants Gmail manquants).", 8000);
     }
@@ -2214,7 +2232,7 @@ async function sendCampaignEmails() {
       }))
     };
 
-    const res = await fetch("/api/send-email", {
+    const res = await apiFetch("/api/send-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -2229,6 +2247,8 @@ async function sendCampaignEmails() {
         const detailErr = data.message || (data.details && data.details[0] && data.details[0].error) || "Échec d'envoi.";
         toast("❌ Erreur : " + detailErr, 9000);
       }
+    } else if (res.status === 401 || res.status === 403) {
+      toast("❌ " + await apiErrorText(res), 9000);
     } else {
       throw new Error(`Serveur indisponible (HTTP ${res.status})`);
     }

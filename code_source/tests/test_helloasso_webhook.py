@@ -118,7 +118,9 @@ class TestHelloAssoWebhookService(unittest.TestCase):
             "eventType": "Ping",
             "data": {}
         }
-        resp = asyncio.run(webhook_helloasso(payload))
+        with patch("helloasso_api.credentials_configured", return_value=False), \
+             patch.dict(os.environ, {"ALJ_API_AUTH": "off"}):
+            resp = asyncio.run(webhook_helloasso(payload))
         self.assertEqual(resp["status"], "ignored")
 
 

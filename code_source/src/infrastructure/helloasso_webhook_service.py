@@ -9,12 +9,26 @@ Permet de :
    (via `domain.competition_matching`).
 4. Mettre à jour immédiatement la base de données (marquage « payé », montant réglé,
    sauvegarde de l'article dans le miroir HelloAsso).
+
+Sécurité (le contenu d'une notification n'est jamais cru sur parole) :
+- Jeton secret : si HELLOASSO_WEBHOOK_TOKEN est défini, l'URL déclarée chez
+  HelloAsso doit être « /webhooks/helloasso?token=<secret> » ; toute requête
+  sans le bon jeton est refusée (401).
+- Re-vérification : si les identifiants API HelloAsso sont disponibles, seuls les
+  identifiants d'articles sont lus dans la notification ; montant, état, payeur et
+  champs personnalisés sont relus depuis l'API HelloAsso officielle.
+- En production (contrôle d'accès actif), une notification n'est traitée que si
+  l'une au moins de ces deux vérifications est possible (fail-closed).
 """
 
 import re
 import json
 import datetime
 from typing import Dict, Any, List, Optional
+
+import helloasso_api
+from infrastructure.api_auth import auth_enforced, constant_time_equals
+from infrastructure.secret_store import SecretStore
 
 from domain.utils import normalize_name, normalize_string
 from domain.competition_matching import (
@@ -34,6 +48,18 @@ from infrastructure.competition_firestore_repository import (
 # Type helper pour tuple (défini AVANT la classe : les annotations sont évaluées
 # à l'import en Python <= 3.13, une définition en fin de fichier lèverait NameError)
 Tuple_Items = tuple[str, List[Dict[str, Any]]]
+
+# Nombre maximal d'articles relus par notification (garde-fou anti-abus)
+MAX_VERIFIED_ITEMS = 50
+
+
+class WebhookRejected(Exception):
+    """Notification refusée (code HTTP à renvoyer + message)."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
 
 
 class HelloAssoWebhookService:
@@ -78,17 +104,108 @@ class HelloAssoWebhookService:
 
         return event_type, items
 
+    # ------------------------------------------------------------------
+    # Vérification de l'authenticité
+    # ------------------------------------------------------------------
     @classmethod
-    def process_webhook(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def check_token(cls, token: Optional[str]) -> Optional[bool]:
+        """True/False si un jeton secret est configuré (correct ou non), None sinon."""
+        expected = (SecretStore.get_secret("HELLOASSO_WEBHOOK_TOKEN") or "").strip()
+        if not expected:
+            return None
+        return bool(token) and constant_time_equals(token.strip(), expected)
+
+    @staticmethod
+    def _ids(objs) -> List[int]:
+        ids = []
+        for o in objs or []:
+            raw = o.get("id") if isinstance(o, dict) else None
+            try:
+                ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        return ids
+
+    @classmethod
+    def fetch_verified_items(cls, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Relit depuis l'API HelloAsso les articles visés par la notification.
+
+        Seuls les identifiants (articles, commande, paiement) sont pris dans le
+        payload ; un identifiant inconnu de HelloAsso est simplement ignoré.
+        """
+        event_type = payload.get("eventType") or ""
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        try:
+            item_ids = cls._ids(data.get("items"))
+            if not item_ids and data.get("id") is not None:
+                order_id = None
+                if event_type == "Payment":
+                    payment = helloasso_api.get_payment(data.get("id")) or {}
+                    item_ids = cls._ids(payment.get("items"))
+                    order_id = (payment.get("order") or {}).get("id")
+                elif event_type == "Order":
+                    order_id = data.get("id")
+                if not item_ids and order_id is not None:
+                    order = helloasso_api.get_order(order_id) or {}
+                    item_ids = cls._ids(order.get("items"))
+
+            items = []
+            for item_id in list(dict.fromkeys(item_ids))[:MAX_VERIFIED_ITEMS]:
+                item = helloasso_api.get_item(item_id)
+                if item and item.get("id") is not None:
+                    items.append(item)
+                else:
+                    print(f"⚠️ [WEBHOOK_HELLOASSO] Article #{item_id} inconnu de l'API HelloAsso : ignoré")
+            return items
+        except helloasso_api.HelloAssoApiError as e:
+            # 503 : HelloAsso renverra la notification plus tard
+            raise WebhookRejected(503, f"Vérification auprès de HelloAsso impossible : {e}")
+
+    @classmethod
+    def handle_notification(cls, payload: Dict[str, Any], token: Optional[str] = None) -> Dict[str, Any]:
+        """Point d'entrée sécurisé du webhook (lève WebhookRejected en cas de refus)."""
+        token_ok = cls.check_token(token)
+        if token_ok is False:
+            raise WebhookRejected(401, "Jeton de notification HelloAsso absent ou invalide")
+
+        if helloasso_api.credentials_configured():
+            items = cls.fetch_verified_items(payload)
+            report = cls.process_webhook(payload, items=items)
+            report["verified"] = "api"
+            return report
+
+        if token_ok or not auth_enforced():
+            report = cls.process_webhook(payload)
+            report["verified"] = "token" if token_ok else "none"
+            return report
+
+        raise WebhookRejected(
+            503,
+            "Notification non vérifiable : configurez HELLOASSO_WEBHOOK_TOKEN "
+            "ou les identifiants API HelloAsso sur le serveur.",
+        )
+
+    # ------------------------------------------------------------------
+    # Traitement
+    # ------------------------------------------------------------------
+    @classmethod
+    def process_webhook(cls, payload: Dict[str, Any],
+                        items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Traite une notification Webhook HelloAsso complète :
         - Extrait les articles.
         - Tente le rapprochement avec la compétition et le participant.
         - Met à jour le statut du participant en base si le match est établi.
         - Enregistre l'article dans le miroir HelloAsso pour l'audit.
+
+        items : articles déjà vérifiés auprès de l'API HelloAsso (prioritaires sur
+        le contenu du payload, qui ne sert alors qu'à connaître le type d'événement).
         """
         CompetitionRepository.setup_database()
-        event_type, raw_items = cls.extract_items_from_payload(payload)
+        if items is None:
+            event_type, raw_items = cls.extract_items_from_payload(payload)
+        else:
+            event_type, raw_items = (payload.get("eventType") or "Unknown"), list(items)
 
         if not raw_items:
             return {

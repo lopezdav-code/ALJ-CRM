@@ -10,8 +10,10 @@ _src_dir = os.path.dirname(os.path.abspath(__file__))
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from fastapi import FastAPI, Body, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
+from typing import Optional
+
+from fastapi import FastAPI, Body, BackgroundTasks, Query
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # Importer les fonctions de notre script existant
@@ -36,6 +38,13 @@ def get_target_slug():
     return slug
 
 app = FastAPI(title="Admin Escalade API")
+
+# Contrôle d'accès (jeton Firebase + rôles de firestore.rules) : actif sur Cloud Run
+# et dans l'image Docker (ALJ_API_AUTH=required), désactivé pour le serveur local
+# de l'application de bureau. Enregistré AVANT le CORS pour que les pré-vols
+# OPTIONS soient traités par le middleware CORS (le plus externe).
+from infrastructure.api_auth import auth_middleware
+app.middleware("http")(auth_middleware)
 
 def geocode_missing_addresses(addresses: List[str]):
     """Géocode les adresses manquantes en tâche de fond avec limitation stricte de débit."""
@@ -956,13 +965,22 @@ def webhook_helloasso_ping():
 
 
 @app.post("/webhooks/helloasso")
-async def webhook_helloasso(payload: Dict[str, Any] = Body(...)):
+async def webhook_helloasso(payload: Dict[str, Any] = Body(...),
+                            token: Optional[str] = Query(None)):
     """Point de terminaison Webhook pour les notifications HelloAsso (Payment & Order).
     Réconcilie en temps réel le paiement avec les participants de la compétition.
+
+    Authenticité : jeton secret dans l'URL (?token=...) et/ou relecture des articles
+    auprès de l'API HelloAsso (voir HelloAssoWebhookService.handle_notification).
     """
+    from infrastructure.helloasso_webhook_service import WebhookRejected
+    if not isinstance(token, str):  # appel direct de la fonction (tests)
+        token = None
     try:
-        result = HelloAssoWebhookService.process_webhook(payload)
-        return result
+        return HelloAssoWebhookService.handle_notification(payload, token=token)
+    except WebhookRejected as e:
+        print(f"⛔ [WEBHOOK_HELLOASSO] Notification refusée ({e.status_code}) : {e.message}")
+        return JSONResponse({"status": "rejected", "message": e.message}, status_code=e.status_code)
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
