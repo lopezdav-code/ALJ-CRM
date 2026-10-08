@@ -189,7 +189,10 @@
 
   <!-- ================= Liste des compétitions ================= -->
   <section class="page" id="page-comps">
-    <div class="card" id="comp-form-card">
+    <div class="btn-row" id="comp-create-row" style="display:none; margin-bottom:10px">
+      <button class="btn btn-primary" id="f-open-create">➕ Créer une compétition</button>
+    </div>
+    <div class="card" id="comp-form-card" style="display:none">
       <div class="m-name" id="f-form-title">➕ Nouvelle compétition</div>
       <label class="fld">Nom de l'épreuve *</label>
       <input type="text" id="f-nom" placeholder="Ex : Championnat départemental U13">
@@ -245,6 +248,7 @@
       </div>
       <div class="btn-row" id="f-btns-new">
         <button class="btn btn-primary" id="f-create">➕ Créer la compétition</button>
+        <button class="btn btn-edit" id="f-close-new">✖ Fermer</button>
       </div>
     </div>
 
@@ -638,8 +642,11 @@ function applyRolePermissions() {
   }
 
   // 2. Formulaire de création de compétition sur page-comps
+  // Le formulaire est réduit par défaut : seul le bouton « Créer » est visible.
+  const compCreateRow = $("#comp-create-row");
+  if (compCreateRow) compCreateRow.style.display = (isCoach && !compFormOpen) ? "flex" : "none";
   const compFormCard = $("#comp-form-card");
-  if (compFormCard) compFormCard.style.display = isCoach ? "block" : "none";
+  if (compFormCard) compFormCard.style.display = (isCoach && compFormOpen) ? "block" : "none";
 
   // 3. Actions sur page-participants
   const pEditBtn = $("#p-edit-btn");
@@ -958,7 +965,7 @@ function renderComps() {
         ${isCoachUser() ? `<button class="btn btn-edit btn-mini" onclick="event.stopPropagation(); openEdit('${esc(String(c.id))}')">✏️ Modifier</button>` : ""}
       </div>
     </div>`;
-  }).join("") || `<div class="empty">Aucune compétition : créez la première avec le formulaire ci-dessus.</div>`;
+  }).join("") || `<div class="empty">Aucune compétition : créez la première avec le bouton « Créer une compétition » ci-dessus.</div>`;
 
   const sel = $("#p-comp-select");
   const prev = sel.value;
@@ -1001,7 +1008,26 @@ function openEdit(id) {
   $("#f-coach3").value = ids[2] != null ? String(ids[2]) : "";
   $("#f-btns").style.display = "flex";
   $("#f-btns-new").style.display = "none";
+  setCompFormOpen(true);
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+// Affiche / réduit le module de création-modification de compétition
+var compFormOpen = false;
+function setCompFormOpen(open) {
+  compFormOpen = !!open;
+  const canEdit = isCoachUser();
+  $("#comp-form-card").style.display = (canEdit && compFormOpen) ? "block" : "none";
+  $("#comp-create-row").style.display = (canEdit && !compFormOpen) ? "flex" : "none";
+}
+function openCreateForm() {
+  if (!isCoachUser()) {
+    toast("🔒 Création non autorisée en mode consultation.");
+    return;
+  }
+  resetCompForm();
+  setCompFormOpen(true);
+  const nom = $("#f-nom");
+  if (nom) nom.focus();
 }
 function resetCompForm() {
   editCompId = null;
@@ -1015,6 +1041,7 @@ function resetCompForm() {
   $("#f-coach3").value = "";
   $("#f-btns").style.display = "none";
   $("#f-btns-new").style.display = "flex";
+  setCompFormOpen(false);
 }
 function readCoachSelection() {
   return ["#f-coach1", "#f-coach2", "#f-coach3"]
@@ -2191,6 +2218,8 @@ function wireEvents() {
   $("#config-btn").addEventListener("click", () => showPage("setup"));
   $("#login-btn").addEventListener("click", login);
   $("#logout-btn-page").addEventListener("click", logout);
+  $("#f-open-create").addEventListener("click", openCreateForm);
+  $("#f-close-new").addEventListener("click", resetCompForm);
   $("#f-create").addEventListener("click", createCompetition);
   $("#f-update").addEventListener("click", updateCompetition);
   $("#f-delete").addEventListener("click", deleteCompetition);
