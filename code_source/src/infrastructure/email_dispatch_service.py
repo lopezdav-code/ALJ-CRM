@@ -9,8 +9,6 @@ Permet de :
 4. Expédier les messages via l'API Gmail sécurisée du club (OAuth2) ou SMTP.
 """
 
-import os
-import sys
 from typing import Dict, Any, List, Optional
 
 from domain.utils import apply_template_variables, format_montant

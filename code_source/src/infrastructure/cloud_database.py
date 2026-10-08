@@ -32,7 +32,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import socket
 import sqlite3
 import threading
@@ -563,7 +562,7 @@ def _build_write(conn, table: str, cols: List[str], pk: List[str], pk_str: str, 
     if row is None:
         if base is None:
             return None
-        w.update(fields={c: v for c, v in zip(pk, vals)}, mask=None, deleted=True,
+        w.update(fields={c: v for c, v in zip(pk, vals, strict=False)}, mask=None, deleted=True,
                  precondition={"updateTime": base_ut} if base_ut else None)
         return w, None
     if base is None:
@@ -658,7 +657,7 @@ def flush(conn, store, by: str = "", report: Optional[Dict[str, Any]] = None,
         chunk = items[start:start + COMMIT_CHUNK]
         try:
             results = store.commit([it[3] for it in chunk])
-            for it, res in zip(chunk, results):
+            for it, res in zip(chunk, results, strict=False):
                 done(it, res)
         except CloudConflictError:
             for it in chunk:

@@ -21,8 +21,6 @@ Sécurité (le contenu d'une notification n'est jamais cru sur parole) :
   l'une au moins de ces deux vérifications est possible (fail-closed).
 """
 
-import re
-import json
 import datetime
 from typing import Dict, Any, List, Optional
 
@@ -30,14 +28,7 @@ import helloasso_api
 from infrastructure.api_auth import auth_enforced, constant_time_equals
 from infrastructure.secret_store import SecretStore
 
-from domain.utils import normalize_name, normalize_string
 from domain.competition_matching import (
-    extract_licence,
-    extract_competition_number,
-    _item_amount,
-    _item_payer_name,
-    _item_state,
-    STATUTS_PAYES,
     auto_link_items,
     summarize_items,
 )

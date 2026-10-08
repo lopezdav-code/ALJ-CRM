@@ -48,7 +48,6 @@ from domain.competition_models import (
     PAIEMENT_STATUTS_ANNULES,
     PAIEMENT_ANNULE_PERDU,
     PAIEMENT_ANNULE_REPORTE,
-    statut_paiement_apres_bascule,
 )
 from domain.planning_groups import group_for_tarif
 from domain.utils import normalize_string

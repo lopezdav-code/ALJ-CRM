@@ -78,8 +78,8 @@ def compare(source: str, cache: str) -> list:
             if len(a) != len(b):
                 problems.append(f"{t} : {len(a)} lignes en source, {len(b)} dans Firestore")
             diff = 0
-            for ra, rb in zip(a, b):
-                if any(x != y or type(x) is not type(y) for x, y in zip(ra, rb)):
+            for ra, rb in zip(a, b, strict=False):
+                if any(x != y or type(x) is not type(y) for x, y in zip(ra, rb, strict=False)):
                     diff += 1
                     if diff <= 3:
                         problems.append(f"{t} : écart {ra[:3]} / {rb[:3]}")

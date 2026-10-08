@@ -1107,7 +1107,7 @@ def sync_helloasso_api():
             "status": "success",
             "stats": {
                 "nb_items": len(items),
-                "nb_auto": len([l for l in (links or {}).values() if l]),
+                "nb_auto": len([lk for lk in (links or {}).values() if lk]),
                 "nb_manual": len([e for e in existing.values() if e.get("source") == "manuel"]),
                 "nb_applied": applied,
                 "nb_unlinked": len(unlinked),
