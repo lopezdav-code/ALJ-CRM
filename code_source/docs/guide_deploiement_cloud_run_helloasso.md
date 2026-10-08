@@ -132,6 +132,11 @@ Dès que votre URL Cloud Run est active, configurez les notifications HelloAsso 
   ```
   Une notification sans le bon `?token=` est refusée (`401`).
 - **Relecture HelloAsso** : si `HELLOASSO_CLIENT_ID` / `HELLOASSO_CLIENT_SECRET` sont configurés sur Cloud Run, le serveur ne lit que les identifiants d'articles dans la notification et relit montant, état, payeur et champs personnalisés auprès de l'API HelloAsso. Un contenu falsifié est donc sans effet.
+  Identifiants rangés dans Secret Manager (`helloasso-client-id`, `helloasso-client-secret`, `helloasso-org-slug`) :
+  ```bash
+  gcloud run services update alj-escalade-api --region europe-west1 \
+      --update-secrets HELLOASSO_CLIENT_ID=helloasso-client-id:latest,HELLOASSO_CLIENT_SECRET=helloasso-client-secret:latest,HELLOASSO_ORG_SLUG=helloasso-org-slug:latest
+  ```
 - **Fail-closed** : en production, une notification qui ne peut être vérifiée ni par le jeton ni par l'API est refusée (`503`).
 - **API `/api/*`, `/map`, `/pivot`, `/docs`** : réservées aux comptes connectés à la PWA. La PWA envoie le jeton Firebase (`Authorization: Bearer …`) ; le serveur vérifie sa signature et applique les rôles de `firestore.rules` (coach requis, admin pour `POST /api/planning`). Restent publics : `/`, `/competitions`, `/annuaire`, `/health`, `/api/web-version`, `/sw.js`, `/manifest.webmanifest` et le webhook. Contrôle actif dans l'image Docker (`ALJ_API_AUTH=required`), désactivé pour le serveur local de l'application de bureau.
 
