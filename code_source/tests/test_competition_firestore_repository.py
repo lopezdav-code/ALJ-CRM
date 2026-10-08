@@ -89,7 +89,17 @@ class FakeFirestore:
     def batch_upsert(self, writes, project_id=None, access_token=None):
         for w in writes:
             col, _, doc_id = str(w["path"]).partition("/")
-            self._col(col)[doc_id] = {k: v for k, v in (w.get("data") or {}).items() if k != "_doc_id"}
+            data = {k: v for k, v in (w.get("data") or {}).items() if k != "_doc_id"}
+            mask = w.get("update_fields")
+            if mask:  # updateMask : seuls les champs listés sont écrits
+                doc = dict(self._col(col).get(doc_id) or {})
+                for k in mask:
+                    if k in data:
+                        doc[k] = data[k]
+                    else:
+                        doc.pop(k, None)
+                data = doc
+            self._col(col)[doc_id] = data
         return {"written": len(writes), "errors_count": 0, "errors": []}
 
 
@@ -404,6 +414,51 @@ class TestHelloAssoMirror(FirestoreRepoTestCase):
 
         Repo.set_item_link(500, self.comp_id, 101, source="auto")
         self.assertEqual(Repo.list_unlinked_items(), [])
+
+
+    def _ignore(self, iid, motif="paiement de test"):
+        self.fake.update_fields("helloasso_items", str(iid),
+                                {"ignore": True, "ignore_motif": motif, "commentaire": motif})
+
+    def test_ignored_item_excluded_from_unlinked_and_auto_links(self):
+        self._ignore(500)
+        self.assertEqual(Repo.list_unlinked_items(), [])
+        self.assertEqual(Repo.list_helloasso_links()[500]["source"], "ignore")
+
+        # Le moteur automatique ne rattache jamais une ligne ignorée
+        from domain.competition_matching import auto_link_items
+        links = auto_link_items(
+            [{"id_item": 500, "etat": "Validated", "competition": "18846", "licence": "654321"}],
+            [{"id": self.comp_id, "id_ffme": "18846", "nom": "Coupe Rhône"}],
+            [{"id": 101, "num_licence": "654321", "nom": "MARTIN", "prenom": "Lucas"}],
+            Repo.list_helloasso_links())
+        self.assertEqual(links, {})
+        Repo.replace_auto_links({500: {"competition_id": self.comp_id, "adherent_id": 101, "source": "auto"}})
+        it = Repo.get_item(500)
+        self.assertIsNone(it["competition_id"])
+        self.assertTrue(it["ignore"])
+
+    def test_resync_preserves_ignore_flag(self):
+        self._ignore(500, "achat boutique")
+        Repo.sync_helloasso_mirror(self.summary, self.raw, "campagne-2026")
+        it = Repo.get_item(500)
+        self.assertTrue(it["ignore"])
+        self.assertEqual(it["ignore_motif"], "achat boutique")
+        self.assertEqual(it["commentaire"], "achat boutique")
+
+    def test_resync_writes_only_helloasso_fields(self):
+        captured = []
+        real = self.fake.batch_upsert
+        def spy(writes, **kw):
+            captured.extend(writes)
+            return real(writes, **kw)
+        with patch.object(FirestoreClient, "batch_upsert", spy):
+            Repo.sync_helloasso_mirror(self.summary, self.raw, "campagne-2026")
+        self.assertEqual(len(captured), 1)
+        mask = captured[0]["update_fields"]
+        for f in ("ignore", "commentaire", "competition_id", "adherent_id", "source"):
+            self.assertNotIn(f, mask)
+            self.assertNotIn(f, captured[0]["data"])
 
 
 class TestAppSettings(FirestoreRepoTestCase):

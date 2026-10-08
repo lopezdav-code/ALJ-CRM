@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="9">
-<title>ALJ Escalade — Gestion des Compétitions (v9)</title>
+<meta name="alj-web-version" content="10">
+<title>ALJ Escalade — Gestion des Compétitions (v10)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -144,13 +144,19 @@
   .filter-chip.active {
     background: #EFF6FF; color: var(--blue); border-color: var(--blue);
   }
+  .ha-kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ha-kv th { text-align: left; vertical-align: top; color: #64748B; font-weight: 600; padding: 3px 8px 3px 0; white-space: nowrap; width: 1%; }
+  .ha-kv td { color: #0F172A; padding: 3px 0; word-break: break-word; }
+  .ha-kv tr.ha-sep th, .ha-kv tr.ha-sep td { border-top: 1px dashed #CBD5E1; padding-top: 6px; }
+  .ha-raw summary { cursor: pointer; font-size: 12px; color: #64748B; margin-top: 8px; }
+  .ha-raw pre { max-height: 220px; overflow: auto; background: #0F172A; color: #E2E8F0; font-size: 10.5px; padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
 <body>
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v9</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v10</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
@@ -343,9 +349,13 @@
         <div style="font-size:20px; font-weight:800; color:var(--green);" id="ha-kpi-linked">0</div>
         <div style="font-size:11px; color:#64748B; font-weight:600;">Rattachés</div>
       </div>
-      <div style="flex:1;">
+      <div style="flex:1; border-right:1px solid var(--line);">
         <div style="font-size:20px; font-weight:800; color:var(--red);" id="ha-kpi-unlinked">0</div>
         <div style="font-size:11px; color:#64748B; font-weight:600;">En attente</div>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:20px; font-weight:800; color:#64748B;" id="ha-kpi-ignored">0</div>
+        <div style="font-size:11px; color:#64748B; font-weight:600;">Ignorés</div>
       </div>
     </div>
 
@@ -362,17 +372,24 @@
 
       <input type="search" id="ha-search" placeholder="🔍 Rechercher payeur, commande, licence, compétition…" oninput="renderHelloAssoPage()">
 
-      <div style="display:flex; gap:8px; margin-top:10px;">
+      <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
         <label class="filter-chip active" id="ha-chip-unlinked" onclick="setHaFilter('unlinked')">
           ⚠️ En attente (<span id="ha-count-chip-unlinked">0</span>)
         </label>
         <label class="filter-chip" id="ha-chip-linked" onclick="setHaFilter('linked')">
           ✅ Rattachés (<span id="ha-count-chip-linked">0</span>)
         </label>
+        <label class="filter-chip" id="ha-chip-ignored" onclick="setHaFilter('ignored')">
+          🚫 Ignorés (<span id="ha-count-chip-ignored">0</span>)
+        </label>
         <label class="filter-chip" id="ha-chip-all" onclick="setHaFilter('all')">
           📋 Tous (<span id="ha-count-chip-all">0</span>)
         </label>
       </div>
+      <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:12px; color:#475569; cursor:pointer;">
+        <input type="checkbox" id="ha-hide-ignored" checked onchange="setHaHideIgnored(this.checked)" style="width:auto; margin:0;">
+        🙈 Masquer les lignes ignorées
+      </label>
     </div>
 
     <div class="section-h">📋 Articles HelloAsso (Miroir)</div>
@@ -499,38 +516,36 @@
   <div id="ha-attach-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeAttachModal();">
     <div class="modal-content card" style="max-width:540px">
       <div class="modal-header">
-        <div class="m-name" style="font-size:16px;">🔗 Rattacher le paiement HelloAsso</div>
+        <div class="m-name" style="font-size:16px;">🔗 Paiement HelloAsso</div>
         <button class="icon-btn" onclick="closeAttachModal()" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px;">✕</button>
       </div>
 
-      <!-- Résumé du paiement reçu -->
+      <!-- Toutes les informations HelloAsso de l'article -->
       <div class="card" style="background:#F8FAFC; border:1px solid #E2E8F0; margin-bottom:12px; padding:10px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <b id="ha-modal-payer" style="font-size:15px; color:#1E293B;">—</b>
-          <span id="ha-modal-amount" style="font-size:16px; font-weight:800; color:var(--green);">0.00 €</span>
+          <span id="ha-modal-amount" style="font-size:16px; font-weight:800; color:var(--green); white-space:nowrap;">0.00 €</span>
         </div>
-        <div style="font-size:12px; color:#64748B; margin-top:4px;">
-          Commande : <span id="ha-modal-order" style="font-weight:600; color:#334155;">—</span> ·
-          Date : <span id="ha-modal-date" style="font-weight:600; color:#334155;">—</span>
-        </div>
-        <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #CBD5E1; font-size:12px;">
-          <div>🪪 Licence saisie : <b id="ha-modal-licence" style="color:#0F172A;">—</b></div>
-          <div style="margin-top:2px;">🏆 Compétition saisie : <b id="ha-modal-comp-saisie" style="color:#0F172A;">—</b></div>
-        </div>
+        <div id="ha-modal-details" style="margin-top:6px;"></div>
       </div>
 
+      <div id="ha-modal-ignored-banner" style="display:none; background:#F1F5F9; border:1px solid #CBD5E1; border-radius:8px; padding:8px 10px; font-size:12px; color:#334155; margin-bottom:10px;"></div>
+
       <!-- Sélections de rattachement -->
-      <label class="fld">1. Compétition concernée *</label>
-      <select id="ha-modal-comp-select"></select>
+      <div id="ha-modal-link-section">
+        <label class="fld">1. Compétition concernée *</label>
+        <select id="ha-modal-comp-select"></select>
 
-      <label class="fld">2. Compétiteur à créditer (marqué « Payé ») *</label>
-      <select id="ha-modal-adh-select"></select>
+        <label class="fld">2. Compétiteur à créditer (marqué « Payé ») *</label>
+        <select id="ha-modal-adh-select"></select>
+      </div>
 
-      <label class="fld">3. Commentaire persistant (optionnel)</label>
-      <input type="text" id="ha-modal-comment" placeholder="Ex : paiement validé par le coach, fratrie…">
+      <label class="fld" id="ha-modal-comment-label">Commentaire (obligatoire pour ignorer la ligne)</label>
+      <input type="text" id="ha-modal-comment" placeholder="Ex : paiement de test, fratrie, validé par le coach…">
 
       <div class="btn-row" style="margin-top:12px;">
         <button class="btn btn-muted" onclick="closeAttachModal()">Annuler</button>
+        <button class="btn" id="ha-modal-ignore-btn" onclick="toggleIgnoreItem()" style="background:#F1F5F9; color:#334155; border:1px solid #CBD5E1;">🚫 Ignorer</button>
         <button class="btn btn-primary" id="ha-modal-save-btn" onclick="saveAttachment()">💾 Enregistrer le rattachement</button>
       </div>
     </div>
@@ -573,7 +588,8 @@ let lastSyncAt = null;
 let editCompId = null;           // id de la compétition en cours d'édition
 let editSourcePage = null;       // page d'où l'édition a été déclenchée
 let helloassoItems = [];         // documents de la collection "helloasso_items"
-let haFilter = "unlinked";       // filtre d'affichage : 'unlinked', 'linked', 'all'
+let haFilter = "unlinked";       // filtre d'affichage : 'unlinked', 'linked', 'ignored', 'all'
+let haHideIgnored = (function () { try { return localStorage.getItem("alj_ha_hide_ignored") !== "0"; } catch (e) { return true; } })();
 let currentAttachItemId = null;  // identifiant de l'item en cours de rattachement
 let participantFilter = "all";   // filtre des participants : 'all', 'selected', 'unpaid'
 
@@ -1703,62 +1719,178 @@ function renderAll() {
 function isItemLinked(item) {
   return item && item.competition_id != null && item.adherent_id != null;
 }
+// Ligne volontairement écartée par un coach (test, achat hors compétition…)
+function isItemIgnored(item) {
+  return !!(item && item.ignore === true && !isItemLinked(item));
+}
+function findHaItem(itemId) {
+  return helloassoItems.find(x => String(x.id_item) === String(itemId) || String(x.docId) === String(itemId));
+}
+
+// Article HelloAsso brut (copie JSON conservée dans le miroir)
+function haRaw(it) {
+  let r = null;
+  try { r = it && it.raw_json ? JSON.parse(it.raw_json) : null; } catch (e) { r = null; }
+  return (r && typeof r === "object") ? r : {};
+}
+
+// Toutes les informations utiles d'un article, avec repli sur les données brutes
+function haInfo(it) {
+  const r = haRaw(it);
+  const order = r.order || {};
+  const payer = r.payer || {};
+  const user = r.user || {};
+  const fullName = o => [o.firstName, o.lastName].filter(Boolean).join(" ").trim();
+  const cents = v => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v) / 100;
+  const fields = list => (Array.isArray(list) ? list : []).map(c => ({
+    name: String((c && c.name) || "").trim(), answer: c ? c.answer : ""
+  }));
+  const payments = Array.isArray(r.payments) ? r.payments : [];
+  const mirrorName = `${it.payer_prenom || ""} ${it.payer_nom || ""}`.trim();
+  return {
+    beneficiary: fullName(user) || mirrorName,
+    payerName: fullName(payer),
+    payerEmail: payer.email || "",
+    payerCity: [payer.zipCode, payer.city].filter(Boolean).join(" "),
+    orderId: it.order_id || (order.id != null ? String(order.id) : ""),
+    date: it.date_item || order.date || (payments[0] && payments[0].date) || "",
+    formName: order.formName || "",
+    formSlug: order.formSlug || it.campagne_slug || "",
+    formType: order.formType || "",
+    itemName: r.name || "",
+    tierDescription: r.tierDescription || "",
+    state: it.etat || r.state || "",
+    amount: Number(it.montant || 0),
+    initialAmount: cents(r.initialAmount),
+    discount: r.discount || null,
+    payments: payments.map(p => ({
+      id: p.id, amount: cents(p.amount != null ? p.amount : p.shareAmount),
+      state: p.state || "", date: p.date || "", means: p.paymentMeans || ""
+    })),
+    customFields: fields(r.customFields),
+    options: (Array.isArray(r.options) ? r.options : []).map(o => ({
+      name: o.name || "", amount: cents(o.amount), customFields: fields(o.customFields)
+    })),
+    hasRaw: Object.keys(r).length > 0,
+    raw: r,
+  };
+}
+function haDisplayName(it, info) {
+  const h = info || haInfo(it);
+  return h.beneficiary || h.payerName || `Article #${it.id_item || it.docId}`;
+}
+const HA_STATES = { processed: "Payé", registered: "Enregistré", authorized: "Autorisé", refused: "Refusé",
+  refunded: "Remboursé", refunding: "Remboursement en cours", canceled: "Annulé", contested: "Contesté", waiting: "En attente" };
+function haStateLabel(s) {
+  const k = String(s || "").toLowerCase();
+  return HA_STATES[k] ? `${HA_STATES[k]} (${s})` : String(s || "");
+}
+function haEuro(v) { return v == null ? "" : `${Number(v).toFixed(2)} €`; }
+
+function haDetailsHtml(it) {
+  const h = haInfo(it);
+  const rows = [];
+  const row = (k, v, sep) => { if (v !== "" && v != null) rows.push(`<tr${sep ? ' class="ha-sep"' : ""}><th>${esc(k)}</th><td>${v}</td></tr>`); };
+  const ans = v => (v === "" || v == null) ? '<i style="color:#94A3B8">— vide —</i>' : `<b>${esc(String(v))}</b>`;
+
+  row("🛒 Article", h.itemName ? `<b>${esc(h.itemName)}</b>` : "");
+  row("📝 Formulaire", h.formName || h.formSlug
+    ? `${esc(h.formName || h.formSlug)}${h.formType ? ` <span style="color:#64748B">(${esc(h.formType)})</span>` : ""}` : "");
+  row("🧾 Commande", h.orderId ? `#${esc(h.orderId)}` : "");
+  row("📅 Date", h.date ? esc(fmtDate(h.date)) : "");
+  row("👤 Bénéficiaire", h.beneficiary ? esc(h.beneficiary) : "");
+  row("💳 Payeur", h.payerName || h.payerEmail
+    ? `${esc(h.payerName)}${h.payerEmail ? ` · <a href="mailto:${esc(h.payerEmail)}">${esc(h.payerEmail)}</a>` : ""}${h.payerCity ? ` · ${esc(h.payerCity)}` : ""}` : "");
+  row("💶 Montant", `<b>${haEuro(h.amount)}</b>${h.initialAmount != null && Math.abs(h.initialAmount - h.amount) > 0.001 ? ` <span style="color:#64748B">(prix initial ${haEuro(h.initialAmount)})</span>` : ""}`);
+  row("📌 État", h.state ? esc(haStateLabel(h.state)) : "");
+  if (h.payments.length) {
+    row("🏦 Paiement" + (h.payments.length > 1 ? "s" : ""), h.payments.map(p =>
+      `#${esc(String(p.id || "?"))} · ${haEuro(p.amount)}${p.state ? " · " + esc(haStateLabel(p.state)) : ""}${p.means ? " · " + esc(p.means) : ""}${p.date ? " · " + esc(fmtDate(p.date)) : ""}`).join("<br>"));
+  } else if (h.hasRaw) {
+    row("🏦 Paiement", '<i style="color:#B45309">aucun paiement associé</i>');
+  }
+  h.customFields.forEach((c, i) => row(c.name || "Champ", ans(c.answer), i === 0));
+  h.options.forEach((o, i) => {
+    row("➕ Option", `${esc(o.name)}${o.amount ? " · " + haEuro(o.amount) : ""}`, i === 0);
+    o.customFields.forEach(c => row("   " + (c.name || "Champ"), ans(c.answer)));
+  });
+  if (!h.customFields.length) {
+    row("🪪 Licence saisie", ans(it.licence_saisie), true);
+    row("🏆 Compétition saisie", ans(it.competition_saisie));
+  }
+  row("🔢 N° article", esc(String(it.id_item || it.docId)), true);
+  if (it.synced_at) row("🔄 Reçu le", esc(String(it.synced_at)));
+
+  const missing = !h.itemName && !h.orderId && !h.payerName
+    ? `<div style="margin-top:6px; color:#B45309; font-size:12px;">⚠️ HelloAsso n'a transmis que le montant de cet article. Lancez « 🔄 Synchroniser » ou consultez HelloAsso avec le n° d'article.</div>` : "";
+  const raw = h.hasRaw
+    ? `<details class="ha-raw"><summary>🔎 Données brutes HelloAsso</summary><pre>${esc(JSON.stringify(h.raw, null, 2))}</pre></details>` : "";
+  return `<table class="ha-kv">${rows.join("")}</table>${missing}${raw}`;
+}
 
 function setHaFilter(filterType) {
   haFilter = filterType;
-  const chipUnlinked = $("#ha-chip-unlinked");
-  const chipLinked = $("#ha-chip-linked");
-  const chipAll = $("#ha-chip-all");
-  if (chipUnlinked) chipUnlinked.classList.toggle("active", filterType === "unlinked");
-  if (chipLinked) chipLinked.classList.toggle("active", filterType === "linked");
-  if (chipAll) chipAll.classList.toggle("active", filterType === "all");
+  ["unlinked", "linked", "ignored", "all"].forEach(f => {
+    const chip = $("#ha-chip-" + f);
+    if (chip) chip.classList.toggle("active", filterType === f);
+  });
+  renderHelloAssoPage();
+}
+function setHaHideIgnored(v) {
+  haHideIgnored = !!v;
+  try { localStorage.setItem("alj_ha_hide_ignored", haHideIgnored ? "1" : "0"); } catch (e) {}
   renderHelloAssoPage();
 }
 
 function renderHelloAssoPage() {
   const total = helloassoItems.length;
   const linked = helloassoItems.filter(isItemLinked).length;
-  const unlinked = total - linked;
+  const ignored = helloassoItems.filter(isItemIgnored).length;
+  const unlinked = total - linked - ignored;
 
   if ($("#ha-kpi-total")) $("#ha-kpi-total").textContent = total;
   if ($("#ha-kpi-linked")) $("#ha-kpi-linked").textContent = linked;
   if ($("#ha-kpi-unlinked")) $("#ha-kpi-unlinked").textContent = unlinked;
+  if ($("#ha-kpi-ignored")) $("#ha-kpi-ignored").textContent = ignored;
 
   if ($("#ha-count-chip-unlinked")) $("#ha-count-chip-unlinked").textContent = unlinked;
   if ($("#ha-count-chip-linked")) $("#ha-count-chip-linked").textContent = linked;
-  if ($("#ha-count-chip-all")) $("#ha-count-chip-all").textContent = total;
+  if ($("#ha-count-chip-ignored")) $("#ha-count-chip-ignored").textContent = ignored;
+  if ($("#ha-count-chip-all")) $("#ha-count-chip-all").textContent = haHideIgnored ? total - ignored : total;
+  if ($("#ha-hide-ignored")) $("#ha-hide-ignored").checked = haHideIgnored;
 
   const query = normKey($("#ha-search") ? $("#ha-search").value : "");
   let filtered = helloassoItems.slice();
 
   if (haFilter === "unlinked") {
-    filtered = filtered.filter(it => !isItemLinked(it));
+    filtered = filtered.filter(it => !isItemLinked(it) && !isItemIgnored(it));
   } else if (haFilter === "linked") {
     filtered = filtered.filter(isItemLinked);
+  } else if (haFilter === "ignored") {
+    filtered = filtered.filter(isItemIgnored);
+  } else if (haHideIgnored) {
+    filtered = filtered.filter(it => !isItemIgnored(it));
   }
 
+  const infos = new Map(filtered.map(it => [it, haInfo(it)]));
   if (query) {
     filtered = filtered.filter(it => {
-      const payer = normKey(`${it.payer_nom || ""} ${it.payer_prenom || ""}`);
-      const order = normKey(it.order_id || "");
-      const lic = normKey(it.licence_saisie || "");
-      const compSaisie = normKey(it.competition_saisie || "");
+      const h = infos.get(it);
       const comp = it.competition_id ? findComp(it.competition_id) : null;
-      const compNom = comp ? normKey(comp.nom) : "";
       const adh = it.adherent_id ? findAdherent(it.adherent_id) : null;
-      const adhNom = adh ? normKey(`${adh.nom || ""} ${adh.prenom || ""}`) : "";
-      return payer.includes(query) || order.includes(query) || lic.includes(query) ||
-             compSaisie.includes(query) || compNom.includes(query) || adhNom.includes(query);
+      const hay = normKey([
+        it.payer_nom, it.payer_prenom, h.beneficiary, h.payerName, h.payerEmail, h.orderId,
+        it.id_item, it.licence_saisie, it.competition_saisie, h.itemName, h.formName,
+        it.commentaire, it.ignore_motif, comp ? comp.nom : "", adh ? `${adh.nom || ""} ${adh.prenom || ""}` : "",
+        h.customFields.map(c => c.answer).join(" ")
+      ].filter(v => v != null).join(" "));
+      return hay.includes(query);
     });
   }
 
-  filtered.sort((a, b) => {
-    const aLinked = isItemLinked(a);
-    const bLinked = isItemLinked(b);
-    if (!aLinked && bLinked) return -1;
-    if (aLinked && !bLinked) return 1;
-    return String(b.date_item || "").localeCompare(String(a.date_item || ""));
-  });
+  const rank = it => isItemLinked(it) ? 1 : (isItemIgnored(it) ? 2 : 0);
+  filtered.sort((a, b) => (rank(a) - rank(b)) ||
+    String(infos.get(b).date || "").localeCompare(String(infos.get(a).date || "")));
 
   const countLine = $("#ha-list-count");
   if (countLine) countLine.textContent = `${filtered.length} paiement${filtered.length > 1 ? "s" : ""}`;
@@ -1767,52 +1899,69 @@ function renderHelloAssoPage() {
   if (!container) return;
 
   if (filtered.length === 0) {
-    container.innerHTML = `<div class="empty">Aucun paiement HelloAsso ${haFilter === "unlinked" ? "en attente de rattachement" : "trouvé"}.</div>`;
+    const what = haFilter === "unlinked" ? "en attente de rattachement" : haFilter === "ignored" ? "ignoré" : "trouvé";
+    container.innerHTML = `<div class="empty">Aucun paiement HelloAsso ${what}.</div>`;
     return;
   }
 
   container.innerHTML = filtered.map(it => {
+    const h = infos.get(it);
     const linked = isItemLinked(it);
+    const ignoredIt = isItemIgnored(it);
+    const color = linked ? "var(--green)" : (ignoredIt ? "#94A3B8" : "var(--red)");
     const comp = it.competition_id ? findComp(it.competition_id) : null;
     const adh = it.adherent_id ? findAdherent(it.adherent_id) : null;
     const compText = comp ? `${esc(comp.nom)}` : "— non rattachée —";
     const adhText = adh ? `${esc(adh.nom)} ${esc(adh.prenom)}` : "— non rattaché —";
-    const dateTxt = it.date_item ? fmtDate(it.date_item) : "—";
+    const dateTxt = h.date ? fmtDate(h.date) : "—";
     const amountTxt = Number(it.montant || 0).toFixed(2) + " €";
     const itemIdStr = esc(String(it.id_item || it.docId));
+    const name = haDisplayName(it, h);
+    const payerLine = h.payerName && normKey(h.payerName) !== normKey(h.beneficiary)
+      ? `<div class="m-sub">💳 payé par ${esc(h.payerName)}</div>` : "";
+    const itemLine = (h.itemName || h.formName)
+      ? `<div style="margin-bottom:3px;">🛒 <b style="color:#0F172A;">${esc(h.itemName || "Article")}</b>${h.formName ? ` <span style="color:#64748B;">— ${esc(h.formName)}</span>` : ""}</div>` : "";
+    const fieldsHtml = h.customFields.length
+      ? h.customFields.map(c => `<div style="margin-top:2px;">${esc(c.name)} : <b style="color:#0F172A;">${esc(c.answer == null || c.answer === "" ? "—" : String(c.answer))}</b></div>`).join("")
+      : `<div>🪪 Licence saisie : <b style="color:#0F172A;">${esc(it.licence_saisie || "— non renseignée —")}</b></div>
+         <div style="margin-top:3px;">🏆 Compétition saisie : <b style="color:#0F172A;">${esc(it.competition_saisie || "— non renseignée —")}</b></div>`;
+    const badge = linked ? "✅ Rattaché" : (ignoredIt ? "🚫 Ignoré" : "⚠️ En attente");
+    const badgeBg = linked ? "var(--green)" : (ignoredIt ? "#94A3B8" : "#F59E0B");
+    const footer = linked
+      ? `<b>Épreuve :</b> ${compText}<br><b>Athlète :</b> ${adhText} <span style="color:#64748B; font-size:10px;">(${esc(it.source || 'auto')})</span>`
+      : ignoredIt
+        ? `<span style="color:#475569;">🚫 Ignoré${it.ignored_by ? " par " + esc(it.ignored_by) : ""}${it.ignored_at ? " le " + esc(fmtDate(it.ignored_at)) : ""}</span>`
+        : `<span style="color:var(--red); font-weight:600;">⚠️ À attribuer à une compétition et un athlète</span>`;
+    const btnLabel = linked ? "🔗 Modifier" : (ignoredIt ? "🔍 Détails" : "🔗 Rattacher");
 
     return `
-    <div class="card" style="border-left: 4px solid ${linked ? 'var(--green)' : 'var(--red)'}; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
-          <div class="m-name" style="font-size:15px;">${esc(it.payer_nom)} ${esc(it.payer_prenom)}</div>
+    <div class="card" style="border-left: 4px solid ${color}; margin-bottom:10px;${ignoredIt ? " opacity:.75;" : ""}">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div style="min-width:0;">
+          <div class="m-name" style="font-size:15px;">${esc(name)}</div>
+          ${payerLine}
           <div class="m-sub" style="margin-top:2px;">
-            Commande <b>#${esc(it.order_id || "—")}</b> · 📅 ${dateTxt}
+            Commande <b>#${esc(h.orderId || "—")}</b> · 📅 ${esc(dateTxt)}
           </div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:16px; font-weight:800; color:${linked ? 'var(--green)' : 'var(--red)'};">${amountTxt}</div>
-          <span class="badge" style="background:${linked ? 'var(--green)' : '#F59E0B'}; font-size:10px; margin-top:4px;">
-            ${linked ? '✅ Rattaché' : '⚠️ En attente'}
-          </span>
+          <div style="font-size:16px; font-weight:800; color:${color};">${amountTxt}</div>
+          <span class="badge" style="background:${badgeBg}; font-size:10px; margin-top:4px;">${badge}</span>
         </div>
       </div>
 
       <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:6px; padding:8px; margin-top:8px; font-size:12px;">
-        <div>🪪 Licence saisie : <b style="color:#0F172A;">${esc(it.licence_saisie || "— non renseignée —")}</b></div>
-        <div style="margin-top:3px;">🏆 Compétition saisie : <b style="color:#0F172A;">${esc(it.competition_saisie || "— non renseignée —")}</b></div>
+        ${itemLine}
+        ${fieldsHtml}
         ${it.commentaire ? `<div style="margin-top:3px; color:#475569;">💬 <i>${esc(it.commentaire)}</i></div>` : ""}
       </div>
 
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px;">
         <div style="font-size:12px; color:#334155; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;">
-          ${linked
-            ? `<b>Épreuve :</b> ${compText}<br><b>Athlète :</b> ${adhText} <span style="color:#64748B; font-size:10px;">(${esc(it.source || 'auto')})</span>`
-            : `<span style="color:var(--red); font-weight:600;">⚠️ À attribuer à une compétition et un athlète</span>`
-          }
+          ${footer}
         </div>
-        <button class="btn btn-mini ${linked ? 'btn-edit' : 'btn-primary'}" onclick="openAttachModal('${itemIdStr}')" style="margin-left:8px; white-space:nowrap;">
-          🔗 ${linked ? 'Modifier' : 'Rattacher'}
+        <button class="btn btn-mini ${linked || ignoredIt ? 'btn-edit' : 'btn-primary'}" onclick="openAttachModal('${itemIdStr}')" style="margin-left:8px; white-space:nowrap;">
+          ${btnLabel}
         </button>
       </div>
     </div>
@@ -1821,7 +1970,7 @@ function renderHelloAssoPage() {
 }
 
 function attachFirstUnlinked() {
-  const unlinked = helloassoItems.filter(it => !isItemLinked(it));
+  const unlinked = helloassoItems.filter(it => !isItemLinked(it) && !isItemIgnored(it));
   if (unlinked.length === 0) {
     toast("🎉 Aucun paiement en attente de rattachement !");
     return;
@@ -1835,21 +1984,36 @@ function openAttachModal(itemId) {
     return;
   }
   currentAttachItemId = itemId;
-  const it = helloassoItems.find(x => String(x.id_item) === String(itemId) || String(x.docId) === String(itemId));
+  const it = findHaItem(itemId);
   if (!it) { toast("⚠️ Article introuvable."); return; }
 
-  $("#ha-modal-payer").textContent = `${it.payer_nom || ""} ${it.payer_prenom || ""}`.trim() || "—";
+  const linked = isItemLinked(it);
+  const ignoredIt = isItemIgnored(it);
+  $("#ha-modal-payer").textContent = haDisplayName(it);
   $("#ha-modal-amount").textContent = `${Number(it.montant || 0).toFixed(2)} €`;
-  $("#ha-modal-order").textContent = it.order_id || "—";
-  $("#ha-modal-date").textContent = it.date_item ? fmtDate(it.date_item) : "—";
-  $("#ha-modal-licence").textContent = it.licence_saisie || "— non renseignée —";
-  $("#ha-modal-comp-saisie").textContent = it.competition_saisie || "— non renseignée —";
-  $("#ha-modal-comment").value = it.commentaire || "";
+  $("#ha-modal-details").innerHTML = haDetailsHtml(it);
+  $("#ha-modal-comment").value = (ignoredIt ? (it.ignore_motif || it.commentaire) : it.commentaire) || "";
+
+  const banner = $("#ha-modal-ignored-banner");
+  if (ignoredIt) {
+    banner.innerHTML = `🚫 <b>Ligne ignorée</b>${it.ignored_by ? " par " + esc(it.ignored_by) : ""}${it.ignored_at ? " le " + esc(fmtDate(it.ignored_at)) : ""}`
+      + (it.ignore_motif ? `<br>Motif : <i>${esc(it.ignore_motif)}</i>` : "");
+    banner.style.display = "";
+  } else {
+    banner.style.display = "none";
+  }
+  $("#ha-modal-link-section").style.display = ignoredIt ? "none" : "";
+  $("#ha-modal-save-btn").style.display = ignoredIt ? "none" : "";
+  const ignBtn = $("#ha-modal-ignore-btn");
+  ignBtn.style.display = linked ? "none" : "";
+  ignBtn.textContent = ignoredIt ? "↩️ Ne plus ignorer" : "🚫 Ignorer";
+  $("#ha-modal-comment-label").textContent = ignoredIt ? "Motif / commentaire"
+    : (linked ? "Commentaire (optionnel)" : "Commentaire (obligatoire pour ignorer la ligne)");
 
   // 1. Liste des compétitions
   const compSel = $("#ha-modal-comp-select");
   const compList = sortedCompetitions();
-  compSel.innerHTML = '<option value="">— Ignorer (ne pas rattacher) —</option>' + compOptionsHtml(compList);
+  compSel.innerHTML = '<option value="">— Aucune compétition (ne pas rattacher) —</option>' + compOptionsHtml(compList);
 
   if (it.competition_id && compList.some(c => String(c.id) === String(it.competition_id))) {
     compSel.value = String(it.competition_id);
@@ -1901,9 +2065,53 @@ function closeAttachModal() {
   currentAttachItemId = null;
 }
 
+// Ignorer / ne plus ignorer une ligne HelloAsso (motif obligatoire pour ignorer)
+async function toggleIgnoreItem() {
+  if (!currentAttachItemId) return;
+  const it = findHaItem(currentAttachItemId);
+  if (!it) return;
+  const note = $("#ha-modal-comment").value.trim();
+  const wasIgnored = isItemIgnored(it);
+  if (!wasIgnored && !note) {
+    toast("✍️ Indiquez un commentaire (motif) pour ignorer cette ligne.");
+    $("#ha-modal-comment").focus();
+    return;
+  }
+  const ref = fsdb.collection("helloasso_items").doc(String(it.id_item || it.docId));
+  const nowIso = new Date().toISOString();
+  const who = (auth.currentUser && auth.currentUser.email) || "";
+  const btn = $("#ha-modal-ignore-btn");
+  btn.disabled = true;
+  try {
+    await fsdb.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error("Article introuvable dans Firestore.");
+      const cur = snap.data() || {};
+      if (wasIgnored) {
+        tx.update(ref, { ignore: false, ignore_motif: "", ignored_at: null, ignored_by: null,
+                         commentaire: note, updated_at: nowIso });
+      } else {
+        if (cur.competition_id != null && cur.adherent_id != null) {
+          throw new Error("Cette ligne vient d'être rattachée à un compétiteur : elle ne peut pas être ignorée.");
+        }
+        tx.update(ref, { ignore: true, ignore_motif: note, commentaire: note, ignored_at: nowIso, ignored_by: who,
+                         competition_id: null, adherent_id: null, source: null,
+                         link_updated_at: nowIso, updated_at: nowIso });
+      }
+    });
+    toast(wasIgnored ? "↩️ La ligne n'est plus ignorée." : "🚫 Ligne ignorée.");
+    closeAttachModal();
+  } catch (err) {
+    console.error("Erreur ignorer/réactiver :", err);
+    toast("❌ " + (err.message || err), 9000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function saveAttachment() {
   if (!currentAttachItemId) return;
-  const it = helloassoItems.find(x => String(x.id_item) === String(currentAttachItemId) || String(x.docId) === String(currentAttachItemId));
+  const it = findHaItem(currentAttachItemId);
   if (!it) return;
 
   const compIdVal = $("#ha-modal-comp-select").value;
@@ -1928,6 +2136,7 @@ async function saveAttachment() {
       adherent_id: adhId,
       source: isLinked ? "manuel" : null,
       commentaire: note,
+      ignore: false,
       link_updated_at: nowIso,
       updated_at: nowIso
     });
@@ -1966,7 +2175,7 @@ async function saveAttachment() {
       }
     }
 
-    toast(isLinked ? "✅ Paiement HelloAsso rattaché avec succès !" : "ℹ️ Paiement marqué comme ignoré.");
+    toast(isLinked ? "✅ Paiement HelloAsso rattaché avec succès !" : "💾 Enregistré (paiement non rattaché).");
     closeAttachModal();
   } catch (err) {
     console.error("Erreur enregistrement rattachement :", err);

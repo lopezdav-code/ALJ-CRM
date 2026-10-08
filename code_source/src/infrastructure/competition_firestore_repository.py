@@ -825,6 +825,12 @@ class CompetitionFirestoreRepository:
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         writes = []
         written = 0
+        # Champs appartenant à HelloAsso : pour un article déjà connu, seuls eux
+        # sont réécrits (masque), afin de ne jamais écraser un rattachement, un
+        # commentaire ou un « ignorer » saisi entre-temps depuis la PWA.
+        helloasso_fields = ["id_item", "order_id", "payer_nom", "payer_prenom", "montant",
+                            "etat", "date_item", "licence_saisie", "competition_saisie",
+                            "campagne_slug", "raw_json", "synced_at"]
         for s, raw in zip(summarized or [], raw_items or [], strict=False):
             id_item = s.get("id_item")
             if id_item is None:
@@ -851,7 +857,11 @@ class CompetitionFirestoreRepository:
             doc.setdefault("source", None)
             doc.setdefault("link_updated_at", None)
             doc.setdefault("commentaire", "")
-            writes.append({"path": f"{cls.COLLECTION_ITEMS}/{int(id_item)}", "data": doc})
+            write = {"path": f"{cls.COLLECTION_ITEMS}/{int(id_item)}", "data": doc}
+            if int(id_item) in existing:
+                write["data"] = {k: doc[k] for k in helloasso_fields}
+                write["update_fields"] = helloasso_fields
+            writes.append(write)
             written += 1
         if writes:
             FirestoreClient.batch_upsert(writes)
@@ -864,6 +874,8 @@ class CompetitionFirestoreRepository:
             source = doc.get("source")
             comp_id = doc.get("competition_id")
             adh_id = doc.get("adherent_id")
+            if doc.get("ignore") is True and (comp_id is None or adh_id is None):
+                source = "ignore"
             if source or comp_id is not None or adh_id is not None:
                 result[iid] = {
                     "competition_id": comp_id,
@@ -906,7 +918,7 @@ class CompetitionFirestoreRepository:
         writes = []
         for iid, doc in items.items():
             source = doc.get("source")
-            if str(source or "") == "manuel":
+            if str(source or "") == "manuel" or doc.get("ignore") is True:
                 continue
             new = dict(doc)
             link = (links or {}).get(iid)
@@ -920,7 +932,10 @@ class CompetitionFirestoreRepository:
                 new["source"] = None
             new["link_updated_at"] = now
             if new != doc:
-                writes.append({"path": f"{cls.COLLECTION_ITEMS}/{iid}", "data": new})
+                link_fields = ["competition_id", "adherent_id", "source", "link_updated_at"]
+                writes.append({"path": f"{cls.COLLECTION_ITEMS}/{iid}",
+                               "data": {k: new[k] for k in link_fields},
+                               "update_fields": link_fields})
         if writes:
             FirestoreClient.batch_upsert(writes)
         return len(writes)
@@ -970,6 +985,8 @@ class CompetitionFirestoreRepository:
                 "raw_json": str(doc.get("raw_json") or ""),
                 "synced_at": str(doc.get("synced_at") or ""),
                 "commentaire": str(doc.get("commentaire") or ""),
+                "ignore": doc.get("ignore") is True,
+                "ignore_motif": str(doc.get("ignore_motif") or ""),
                 "competition_id": comp_id,
                 "adherent_id": adh_id,
                 "source": doc.get("source"),
@@ -992,6 +1009,8 @@ class CompetitionFirestoreRepository:
             if str(it.get("etat") or "").lower() not in paid:
                 continue
             if it.get("competition_id") is not None and it.get("adherent_id") is not None:
+                continue
+            if it.get("ignore") is True:
                 continue
             lic = re.sub(r"\D", "", str(it.get("licence_saisie") or ""))
             preselect = it.get("adherent_id")

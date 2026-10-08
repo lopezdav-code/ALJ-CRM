@@ -185,6 +185,42 @@ class HelloAssoWebhookService:
             "ou les identifiants API HelloAsso sur le serveur.",
         )
 
+    @staticmethod
+    def item_form_slug(raw: Dict[str, Any]) -> str:
+        return str((raw.get("order") or {}).get("formSlug") or raw.get("formSlug") or "").strip()
+
+    @classmethod
+    def competition_form_slug(cls) -> str:
+        """Slug du formulaire HelloAsso des compétitions (réglage HELLOASSO_ANNUAL_CAMPAIGN)."""
+        try:
+            from domain.competition_matching import parse_campaign_identifier
+            ref = CompetitionRepository.get_app_setting("HELLOASSO_ANNUAL_CAMPAIGN")
+            if not isinstance(ref, str) or not ref.strip():
+                return ""
+            return parse_campaign_identifier(ref)["slug"]
+        except Exception as e:
+            print(f"⚠️ [WEBHOOK_HELLOASSO] Formulaire de compétition introuvable : {e}")
+            return ""
+
+    @classmethod
+    def filter_competition_form(cls, raw_items: List[Dict[str, Any]]):
+        """Sépare les articles du formulaire de compétition des autres.
+
+        Retourne (articles_retenus, slugs_des_articles_écartés). Sans réglage, ou
+        pour un article dont le formulaire est inconnu, rien n'est écarté.
+        """
+        expected = cls.competition_form_slug().lower()
+        if not expected:
+            return list(raw_items), []
+        kept, others = [], []
+        for raw in raw_items:
+            slug = cls.item_form_slug(raw)
+            if slug and slug.lower() != expected:
+                others.append(slug)
+            else:
+                kept.append(raw)
+        return kept, others
+
     # ------------------------------------------------------------------
     # Traitement
     # ------------------------------------------------------------------
@@ -207,10 +243,20 @@ class HelloAssoWebhookService:
         else:
             event_type, raw_items = (payload.get("eventType") or "Unknown"), list(items)
 
+        # Seuls les articles du formulaire « compétitions » configuré sont traités :
+        # les autres ventes HelloAsso de l'association (boutique, adhésions…) ne
+        # doivent pas polluer le miroir des paiements de compétition.
+        raw_items, other_forms = cls.filter_competition_form(raw_items)
+        if other_forms:
+            print(f"ℹ️ [WEBHOOK_HELLOASSO] {len(other_forms)} article(s) d'un autre formulaire ignoré(s) : "
+                  + ", ".join(sorted({s or '?' for s in other_forms})))
+
         if not raw_items:
             return {
                 "status": "ignored",
-                "message": "Aucun article (item) exploitable dans ce payload.",
+                "message": ("Articles hors formulaire de compétition : ignorés."
+                            if other_forms else "Aucun article (item) exploitable dans ce payload."),
+                "other_forms": sorted({s or "?" for s in other_forms}),
                 "event_type": event_type,
                 "processed_count": 0,
                 "matches": [],

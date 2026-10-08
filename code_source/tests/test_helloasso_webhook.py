@@ -112,6 +112,36 @@ class TestHelloAssoWebhookService(unittest.TestCase):
         mock_apply_payment.assert_called_once()
         mock_set_link.assert_called_once()
 
+    def test_items_of_other_forms_are_ignored(self):
+        """Un achat boutique (autre formulaire) n'entre pas dans le miroir des compétitions."""
+        tshirt = {"id": 210752710, "amount": 1700, "state": "Processed", "name": "T shirt technique Enfant",
+                  "order": {"id": 1, "formSlug": "vetements-club-al-jonage-2026-2027", "formType": "Shop"}}
+        compet = {"id": 42, "amount": 1500, "state": "Processed",
+                  "order": {"id": 2, "formSlug": "regularisation-inscription-competiteurs-2026-2027"}}
+        url = ("https://www.helloasso.com/associations/amicale-laique-de-jonage/evenements/"
+               "regularisation-inscription-competiteurs-2026-2027")
+        Repo = "infrastructure.competition_firestore_repository.CompetitionFirestoreRepository"
+        with patch(f"{Repo}.get_app_setting", return_value=url), \
+             patch(f"{Repo}.setup_database"), \
+             patch(f"{Repo}.sync_helloasso_mirror") as mirror, \
+             patch(f"{Repo}.list_competitions", return_value=[]), \
+             patch(f"{Repo}.list_adherents", return_value=[]), \
+             patch(f"{Repo}.list_helloasso_links", return_value={}):
+            report = HelloAssoWebhookService.process_webhook({"eventType": "Order"}, items=[tshirt])
+            self.assertEqual(report["status"], "ignored")
+            self.assertEqual(report["other_forms"], ["vetements-club-al-jonage-2026-2027"])
+            mirror.assert_not_called()
+
+            report = HelloAssoWebhookService.process_webhook({"eventType": "Order"}, items=[tshirt, compet])
+            self.assertEqual(report["processed_count"], 1)
+            mirror.assert_called_once()
+            self.assertEqual(mirror.call_args.kwargs["raw_items"][0]["id"], 42)
+
+    def test_summarize_items_uses_order_date(self):
+        from domain.competition_matching import summarize_items
+        rows = summarize_items([{"id": 1, "amount": 100, "order": {"id": 9, "date": "2026-10-07T15:45:10+02:00"}}])
+        self.assertEqual(rows[0]["date_item"], "2026-10-07T15:45:10+02:00")
+
     def test_fastapi_webhook_endpoint(self):
         """Teste l'appel sur le route handler FastAPI /webhooks/helloasso."""
         payload = {

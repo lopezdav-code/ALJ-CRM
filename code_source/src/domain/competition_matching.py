@@ -164,9 +164,34 @@ def summarize_items(items: list) -> list:
             "licence": extract_licence(item),
             "competition": extract_competition_number(item),
             "etat": str(item.get("state") or ""),
-            "date_item": str(item.get("date") or ""),
+            "date_item": _item_date(item),
         })
     return rows
+
+
+def _item_date(item: dict) -> str:
+    """Date de l'article : un article HelloAsso n'a pas de date propre, on prend
+    celle de la commande (ou du premier paiement)."""
+    if item.get("date"):
+        return str(item.get("date"))
+    order = item.get("order") or {}
+    if order.get("date"):
+        return str(order.get("date"))
+    for p in item.get("payments") or []:
+        if isinstance(p, dict) and p.get("date"):
+            return str(p.get("date"))
+    return ""
+
+
+def link_source(value) -> str:
+    """Source d'un lien existant, que l'appelant passe {id: source} ou {id: {..., source}}."""
+    if isinstance(value, dict):
+        return str(value.get("source") or "")
+    return str(value or "")
+
+
+# Lignes que le moteur automatique ne doit jamais toucher
+SOURCES_FIGEES = ("manuel", "ignore")
 
 
 def match_adherent_by_name(payer: str, adherents: list):
@@ -197,7 +222,8 @@ def auto_link_items(items: list, competitions: list, adherents: list,
     - items : projection du miroir (summarize_items) ;
     - competitions : [{id, id_ffme, nom}] ;
     - adherents : [{id, num_licence, nom, prenom}] (instantané local) ;
-    - existing_links : {id_item: source} — les liens 'manuel' sont préservés.
+    - existing_links : {id_item: source} ou {id_item: {..., "source"}} — les liens
+      'manuel' et les lignes ignorées ('ignore') ne sont jamais recalculés.
 
     La compétition provient du champ « Compétition concernée » (n° d'épreuve saisi) :
     sans champ exploitable, l'article n'est PAS lié automatiquement (il reste
@@ -228,7 +254,7 @@ def auto_link_items(items: list, competitions: list, adherents: list,
         id_item = it.get("id_item")
         if id_item is None:
             continue
-        if existing_links.get(id_item) == "manuel":
+        if link_source(existing_links.get(id_item)) in SOURCES_FIGEES:
             continue
         if normalize_string(it.get("etat") or "") not in STATUTS_PAYES:
             continue
