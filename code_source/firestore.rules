@@ -93,5 +93,14 @@ service cloud.firestore {
       allow read: if isCoach();
       allow write: if isCoach();
     }
+
+    // 7. Base principale des adhérents (ex-database.db) : collections crm_<table>
+    //    (crm_users, crm_orders, crm_purchases, crm_planning...). Lecture : coachs
+    //    (état civil, contacts d'urgence et santé compris) ; écriture : admins.
+    //    L'application de bureau et Cloud Run y accèdent par IAM.
+    match /{collection}/{docId} {
+      allow read: if collection.matches('crm_.*') && isCoach();
+      allow write: if collection.matches('crm_.*') && isAdmin();
+    }
   }
 }

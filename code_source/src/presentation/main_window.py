@@ -562,7 +562,22 @@ class MainWindow(QMainWindow):
         # pour éviter d'avoir du texte entre "chargement en cours" et "chargement terminé"
         print(f"⏳ [STARTUP PROGRESS] {percent}% - {message}")
 
+    def start_cloud_sync(self):
+        """Base Firestore : envoi automatique des modifications (toutes les 15 s),
+        réception de celles des autres postes (toutes les 2 min) et mise à jour
+        du pied de page."""
+        from infrastructure.cloud_database import CloudDatabase
+        if not CloudDatabase.is_enabled() or getattr(self, "_cloud_timer", None):
+            return
+        CloudDatabase.start_background(interval=15)
+        from PySide6.QtCore import QTimer
+        self._cloud_timer = QTimer(self)
+        self._cloud_timer.timeout.connect(self.update_last_sync_footer_label)
+        self._cloud_timer.start(15000)
+        self.update_last_sync_footer_label()
+
     def on_loader_finished(self, success: bool, members_list: list, error_msg: str):
+        self.start_cloud_sync()
         # Réactiver les boutons
         for btn in self.nav_buttons:
             btn.setEnabled(True)
@@ -615,6 +630,21 @@ class MainWindow(QMainWindow):
             )
     def update_last_sync_footer_label(self):
         """Met à jour l'étiquette de dernière sauvegarde et de dernier import de la BDD SQLite sur le Google Drive dans le pied de page."""
+        from infrastructure.cloud_database import CloudDatabase
+        if CloudDatabase.is_enabled():
+            import datetime
+            st = CloudDatabase.status()
+            if st["last_error"]:
+                txt = "🟠 Firestore injoignable — travail sur la copie locale"
+            elif st["last_sync"]:
+                hhmm = datetime.datetime.fromtimestamp(st["last_sync"]).strftime("%H:%M")
+                txt = f"☁️ Base Firestore synchronisée à {hhmm}"
+            else:
+                txt = "☁️ Base Firestore"
+            if st["pending"]:
+                txt += f"  |  ⏳ {st['pending']} modification(s) à envoyer"
+            self.last_sync_lbl.setText(txt)
+            return
         last_sync = SecretStore.get_secret("LAST_GOOGLE_DRIVE_SYNC")
         last_import = SecretStore.get_secret("LAST_GOOGLE_DRIVE_IMPORT")
         
@@ -672,6 +702,22 @@ class MainWindow(QMainWindow):
             print("🚪 [FERMETURE] Début de la procédure d'archivage et de synchronisation finale...")
             print("================================================================================")
             
+            # Étape 0 : base Firestore — envoyer les dernières modifications
+            from infrastructure.cloud_database import CloudDatabase
+            if CloudDatabase.is_enabled():
+                progress.setLabelText("Envoi des dernières modifications vers Firestore...")
+                QCoreApplication.processEvents()
+                CloudDatabase.stop_background()
+                report = CloudDatabase.sync()
+                CloudDatabase.refresh_projection()
+                if CloudDatabase._last_error or CloudDatabase.status()["pending"]:
+                    from PySide6.QtWidgets import QMessageBox as _MB
+                    _MB.warning(self, "Firestore",
+                                "⚠️ Certaines modifications n'ont pas pu être envoyées à Firestore.\n"
+                                "Elles restent enregistrées sur ce poste et partiront au prochain lancement.\n\n"
+                                f"{CloudDatabase._last_error or ''}")
+                print(f"☁️ [FERMETURE] Synchronisation Firestore : {report}")
+
             # Étape 1 : Créer une archive locale saine
             progress.setLabelText("Étape 1/2 : Création de la sauvegarde locale...")
             QCoreApplication.processEvents()

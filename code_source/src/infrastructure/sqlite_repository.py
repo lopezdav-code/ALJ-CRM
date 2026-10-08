@@ -93,6 +93,9 @@ class SqliteRepository:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
             pass
+        # Les lignes écrasées par INSERT OR REPLACE déclenchent aussi les
+        # déclencheurs de suppression (suivi des modifications pour Firestore).
+        conn.execute("PRAGMA recursive_triggers=ON")
         return conn
 
     @classmethod

@@ -686,6 +686,19 @@ class DownloadDriveFileWorker(QThread):
             from infrastructure.sqlite_repository import SqliteRepository
             from infrastructure.google_drive_client import GoogleDriveClient
             
+            from infrastructure.cloud_database import CloudDatabase
+            if CloudDatabase.is_enabled():
+                self.progress.emit("Synchronisation avec Firestore...", 30)
+                report = CloudDatabase.sync(progress=lambda m: self.progress.emit(m, 60))
+                if CloudDatabase._last_error:
+                    self.finished.emit(False, f"Synchronisation Firestore impossible : {CloudDatabase._last_error}")
+                    return
+                SqliteRepository.setup_database()
+                self.progress.emit("Synchronisation réussie !", 100)
+                self.finished.emit(True, "La base a été synchronisée avec Firestore "
+                                         f"({report.get('pulled', 0)} reçue(s), {report.get('pushed', 0)} envoyée(s)).")
+                return
+
             self.progress.emit("Connexion à Google Drive...", 20)
             
             db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
@@ -740,6 +753,20 @@ class LocalDataLoaderWorker(QThread):
             
             # Vérifier si la base SQLite locale existe déjà
             db_exists = os.path.exists(db_local_path)
+
+            from infrastructure.cloud_database import CloudDatabase
+            if CloudDatabase.is_enabled():
+                # Base principale dans Firestore : mise à jour du cache local
+                # (chargement complet au premier lancement, puis incrémental).
+                self.progress.emit("Synchronisation de la base avec Firestore...", 20)
+                CloudDatabase.sync(progress=lambda m: self.progress.emit(m, 30))
+                if CloudDatabase._last_error:
+                    if not CloudDatabase.cache_ready():
+                        raise RuntimeError("Base Firestore injoignable et aucune copie locale : "
+                                           f"{CloudDatabase._last_error}")
+                    self.progress.emit("⚠️ Firestore injoignable : copie locale utilisée "
+                                       "(les modifications seront envoyées plus tard)", 40)
+                db_exists = True
             
             # 1. Si la BDD locale n'existe pas encore, la télécharger depuis Drive à la première utilisation
             if not db_exists:

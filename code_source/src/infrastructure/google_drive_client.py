@@ -107,6 +107,16 @@ class GoogleDriveClient:
 
         raise Exception(f"Échec de l'obtention du token Google : {last_error}")
 
+    @staticmethod
+    def _is_cloud_main_db(file_id: str, local_path: str) -> bool:
+        """Vrai si l'échange concerne database.db alors que la base principale
+        est dans Firestore (réglage MEMBER_BACKEND = firestore)."""
+        try:
+            from infrastructure.cloud_database import CloudDatabase
+            return bool(file_id) and CloudDatabase.is_enabled() and CloudDatabase.is_db_path(local_path)
+        except Exception:
+            return False
+
     @classmethod
     def download_file(cls, file_id: str, dest_path: str) -> bool:
         """
@@ -114,6 +124,13 @@ class GoogleDriveClient:
         """
         if not file_id:
             return False
+        if cls._is_cloud_main_db(file_id, dest_path):
+            # Base principale dans Firestore : on met à jour le cache local
+            # au lieu de télécharger l'ancien fichier partagé.
+            from infrastructure.cloud_database import CloudDatabase
+            print("☁️ [DRIVE] database.db est maintenant dans Firestore : synchronisation du cache local.")
+            CloudDatabase.sync()
+            return not CloudDatabase._last_error
             
         try:
             access_token = cls.get_access_token()
@@ -142,6 +159,14 @@ class GoogleDriveClient:
         """
         if not file_id or not os.path.exists(src_path):
             return False
+        if cls._is_cloud_main_db(file_id, src_path):
+            # Base principale dans Firestore : envoyer d'abord les modifications
+            # locales. Le fichier déposé ensuite sur Drive n'est plus qu'un
+            # export en lecture (annuaire web index.html).
+            from infrastructure.cloud_database import CloudDatabase
+            CloudDatabase.sync()
+            if CloudDatabase._last_error:
+                return False
             
         try:
             access_token = cls.get_access_token()

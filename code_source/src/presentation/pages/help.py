@@ -103,9 +103,11 @@ class HelpPage(QWidget):
         f3_title = QLabel("📁 3. Base de Référence des Adhésions du Club")
         f3_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2563EB;")
         f3_desc = QLabel(
-            "<b>Format :</b> <code>database.db</code> (base SQLite locale, synchronisée sur Google Drive)<br>"
-            "<b>Provenance :</b> Synchronisée automatiquement depuis l'API HelloAsso et sauvegardée de façon "
-            "partagée sur Google Drive (<code>GOOGLE_DRIVE_DB_ID</code>).<br>"
+            "<b>Format :</b> base partagée en ligne dans <b>Firestore</b> (collections <code>crm_*</code>) ; "
+            "<code>database.db</code> n'est plus qu'une copie locale, mise à jour automatiquement "
+            "(envoi des modifications toutes les 15 s, réception de celles des autres postes toutes les 2 min).<br>"
+            "<b>Provenance :</b> Synchronisée depuis l'API HelloAsso. Une copie est encore déposée sur Google Drive "
+            "(<code>GOOGLE_DRIVE_DB_ID</code>) pour l'annuaire web, en lecture seule.<br>"
             "<b>Rôle :</b> C'est le pivot central de l'application. Elle recense l'intégralité des "
             "<i>coordonnées des adhérents, tarifs réglés, justificatifs de paiement et statuts de commandes</i> "
             "au format relationnel (users / orders / purchases / purchase_options)."

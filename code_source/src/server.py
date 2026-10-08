@@ -43,6 +43,26 @@ app = FastAPI(title="Admin Escalade API")
 # et dans l'image Docker (ALJ_API_AUTH=required), désactivé pour le serveur local
 # de l'application de bureau. Enregistré AVANT le CORS pour que les pré-vols
 # OPTIONS soient traités par le middleware CORS (le plus externe).
+from infrastructure.cloud_database import CloudDatabase
+from starlette.concurrency import run_in_threadpool
+
+
+async def cloud_db_middleware(request, call_next):
+    """Base principale dans Firestore : le cache SQLite du serveur est mis à jour
+    avant les routes de données, et les écritures sont envoyées juste après.
+    Enregistré avant le contrôle d'accès : il ne s'exécute qu'après lui."""
+    path = request.url.path
+    relevant = path.startswith("/api/") or path in ("/map", "/pivot")
+    if relevant and os.environ.get("K_SERVICE") and CloudDatabase.is_enabled():
+        await run_in_threadpool(CloudDatabase.ensure_fresh, 30)
+    response = await call_next(request)
+    if relevant and request.method not in ("GET", "HEAD", "OPTIONS") and CloudDatabase.is_enabled():
+        await run_in_threadpool(CloudDatabase.after_write)
+    return response
+
+
+app.middleware("http")(cloud_db_middleware)
+
 from infrastructure.api_auth import auth_middleware
 app.middleware("http")(auth_middleware)
 
@@ -72,6 +92,8 @@ def geocode_missing_addresses(addresses: List[str]):
                 SqliteRepository.save_geocode(address, None, None)
         except Exception as e:
             print(f"❌ [GEOCODING] Erreur lors du géocodage de '{address}' : {e}")
+    if CloudDatabase.is_enabled():
+        CloudDatabase.flush_only()
     print("🌍 [GEOCODING] Tâche de fond terminée.")
 
 # Autoriser le frontend local à communiquer avec l'API

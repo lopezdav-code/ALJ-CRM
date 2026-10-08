@@ -42,7 +42,8 @@ class SettingsPage(QWidget):
             ("Saison active (ex: 2026-2027) :", "ACTIVE_SEASON", "2026-2027"),
             ("HelloAsso Client ID :", "HELLOASSO_CLIENT_ID", ""),
             ("Campagne d'adhésion HelloAsso (slug) :", "CAMPAIGN_SLUG", "adhesion-escalade-2026-2027-amicale-laique-escalade-2"),
-            ("Google Drive SQLite DB ID (Base d'adhérents) :", "GOOGLE_DRIVE_DB_ID", ""),
+            ("Base principale (firestore = partagée en ligne, drive = ancien fichier partagé) :", "MEMBER_BACKEND", "firestore"),
+            ("Google Drive SQLite DB ID (export de la base pour l'annuaire web) :", "GOOGLE_DRIVE_DB_ID", ""),
             ("Google Drive SQLite DB ID (Base compétitions) :", "GOOGLE_DRIVE_COMPETITION_DB_ID", ""),
             ("Google Cloud Client ID :", "GMAIL_CLIENT_ID", ""),
             ("Adresse Expéditeur Gmail :", "GMAIL_USER_EMAIL", "")
