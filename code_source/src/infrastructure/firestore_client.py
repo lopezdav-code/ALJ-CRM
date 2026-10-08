@@ -30,6 +30,15 @@ class FirestoreError(RuntimeError):
     """Erreur d'échange avec l'API Firestore (statut HTTP non attendu)."""
 
 
+class FirestoreConflictError(FirestoreError):
+    """Écriture refusée : le document a été modifié depuis sa lecture
+    (précondition `currentDocument.updateTime` non satisfaite)."""
+
+
+# Clés techniques ajoutées aux documents lus (jamais réécrites dans Firestore).
+META_KEYS = ("_doc_id", "_update_time")
+
+
 def python_to_firestore_value(val: Any) -> Dict[str, Any]:
     """Convertit une valeur Python native en format de champ Firestore REST."""
     if val is None:
@@ -87,7 +96,17 @@ def firestore_to_python_value(f_val: Dict[str, Any]) -> Any:
 
 def dict_to_firestore_fields(d: Dict[str, Any]) -> Dict[str, Any]:
     """Convertit un dictionnaire Python en structure de champs Firestore."""
-    return {k: python_to_firestore_value(v) for k, v in (d or {}).items()}
+    return {k: python_to_firestore_value(v) for k, v in (d or {}).items()
+            if k not in META_KEYS}
+
+
+def _is_precondition_failure(resp) -> bool:
+    """Vrai si Firestore a refusé l'écriture pour cause de précondition
+    (document modifié entre-temps)."""
+    if resp.status_code not in (400, 409, 412):
+        return False
+    text = resp.text or ""
+    return "FAILED_PRECONDITION" in text or "ABORTED" in text or resp.status_code == 412
 
 
 def firestore_fields_to_dict(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,6 +169,7 @@ class FirestoreClient:
             doc = resp.json()
             data = firestore_fields_to_dict(doc.get("fields", {}))
             data["_doc_id"] = doc.get("name", "").rsplit("/", 1)[-1]
+            data["_update_time"] = doc.get("updateTime")
             return data
         if resp.status_code == 404:
             return None
@@ -182,6 +202,7 @@ class FirestoreClient:
             for doc in payload.get("documents", []):
                 data = firestore_fields_to_dict(doc.get("fields", {}))
                 data["_doc_id"] = doc.get("name", "").rsplit("/", 1)[-1]
+                data["_update_time"] = doc.get("updateTime")
                 results.append(data)
             page_token = payload.get("nextPageToken")
             if not page_token:
@@ -211,10 +232,16 @@ class FirestoreClient:
     @classmethod
     def update_fields(cls, collection_name: str, doc_id: str, patch: Dict[str, Any],
                       project_id: Optional[str] = None,
-                      access_token: Optional[str] = None) -> bool:
+                      access_token: Optional[str] = None,
+                      expected_update_time: Optional[str] = None) -> bool:
         """Mise à jour partielle (updateMask) : seuls les champs fournis sont modifiés.
 
-        Si le document n'existe pas, il est créé avec les champs fournis."""
+        Si le document n'existe pas, il est créé avec les champs fournis.
+
+        `expected_update_time` (valeur `_update_time` du document lu) active le
+        verrouillage optimiste : si le document a été modifié depuis la lecture,
+        Firestore refuse l'écriture et `FirestoreConflictError` est levée."""
+        patch = {k: v for k, v in (patch or {}).items() if k not in META_KEYS}
         if not patch:
             return False
         url = f"{cls.database_url(project_id)}/{collection_name}/{doc_id}"
@@ -222,6 +249,8 @@ class FirestoreClient:
         params = []
         for p in field_paths:
             params.append(("updateMask.fieldPaths", p))
+        if expected_update_time:
+            params.append(("currentDocument.updateTime", expected_update_time))
         payload = {"fields": dict_to_firestore_fields(patch)}
         try:
             resp = requests.patch(url, headers=cls._headers(access_token),
@@ -230,6 +259,10 @@ class FirestoreClient:
             raise FirestoreError(f"Firestore injoignable ({collection_name}/{doc_id}) : {e}")
         if resp.status_code in (200, 201):
             return True
+        if expected_update_time and _is_precondition_failure(resp):
+            raise FirestoreConflictError(
+                f"Document {collection_name}/{doc_id} modifié entre-temps (conflit d'écriture)"
+            )
         raise FirestoreError(
             f"Mise à jour Firestore {collection_name}/{doc_id} : HTTP {resp.status_code} - {resp.text[:200]}"
         )

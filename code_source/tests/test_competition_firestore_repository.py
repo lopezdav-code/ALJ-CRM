@@ -31,35 +31,56 @@ from domain.competition_models import (
 class FakeFirestore:
     """Magasin de documents en mémoire imitant FirestoreClient."""
 
+    META = ("_doc_id", "_update_time")
+
     def __init__(self):
         self.store = {}
+        # Horodatage de version par document (imite `updateTime` de Firestore)
+        self.versions = {}
+        self._clock = 0
+        # Crochet optionnel appelé juste avant une écriture conditionnelle
+        # (simule une modification concurrente entre lecture et écriture).
+        self.before_conditional_write = None
 
     def _col(self, collection_name):
         return self.store.setdefault(collection_name, {})
+
+    def _touch(self, collection_name, doc_id):
+        self._clock += 1
+        self.versions[(collection_name, str(doc_id))] = f"2026-01-01T00:00:00.{self._clock:06d}Z"
+
+    def _out(self, collection_name, doc_id, doc):
+        out = dict(doc)
+        out["_doc_id"] = str(doc_id)
+        out["_update_time"] = self.versions.get((collection_name, str(doc_id)))
+        return out
 
     def get_document(self, collection_name, doc_id, project_id=None, access_token=None):
         doc = self._col(collection_name).get(str(doc_id))
         if doc is None:
             return None
-        out = dict(doc)
-        out["_doc_id"] = str(doc_id)
-        return out
+        return self._out(collection_name, doc_id, doc)
 
     def list_documents(self, collection_name, project_id=None, access_token=None):
-        out = []
-        for doc_id, doc in self._col(collection_name).items():
-            d = dict(doc)
-            d["_doc_id"] = str(doc_id)
-            out.append(d)
-        return out
+        return [self._out(collection_name, doc_id, doc)
+                for doc_id, doc in self._col(collection_name).items()]
 
     def upsert_document(self, collection_name, doc_id, data, project_id=None, access_token=None):
-        self._col(collection_name)[str(doc_id)] = {k: v for k, v in data.items() if k != "_doc_id"}
+        self._col(collection_name)[str(doc_id)] = {k: v for k, v in data.items() if k not in self.META}
+        self._touch(collection_name, doc_id)
         return True
 
-    def update_fields(self, collection_name, doc_id, patch, project_id=None, access_token=None):
+    def update_fields(self, collection_name, doc_id, patch, project_id=None, access_token=None,
+                      expected_update_time=None):
+        if expected_update_time:
+            hook = self.before_conditional_write
+            if hook:
+                hook(collection_name, doc_id)
+            if self.versions.get((collection_name, str(doc_id))) != expected_update_time:
+                raise fc.FirestoreConflictError("conflit simulé")
         doc = self._col(collection_name).setdefault(str(doc_id), {})
-        doc.update(patch)
+        doc.update({k: v for k, v in patch.items() if k not in self.META})
+        self._touch(collection_name, doc_id)
         return True
 
     def delete_document(self, collection_name, doc_id, project_id=None, access_token=None):
@@ -435,6 +456,117 @@ class TestBatchUpsertCommitBody(unittest.TestCase):
         # Le :commit est bien appelé sur l'URL absolue du service
         self.assertIn("https://firestore.googleapis.com/v1/", mock_post.call_args.args[0])
         self.assertIn(":commit", mock_post.call_args.args[0])
+
+
+class TestModificationsConcurrentes(FirestoreRepoTestCase):
+    """Verrouillage optimiste des participants : une écriture concurrente
+    (autre poste, page web, webhook HelloAsso) n'est jamais perdue."""
+
+    def setUp(self):
+        super().setUp()
+        self.seed_adherent(101)
+        self.seed_adherent(102, nom="DUPONT", prenom="Léa", licence="111222")
+        self.comp_id = Repo.save_competition(Competition(nom="Épreuve C", prix=15.0))
+        Repo.add_participant(self.comp_id, 101)
+        Repo.add_participant(self.comp_id, 102)
+
+    def _parts(self):
+        return {p.adherent_id: p for p in Repo.list_participants(self.comp_id)}
+
+    def _concurrent_once(self, action):
+        """Exécute `action` (écriture directe) une seule fois, juste avant la
+        prochaine écriture conditionnelle du référentiel."""
+        state = {"done": False}
+
+        def hook(collection_name, doc_id):
+            if state["done"]:
+                return
+            state["done"] = True
+            self.fake.before_conditional_write = None
+            action()
+        self.fake.before_conditional_write = hook
+        return state
+
+    def test_paiement_concurrent_preserve_par_la_selection(self):
+        # Pendant que le bureau décoche 102, le webhook HelloAsso marque 101 payé.
+        def webhook():
+            doc = self.fake.store["competitions"][str(self.comp_id)]
+            parts = [dict(p) for p in doc["participants"]]
+            for p in parts:
+                if p["adherent_id"] == 101:
+                    p["statut_paiement"] = "paye"
+                    p["montant_paye"] = 15.0
+            self.fake.update_fields("competitions", str(self.comp_id), {"participants": parts})
+        state = self._concurrent_once(webhook)
+        Repo.set_selection(self.comp_id, 102, False)
+        self.assertTrue(state["done"])
+        parts = self._parts()
+        self.assertEqual(parts[101].statut_paiement, PAIEMENT_PAYE)   # pas écrasé
+        self.assertEqual(parts[101].montant_paye, 15.0)
+        self.assertFalse(parts[102].selectionne)                       # modification rejouée
+        doc = self.fake.store["competitions"][str(self.comp_id)]
+        self.assertEqual(doc["nb_payes"], 1)
+        self.assertEqual(doc["total_collecte"], 15.0)
+
+    def test_ajout_concurrent_preserve(self):
+        self.seed_adherent(103, nom="BERNARD", prenom="Tom", licence="333444")
+        state = self._concurrent_once(lambda: Repo.add_participant(self.comp_id, 103))
+        Repo.apply_helloasso_payment(self.comp_id, 101, 15.0, order_ref="ORD-1")
+        self.assertTrue(state["done"])
+        parts = self._parts()
+        self.assertIn(103, parts)
+        self.assertEqual(parts[101].statut_paiement, PAIEMENT_PAYE)
+
+    def test_conflit_persistant_leve_une_erreur(self):
+        def always(collection_name, doc_id):
+            self.fake._touch(collection_name, doc_id)
+        self.fake.before_conditional_write = always
+        with patch.object(repo_module.time, "sleep"):
+            with self.assertRaises(fc.FirestoreConflictError):
+                Repo.set_payment_status(self.comp_id, 101, PAIEMENT_PAYE)
+
+    def test_modification_epreuve_ne_reecrit_pas_les_participants(self):
+        comp = Repo.get_competition(self.comp_id)          # lu avant le paiement
+        Repo.apply_helloasso_payment(self.comp_id, 101, 15.0)
+        comp.prix = 20.0
+        Repo.save_competition(comp)
+        self.assertEqual(Repo.get_competition(self.comp_id).prix, 20.0)
+        self.assertEqual(self._parts()[101].statut_paiement, PAIEMENT_PAYE)
+
+    def test_add_participant_retourne_l_identifiant(self):
+        self.seed_adherent(104, nom="PETIT", prenom="Zoé", licence="555666")
+        self.assertEqual(Repo.add_participant(self.comp_id, 104), 104)
+
+
+class TestFirestoreClientPrecondition(unittest.TestCase):
+    """Client REST : précondition `currentDocument.updateTime` et clés techniques."""
+
+    def test_meta_keys_jamais_ecrites(self):
+        fields = fc.dict_to_firestore_fields({"nom": "A", "_doc_id": "1", "_update_time": "t"})
+        self.assertEqual(list(fields), ["nom"])
+
+    def test_update_fields_envoie_la_precondition(self):
+        with patch.object(fc.requests, "patch") as mock_patch, \
+             patch.object(FirestoreClient, "get_access_token", return_value="tok"):
+            mock_patch.return_value.status_code = 200
+            FirestoreClient.update_fields("competitions", "1", {"x": 1, "_update_time": "T"},
+                                          project_id="p", expected_update_time="T0")
+        params = mock_patch.call_args.kwargs["params"]
+        self.assertIn(("currentDocument.updateTime", "T0"), params)
+        self.assertEqual([v for k, v in params if k == "updateMask.fieldPaths"], ["x"])
+
+    def test_update_fields_conflit(self):
+        with patch.object(fc.requests, "patch") as mock_patch, \
+             patch.object(FirestoreClient, "get_access_token", return_value="tok"):
+            mock_patch.return_value.status_code = 400
+            mock_patch.return_value.text = '{"error": {"status": "FAILED_PRECONDITION"}}'
+            with self.assertRaises(fc.FirestoreConflictError):
+                FirestoreClient.update_fields("competitions", "1", {"x": 1},
+                                              project_id="p", expected_update_time="T0")
+            # Sans précondition, une erreur 400 reste une erreur générique
+            with self.assertRaises(fc.FirestoreError) as ctx:
+                FirestoreClient.update_fields("competitions", "1", {"x": 1}, project_id="p")
+            self.assertNotIsInstance(ctx.exception, fc.FirestoreConflictError)
 
 
 class TestBasculeParticipePaiement(unittest.TestCase):

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="6">
-<title>ALJ Escalade — Gestion des Compétitions (v6)</title>
+<meta name="alj-web-version" content="7">
+<title>ALJ Escalade — Gestion des Compétitions (v7)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -150,7 +150,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v6</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v7</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
@@ -897,25 +897,71 @@ function statutApresBascule(statut, checked) {
   if (statut === "en_attente") return "non_invite";
   return null;
 }
-async function updateCompetitionDoc(comp, patch) {
-  /* Écrit toujours l'identifiant canonique String(comp.id) (même convention que
-     l'application de bureau) ; un éventuel document hérité (ID aléatoire) est
-     supprimé après l'écriture réussie. */
+/* Écriture transactionnelle d'une épreuve (protection contre les modifications
+   simultanées). La transaction relit le document À JOUR sur le serveur, applique
+   `mutate(doc)` puis l'écrit ; si un autre coach, l'application de bureau ou le
+   webhook HelloAsso a modifié l'épreuve entre-temps, Firestore rejoue
+   automatiquement la transaction sur la nouvelle version. `mutate` doit donc
+   être rejouable : il ne part que du document reçu (jamais du cache local `comps`)
+   et renvoie le document à écrire, ou null s'il n'y a rien à faire.
+   Écrit toujours l'identifiant canonique String(comp.id) (même convention que
+   l'application de bureau) ; un éventuel document hérité (ID aléatoire) est
+   supprimé dans la même transaction. Renvoie true si une écriture a eu lieu. */
+async function txCompetitionDoc(comp, mutate) {
   const canon = String(comp.id);
+  const canonRef = fsdb.collection("competitions").doc(canon);
+  const legacyRef = (comp.docId && String(comp.docId) !== canon)
+    ? fsdb.collection("competitions").doc(String(comp.docId)) : null;
   try {
-    const full = Object.assign({}, comp, patch, { updated_at: new Date().toISOString() });
-    delete full.docId;
-    await fsdb.collection("competitions").doc(canon).set(full);
-    if (comp.docId && comp.docId !== canon) {
-      try { await fsdb.collection("competitions").doc(String(comp.docId)).delete(); } catch (e) {}
-      comp.docId = canon;
-    }
+    const written = await fsdb.runTransaction(async tx => {
+      const snap = await tx.get(canonRef);
+      const legacySnap = legacyRef ? await tx.get(legacyRef) : null;
+      let base = null;
+      if (snap.exists) base = snap.data();
+      else if (legacySnap && legacySnap.exists) base = legacySnap.data();
+      if (!base) throw new Error("Compétition introuvable (supprimée entre-temps ?)");
+      const full = mutate(Object.assign({}, base));
+      if (!full) return false;
+      delete full.docId;
+      full.updated_at = new Date().toISOString();
+      tx.set(canonRef, full);
+      if (legacySnap && legacySnap.exists) tx.delete(legacyRef);
+      return true;
+    });
+    if (legacyRef) comp.docId = canon;
+    return written;
   } catch (e) {
     console.error(e);
     if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
     else toast("❌ " + (e.message || e), 9000);
     throw e;
   }
+}
+/* Mise à jour des informations de l'épreuve (nom, date, coachs…) : les champs
+   de `patch` sont appliqués sur la version serveur, les participants à jour
+   sont conservés. */
+function updateCompetitionDoc(comp, patch) {
+  return txCompetitionDoc(comp, doc => Object.assign(doc, patch));
+}
+/* Compteurs dérivés du tableau des participants (mêmes règles que
+   CompetitionFirestoreRepository._recompute_counters côté bureau). */
+function participantCounters(parts) {
+  return {
+    nb_participants: parts.length,
+    nb_selectionnes: parts.filter(p => p.selectionne).length,
+    nb_payes: parts.filter(p => (p.statut_paiement || "") === "paye").length,
+    total_collecte: Math.round(parts.reduce((acc, p) => acc + Number(p.montant_paye || 0), 0) * 100) / 100
+  };
+}
+/* Modification transactionnelle des participants : `fn(parts)` reçoit une copie
+   du tableau À JOUR et renvoie le nouveau tableau (ou null = rien à faire). */
+function mutateParticipants(comp, fn) {
+  return txCompetitionDoc(comp, doc => {
+    const parts = (doc.participants || []).map(p => Object.assign({}, p));
+    const next = fn(parts);
+    if (!next) return null;
+    return Object.assign(doc, { participants: next }, participantCounters(next));
+  });
 }
 
 /* ===================== Rendu : compétitions ===================== */
@@ -1274,21 +1320,27 @@ async function toggleSelection(compId, adherentId, checked) {
     openCancelModal(compId, adherentId, c);
     return;
   }
-  const newStatut = statutApresBascule(existing ? existing.statut_paiement : "non_invite", checked);
-  const stamp = new Date().toISOString();
-  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], {
-    selectionne: !!checked,
-    statut_paiement: newStatut || (parts[idx].statut_paiement || "non_invite"),
-    updated_at: stamp
-  });
-  else parts.push(newParticipant(adherentId, checked));
+  let devenuPaye = false;
   try {
-    await updateCompetitionDoc(c, {
-      participants: parts,
-      nb_participants: parts.length,
-      nb_selectionnes: parts.filter(p => p.selectionne).length
+    await mutateParticipants(c, parts => {
+      devenuPaye = false;
+      const i = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
+      if (!checked && i >= 0 && parts[i].statut_paiement === "paye") {
+        // Payé entre-temps (webhook HelloAsso) : décision du coach requise
+        devenuPaye = true;
+        return null;
+      }
+      const newStatut = statutApresBascule(i >= 0 ? parts[i].statut_paiement : "non_invite", checked);
+      if (i >= 0) parts[i] = Object.assign({}, parts[i], {
+        selectionne: !!checked,
+        statut_paiement: newStatut || (parts[i].statut_paiement || "non_invite"),
+        updated_at: new Date().toISOString()
+      });
+      else parts.push(newParticipant(adherentId, checked));
+      return parts;
     });
-  } catch (e) {}
+  } catch (e) { renderParticipants(); return; }
+  if (devenuPaye) openCancelModal(compId, adherentId, findComp(compId) || c);
 }
 
 /* ============ Modal d'annulation d'un participant ayant payé ============ */
@@ -1317,22 +1369,20 @@ async function applyCancelModal() {
   const statut = document.querySelector('input[name="cm-choice"]:checked').value;
   const c = findComp(cancelModalCtx.compId);
   if (!c) { closeCancelModal(); return; }
-  const parts = (c.participants || []).slice();
-  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(cancelModalCtx.adherentId));
-  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], {
-    selectionne: false,
-    statut_paiement: statut,
-    note_paiement: note,
-    updated_at: new Date().toISOString()
-  });
   const ctx = cancelModalCtx;
   cancelModalCtx = null;
   $("#cancel-modal").style.display = "none";
   try {
-    await updateCompetitionDoc(c, {
-      participants: parts,
-      nb_participants: parts.length,
-      nb_selectionnes: parts.filter(p => p.selectionne).length
+    await mutateParticipants(c, parts => {
+      const idx = parts.findIndex(p => Number(p.adherent_id) === Number(ctx.adherentId));
+      if (idx < 0) return null;
+      parts[idx] = Object.assign({}, parts[idx], {
+        selectionne: false,
+        statut_paiement: statut,
+        note_paiement: note,
+        updated_at: new Date().toISOString()
+      });
+      return parts;
     });
     toast("🗑 Participation annulée (" + PAIEMENT_LABELS[statut] + ").");
   } catch (e) {
@@ -1354,25 +1404,22 @@ async function loadCompetitionGroup() {
   const c = findComp(compId);
   if (!c) return;
   const group = adherents.filter(a => normKey(a.tarif).includes("competition"));
-  const parts = (c.participants || []).slice();
   let added = 0;
-  for (const a of group) {
-    const idx = parts.findIndex(p => Number(p.adherent_id) === Number(a.id));
-    if (idx < 0) {
-      parts.push(newParticipant(a.id, false, "non_invite"));
-      added++;
-    }
-  }
-  if (added === 0) {
-    toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà présents dans la liste.");
-    return;
-  }
   try {
-    await updateCompetitionDoc(c, {
-      participants: parts,
-      nb_participants: parts.length,
-      nb_selectionnes: parts.filter(p => p.selectionne).length
+    await mutateParticipants(c, parts => {
+      added = 0;
+      for (const a of group) {
+        if (!parts.some(p => Number(p.adherent_id) === Number(a.id))) {
+          parts.push(newParticipant(a.id, false, "non_invite"));
+          added++;
+        }
+      }
+      return added ? parts : null;
     });
+    if (added === 0) {
+      toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà présents dans la liste.");
+      return;
+    }
     toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » ajouté(s) à la liste.`);
   } catch (e) {}
 }
@@ -1404,16 +1451,12 @@ async function addAdherent(compId, adherentId) {
   }
   const c = findComp(compId);
   if (!c) return;
-  const parts = (c.participants || []).slice();
-  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
-  const stamp = new Date().toISOString();
-  if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: stamp });
-  else parts.push(newParticipant(adherentId, true));
   try {
-    await updateCompetitionDoc(c, {
-      participants: parts,
-      nb_participants: parts.length,
-      nb_selectionnes: parts.filter(p => p.selectionne).length
+    await mutateParticipants(c, parts => {
+      const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
+      if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: new Date().toISOString() });
+      else parts.push(newParticipant(adherentId, true));
+      return parts;
     });
     toast("➕ Adhérent ajouté à la compétition.");
   } catch (e) {}
@@ -1424,12 +1467,10 @@ async function deleteParticipant(compId, adherentId, nomComplet) {
   if (!confirm(`Retirer « ${nomComplet} » de cette compétition ?\n(L'adhérent reste dans la base.)`)) return;
   const c = findComp(compId);
   if (!c) return;
-  const parts = (c.participants || []).filter(p => Number(p.adherent_id) !== Number(adherentId));
   try {
-    await updateCompetitionDoc(c, {
-      participants: parts,
-      nb_participants: parts.length,
-      nb_selectionnes: parts.filter(p => p.selectionne).length
+    await mutateParticipants(c, parts => {
+      const kept = parts.filter(p => Number(p.adherent_id) !== Number(adherentId));
+      return kept.length !== parts.length ? kept : null;
     });
     toast("🗑 Compétiteur retiré de l'épreuve.");
   } catch (e) {}
@@ -1802,39 +1843,32 @@ async function saveAttachment() {
     if (isLinked) {
       const c = findComp(compId);
       if (c) {
-        const parts = (c.participants || []).slice();
-        const pIdx = parts.findIndex(p => Number(p.adherent_id) === adhId);
         const itemAmount = parseFloat(it.montant || 0);
         const orderRef = String(it.order_id || "").trim();
+        await mutateParticipants(c, parts => {
+          const pIdx = parts.findIndex(p => Number(p.adherent_id) === adhId);
+          if (pIdx >= 0) {
+            const prev = parts[pIdx];
+            const orders = (prev.commande_helloasso ? prev.commande_helloasso.split(", ") : []).map(s => s.trim()).filter(Boolean);
+            if (orderRef && !orders.includes(orderRef)) orders.push(orderRef);
+            const currentMontant = Number(prev.montant_paye || 0);
+            const newMontant = currentMontant > 0 ? (currentMontant + itemAmount) : itemAmount;
 
-        if (pIdx >= 0) {
-          const prev = parts[pIdx];
-          const orders = (prev.commande_helloasso ? prev.commande_helloasso.split(", ") : []).map(s => s.trim()).filter(Boolean);
-          if (orderRef && !orders.includes(orderRef)) orders.push(orderRef);
-          const currentMontant = Number(prev.montant_paye || 0);
-          const newMontant = currentMontant > 0 ? (currentMontant + itemAmount) : itemAmount;
-
-          parts[pIdx] = Object.assign({}, prev, {
-            selectionne: true,
-            statut_paiement: "paye",
-            montant_paye: Math.round(newMontant * 100) / 100,
-            commande_helloasso: orders.join(", "),
-            updated_at: nowIso
-          });
-        } else {
-          const newP = newParticipant(adhId, true, "paye");
-          newP.montant_paye = Math.round(itemAmount * 100) / 100;
-          newP.commande_helloasso = orderRef;
-          newP.updated_at = nowIso;
-          parts.push(newP);
-        }
-
-        await updateCompetitionDoc(c, {
-          participants: parts,
-          nb_participants: parts.length,
-          nb_selectionnes: parts.filter(p => p.selectionne).length,
-          nb_payes: parts.filter(p => p.statut_paiement === "paye").length,
-          total_collecte: Math.round(parts.reduce((acc, p) => acc + Number(p.montant_paye || 0), 0) * 100) / 100
+            parts[pIdx] = Object.assign({}, prev, {
+              selectionne: true,
+              statut_paiement: "paye",
+              montant_paye: Math.round(newMontant * 100) / 100,
+              commande_helloasso: orders.join(", "),
+              updated_at: nowIso
+            });
+          } else {
+            const newP = newParticipant(adhId, true, "paye");
+            newP.montant_paye = Math.round(itemAmount * 100) / 100;
+            newP.commande_helloasso = orderRef;
+            newP.updated_at = nowIso;
+            parts.push(newP);
+          }
+          return parts;
         });
       }
     }

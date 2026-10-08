@@ -41,6 +41,7 @@ from domain.age_rules import parse_birth_date, age_at, get_season_start_date
 from domain.utils import normalize_string
 from infrastructure.firestore_client import (
     FirestoreClient,
+    FirestoreConflictError,
     FirestoreError,
 )
 from infrastructure.sqlite_repository import SqliteRepository
@@ -50,6 +51,11 @@ from infrastructure.sqlite_repository import SqliteRepository
 DEFAULT_STATUT_NOUVEAU_PARTICIPANT = PAIEMENT_EN_ATTENTE
 
 _ADHERENTS_CACHE_TTL = 30.0
+
+# Verrouillage optimiste des participants : nombre de tentatives (relecture +
+# ré-application de la modification) quand un autre poste, la page web ou le
+# webhook HelloAsso a modifié l'épreuve entre la lecture et l'écriture.
+_MAX_WRITE_ATTEMPTS = 5
 
 
 class CompetitionFirestoreRepository:
@@ -180,11 +186,16 @@ class CompetitionFirestoreRepository:
 
     @classmethod
     def _save_parts(cls, doc: Dict[str, Any], parts: List[Dict[str, Any]]):
-        """Réécrit le tableau des participants + compteurs (mise à jour partielle)."""
+        """Réécrit le tableau des participants + compteurs (mise à jour partielle).
+
+        L'écriture est conditionnée à la version lue (`_update_time`) : si le
+        document a changé depuis, `FirestoreConflictError` est levée et rien
+        n'est écrit (voir `_mutate_participants`, qui rejoue la modification)."""
         patch = {"participants": parts, "updated_at": cls._now_iso()}
         patch.update(cls._recompute_counters(parts))
         FirestoreClient.update_fields(
-            cls.COLLECTION_COMPETITIONS, doc.get("_doc_id") or str(doc.get("id")), patch
+            cls.COLLECTION_COMPETITIONS, doc.get("_doc_id") or str(doc.get("id")), patch,
+            expected_update_time=doc.get("_update_time"),
         )
 
     # ------------------------------------------------------------------
@@ -451,7 +462,18 @@ class CompetitionFirestoreRepository:
         coach_names = [coaches[cid] for cid in (comp.coach1_id, comp.coach2_id, comp.coach3_id)
                        if cid is not None and cid in coaches]
         doc = cls._build_comp_doc(existing, comp, coach_names)
-        FirestoreClient.upsert_document(cls.COLLECTION_COMPETITIONS, str(comp.id), doc)
+        if existing and (existing.get("_doc_id") or str(comp.id)) == str(comp.id):
+            # Épreuve existante : mise à jour partielle des seules informations de
+            # l'épreuve. Le tableau des participants et ses compteurs ne sont pas
+            # réécrits, pour ne pas écraser une modification concurrente.
+            skip = {"participants", "nb_participants", "nb_selectionnes",
+                    "nb_payes", "total_collecte"}
+            FirestoreClient.update_fields(
+                cls.COLLECTION_COMPETITIONS, str(comp.id),
+                {k: v for k, v in doc.items() if k not in skip},
+            )
+        else:
+            FirestoreClient.upsert_document(cls.COLLECTION_COMPETITIONS, str(comp.id), doc)
         return comp.id
 
     @classmethod
@@ -526,16 +548,33 @@ class CompetitionFirestoreRepository:
         """Charge le document, applique `mutate(parts)`, réécrit le tableau.
 
         `mutate` peut renvoyer None pour signaler « rien à faire » : aucune
-        écriture n'a alors lieu."""
-        doc = cls._load_comp_doc(competition_id)
-        if not doc:
-            return None
-        parts = [dict(p) for p in (doc.get("participants") or [])]
-        new_parts = mutate(parts)
-        if new_parts is None:
-            return None
-        cls._save_parts(doc, new_parts)
-        return doc
+        écriture n'a alors lieu.
+
+        Verrouillage optimiste : l'écriture n'est acceptée que si le document n'a
+        pas changé depuis sa lecture. En cas de conflit, le document est relu et
+        `mutate` ré-appliqué sur la version à jour (jusqu'à `_MAX_WRITE_ATTEMPTS`
+        fois). `mutate` doit donc pouvoir être rejoué : il ne dépend que de la
+        liste reçue. Le document renvoyé contient les participants écrits."""
+        for attempt in range(_MAX_WRITE_ATTEMPTS):
+            doc = cls._load_comp_doc(competition_id)
+            if not doc:
+                return None
+            parts = [dict(p) for p in (doc.get("participants") or [])]
+            new_parts = mutate(parts)
+            if new_parts is None:
+                return None
+            try:
+                cls._save_parts(doc, new_parts)
+            except FirestoreConflictError:
+                if attempt == _MAX_WRITE_ATTEMPTS - 1:
+                    raise
+                print(f"🔁 [FIRESTORE] Épreuve #{competition_id} modifiée entre-temps : "
+                      f"nouvelle tentative ({attempt + 2}/{_MAX_WRITE_ATTEMPTS})")
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            doc["participants"] = new_parts
+            return doc
+        return None
 
     @classmethod
     def add_participant(cls, competition_id: int, adherent_id: int,
@@ -564,14 +603,10 @@ class CompetitionFirestoreRepository:
 
     @classmethod
     def remove_participant(cls, competition_id: int, adherent_id: int) -> bool:
-        doc = cls._load_comp_doc(competition_id)
-        if not doc:
-            return False
-        parts = [p for p in (doc.get("participants") or []) if p.get("adherent_id") != adherent_id]
-        if len(parts) == len(doc.get("participants") or []):
-            return False
-        cls._save_parts(doc, parts)
-        return True
+        def mutate(parts):
+            kept = [p for p in parts if p.get("adherent_id") != adherent_id]
+            return kept if len(kept) != len(parts) else None
+        return cls._mutate_participants(competition_id, mutate) is not None
 
     @classmethod
     def set_selection(cls, competition_id: int, adherent_id: int, selectionne: bool) -> bool:
@@ -651,23 +686,24 @@ class CompetitionFirestoreRepository:
     @classmethod
     def load_competition_group_into(cls, competition_id: int) -> int:
         """Pré-remplit la liste des participants avec le groupe « Compétition »."""
-        doc = cls._load_comp_doc(competition_id)
-        if not doc:
+        groupe = cls.list_adherents(competition_only=True)
+        added = {"count": 0}
+
+        def mutate(parts):
+            existing = {p.get("adherent_id") for p in parts}
+            now = cls._now_iso()
+            added["count"] = 0
+            for a in groupe:
+                if a["id"] in existing:
+                    continue
+                p = cls._new_participant_map(a, False, PAIEMENT_NON_INVITE)
+                p["updated_at"] = now
+                parts.append(p)
+                added["count"] += 1
+            return parts if added["count"] else None
+        if cls._mutate_participants(competition_id, mutate) is None:
             return 0
-        parts = [dict(p) for p in (doc.get("participants") or [])]
-        existing = {p.get("adherent_id") for p in parts}
-        now = cls._now_iso()
-        count = 0
-        for a in cls.list_adherents(competition_only=True):
-            if a["id"] in existing:
-                continue
-            p = cls._new_participant_map(a, False, PAIEMENT_NON_INVITE)
-            p["updated_at"] = now
-            parts.append(p)
-            count += 1
-        if count:
-            cls._save_parts(doc, parts)
-        return count
+        return added["count"]
 
     # ------------------------------------------------------------------
     # Bilan de fin d'année
@@ -1018,30 +1054,32 @@ class CompetitionFirestoreRepository:
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         applied = 0
         for comp_id, adherent_ids in by_comp.items():
-            doc = cls._load_comp_doc(comp_id)
-            if not doc:
-                continue
-            parts = [dict(p) for p in (doc.get("participants") or [])]
-            index = {p.get("adherent_id"): p for p in parts}
-            for adherent_id in adherent_ids:
-                g = groupes[(comp_id, adherent_id)]
-                p = index.get(adherent_id)
-                if p is None:
-                    adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
-                    p = cls._new_participant_map(adh, True)
+            done = {"count": 0}
+
+            def mutate(parts, comp_id=comp_id, adherent_ids=adherent_ids, done=done):
+                done["count"] = 0
+                index = {p.get("adherent_id"): p for p in parts}
+                for adherent_id in adherent_ids:
+                    g = groupes[(comp_id, adherent_id)]
+                    p = index.get(adherent_id)
+                    if p is None:
+                        adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
+                        p = cls._new_participant_map(adh, True)
+                        p["updated_at"] = now
+                        parts.append(p)
+                        index[adherent_id] = p
+                    elif (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                        continue
+                    else:
+                        p["selectionne"] = True
+                    p["statut_paiement"] = "paye"
+                    p["montant_paye"] = round(g["montant"], 2)
+                    p["commande_helloasso"] = ", ".join(g["orders"])
                     p["updated_at"] = now
-                    parts.append(p)
-                    index[adherent_id] = p
-                elif (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
-                    continue
-                else:
-                    p["selectionne"] = True
-                p["statut_paiement"] = "paye"
-                p["montant_paye"] = round(g["montant"], 2)
-                p["commande_helloasso"] = ", ".join(g["orders"])
-                p["updated_at"] = now
-                applied += 1
-            cls._save_parts(doc, parts)
+                    done["count"] += 1
+                return parts
+            if cls._mutate_participants(comp_id, mutate) is not None:
+                applied += done["count"]
         return applied
 
     # ------------------------------------------------------------------

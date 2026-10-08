@@ -1,5 +1,5 @@
 // Doit correspondre à <meta name="alj-web-version"> de competitions.html
-const CACHE_NAME = "alj-escalade-v6";
+const CACHE_NAME = "alj-escalade-v7";
 const ASSETS_TO_CACHE = [
   "/competitions",
   "/annuaire/competitions.html",
