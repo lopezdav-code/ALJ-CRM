@@ -11,7 +11,7 @@ Ce document consigne la feuille de route architecturale pour doter l'Amicale La�
 | Lot | Intitulé | Statut | Fichiers Clés & Livrables |
 |---|---|:---:|---|
 | **Lot 1** | **Micro-service Backend (Webhooks & Emails)** | ✅ **Terminé** | `src/infrastructure/helloasso_webhook_service.py`<br>`src/infrastructure/email_dispatch_service.py`<br>`src/server.py` (`/webhooks/helloasso`, `/api/send-email`, `/api/preview-email`)<br>`tests/test_helloasso_webhook.py`, `tests/test_email_dispatch_service.py` |
-| **Lot 2** | **Modélisation Firestore & Passerelle Desktop** | ✅ **Terminé** | `firestore.rules` (Règles Admin / Coach)<br>`src/infrastructure/firestore_sync.py` (Push/Pull REST v1)<br>`src/server.py` (`/api/firestore/push`, `/api/firestore/pull/{id}`)<br>`tests/test_firestore_sync.py` |
+| **Lot 2** | **Modélisation Firestore & Passerelle Desktop** | ✅ **Terminé** | `firestore.rules` (Règles Admin / Coach)<br>`src/infrastructure/firestore_sync.py` (Push/Pull REST v1)<br>~~`src/server.py` (`/api/firestore/push`, `/api/firestore/pull/{id}`)~~ (supprimés : lisaient/écrivaient l'ancienne `database_Competition.db` et risquaient d'écraser Firestore)<br>`tests/test_firestore_sync.py` |
 | **Lot 3** | **Application Web Mobile PWA (Design Existant)** | ✅ **Terminé** | `web/competitions.html` (Modale d'envoi d'e-mails, balises dynamiques, appels 1-clic `tel:`)<br>`web/manifest.webmanifest` & `web/sw.js` (PWA installable sur smartphone, cache hors-ligne)<br>`web/logo.png`<br>`tests/test_mobile_pwa.py` |
 | **Lot 4** | **Déploiement Cloud Run & Recette en Production** | ✅ **Terminé** | `Dockerfile` Cloud Run multi-plateforme Linux<br>`requirements-docker.txt` (dépendances backend épurées)<br>`.dockerignore` (sécurisation des secrets & BDD locales)<br>`deploy_cloud_run.bat` & `deploy_cloud_run.sh`<br>`docs/guide_deploiement_cloud_run_helloasso.md`<br>`tests/test_cloud_run_lot4.py` (routes `/health`, `/`, `GET /webhooks/helloasso`) |
 
@@ -32,7 +32,7 @@ Ce document consigne la feuille de route architecturale pour doter l'Amicale La�
 │ • Voir les épreuves   │◄───────────┤ • /webhooks/helloasso                   │
 │ • Pointer compétiteurs│ (Temps     │ • /api/send-email (Gmail API)           │
 │ • Envoyer les emails  │  réel)     │ • /api/email-templates & /preview-email│
-│ • Appels d'urgence    │            │ • /api/firestore/push & pull            │
+│ • Appels d'urgence    │            │                                         │
 └──────────┬────────────┘            └────────────────────┬────────────────────┘
            │                                              │
            │ Écritures / Sélections                       │ Écritures paiements

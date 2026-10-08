@@ -1060,31 +1060,6 @@ def sync_helloasso_api():
         return {"status": "error", "message": str(e)}
 
 
-# --------------------------------------------------------------------------
-# Synchronisation Google Cloud Firestore
-# --------------------------------------------------------------------------
-from infrastructure.firestore_sync import FirestoreSyncService
-
-
-@app.post("/api/firestore/push")
-def firestore_push(data: Dict[str, Any] = Body(default={})):
-    """Pousse l'ensemble des données SQLite vers Google Cloud Firestore."""
-    try:
-        project_id = data.get("project_id")
-        return FirestoreSyncService.push_all(project_id=project_id)
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-@app.post("/api/firestore/pull/{competition_id}")
-def firestore_pull(competition_id: int):
-    """Récupère les sélections et pointages depuis Firestore vers SQLite."""
-    try:
-        return FirestoreSyncService.pull_competition_updates(competition_id)
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
 if __name__ == "__main__":
     import uvicorn
     # Support de la variable d'environnement PORT (Cloud Run injecte PORT=8080)
