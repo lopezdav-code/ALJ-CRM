@@ -3,3 +3,5 @@ pytest==9.1.1
 pytest-timeout==2.4.0
 ruff==0.16.5
 mypy==2.3.1
+PyJWT[crypto]==2.15.1
+httpx==0.28.1
