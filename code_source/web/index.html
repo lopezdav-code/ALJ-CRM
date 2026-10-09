@@ -4,14 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="12">
-<title>ALJ Escalade — Annuaire des adhérents (v12)</title>
+<meta name="alj-web-version" content="13">
+<title>ALJ Escalade — Annuaire des adhérents (v13)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="/annuaire/logo.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<script src="/static-web/alj-vue.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -136,7 +137,7 @@
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v12</span></b>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v13</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
@@ -784,7 +785,7 @@ function setAllCreneaux(on) {
 }
 function wireEvents() {
   document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showPage(b.dataset.page)));
-  $("#comps-link").href = COMPETITIONS_URL;
+  $("#comps-link").href = COMPETITIONS_URL + "?vue=pwa";
   $("#refresh-btn").addEventListener("click", () => {
     if (!isCoachUser()) { showPage("setup"); return; }
     $("#refresh-btn").classList.add("spin");

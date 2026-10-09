@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
+<meta name="alj-web-version" content="13">
+<title>ALJ Escalade — Bureau · Outils (v13)</title>
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<link rel="stylesheet" href="/static-web/alj.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="shell"></div>
+<script type="module">
+import { startBureau } from "/static-web/alj-shell.js";
+
+startBureau({
+  page: "outils",
+  title: "Outils",
+  onReady: () => {
+    document.getElementById("content").innerHTML = `
+      <div class="card">
+        <h2>🚧 En construction</h2>
+        <p>Étape 4 : la carte interactive et l'analyse des effectifs seront affichées ici.</p>
+      </div>`;
+  }
+});
+</script>
+</body>
+</html>

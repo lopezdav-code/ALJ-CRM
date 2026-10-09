@@ -887,8 +887,37 @@ _web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if os.path.isdir(_web_dir):
     app.mount("/annuaire", StaticFiles(directory=_web_dir, html=True), name="annuaire")
 
+# Ressources communes du portail bureau (CSS, modules JavaScript) : web/shared/.
+_shared_dir = os.path.join(_web_dir, "shared")
+if os.path.isdir(_shared_dir):
+    app.mount("/static-web", StaticFiles(directory=_shared_dir), name="static-web")
+
 _competitions_page_path = os.path.join(_web_dir, "competitions.html")
 _annuaire_page_path = os.path.join(_web_dir, "index.html")
+
+# Portail « bureau » (ordinateur) : pages publiques, les données restent protégées
+# (lecture Firestore avec le compte Google, appels API avec jeton).
+_bureau_dir = os.path.join(_web_dir, "bureau")
+_BUREAU_PAGES = {"": "index.html", "adherents": "adherents.html", "outils": "outils.html"}
+
+
+def _bureau_file(page: str):
+    name = _BUREAU_PAGES.get(page)
+    p = os.path.join(_bureau_dir, name) if name else ""
+    if p and os.path.exists(p):
+        return FileResponse(p, media_type="text/html")
+    return HTMLResponse("<h1>Page bureau introuvable</h1>", status_code=404)
+
+@app.get("/bureau", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/bureau/", response_class=HTMLResponse, include_in_schema=False)
+def get_bureau_home():
+    """Accueil du portail bureau (ordinateur)."""
+    return _bureau_file("")
+
+@app.get("/bureau/{page}", response_class=HTMLResponse, include_in_schema=False)
+def get_bureau_page(page: str):
+    """Pages du portail bureau : seules les pages de _BUREAU_PAGES sont servies."""
+    return _bureau_file(page)
 
 @app.get("/index", response_class=HTMLResponse)
 def get_annuaire_page():

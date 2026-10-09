@@ -72,7 +72,8 @@ PUBLIC_PATHS = frozenset({
     "/api/web-version",
     "/webhooks/helloasso",
 })
-PUBLIC_PREFIXES = ("/annuaire",)
+# Portail bureau et ressources communes : pages et scripts publics, données protégées.
+PUBLIC_PREFIXES = ("/annuaire", "/bureau", "/static-web")
 
 
 class AuthError(Exception):

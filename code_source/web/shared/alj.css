@@ -1,0 +1,70 @@
+/* Charte commune du bureau web (ordinateur). Couleurs reprises de competitions.html. */
+:root {
+  --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
+  --line: #E2E8F0; --blue: #2563EB; --blue-dark: #1D4ED8;
+  --green: #16A34A; --amber: #D97706; --red: #DC2626;
+  --side: #0F172A; --side-hover: #1E293B; --side-text: #CBD5E1;
+  --side-w: 232px;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--ink); font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; font-size: 14px; }
+button { font-family: inherit; }
+a { color: var(--blue); }
+
+/* ----- Mise en page : menu latéral + zone principale ----- */
+.app { display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 100vh; }
+.side {
+  background: var(--side); color: var(--side-text); padding: 18px 12px;
+  display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh;
+}
+.side .brand b { display: block; color: #F8FAFC; font-size: 16px; }
+.side .brand > span { display: block; font-size: 12px; color: #94A3B8; margin-top: 2px; }
+.side nav { display: flex; flex-direction: column; gap: 2px; }
+.side nav a {
+  color: var(--side-text); text-decoration: none; padding: 9px 12px; border-radius: 8px; font-weight: 600;
+}
+.side nav a:hover { background: var(--side-hover); color: #F8FAFC; }
+.side nav a.active { background: var(--blue); color: #fff; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.side-foot .mobile-link { color: var(--side-text); font-size: 13px; text-decoration: none; }
+.side-foot .mobile-link:hover { color: #F8FAFC; text-decoration: underline; }
+.side-foot .who { font-size: 12px; color: #94A3B8; overflow-wrap: anywhere; }
+
+.main { padding: 22px 28px 40px; min-width: 0; }
+.top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.top h1 { margin: 0; font-size: 22px; }
+.top .sync { color: var(--muted); font-size: 13px; }
+
+.web-version { font-size: 11px; font-weight: 600; color: #94A3B8; margin-left: 4px; }
+.web-version.outdated { color: #FBBF24; cursor: pointer; text-decoration: underline; }
+
+/* ----- Cartes, grilles, boutons ----- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.card h2 { margin: 0 0 8px; font-size: 17px; }
+.card p { margin: 6px 0; line-height: 1.5; }
+.gate { max-width: 560px; }
+.grid-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.grid-links .card { margin-bottom: 0; }
+.link-card { display: block; text-decoration: none; color: var(--ink); }
+.link-card:hover { border-color: var(--blue); }
+.link-card b { display: block; font-size: 16px; margin-bottom: 4px; }
+.link-card span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.muted { color: var(--muted); }
+
+.btn { border: none; border-radius: 9px; padding: 9px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:hover { background: var(--blue-dark); }
+.btn-muted { background: #E2E8F0; color: #475569; }
+.btn-mini { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+
+/* Écran étroit (bureau consulté sur téléphone) : menu en bandeau en haut */
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; height: auto; min-width: 0; flex-direction: column; gap: 10px; padding: 12px; }
+  .side nav { flex-direction: row; overflow-x: auto; min-width: 0; }
+  .side nav a { white-space: nowrap; }
+  .side-foot { margin-top: 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .main { padding: 16px 12px 30px; }
+}

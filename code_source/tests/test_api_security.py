@@ -77,7 +77,8 @@ class TestRoles(unittest.TestCase):
     def test_required_role(self):
         r = api_auth.required_role
         for path in ("/", "/health", "/competitions", "/index", "/sw.js", "/manifest.webmanifest",
-                     "/api/web-version", "/webhooks/helloasso", "/annuaire/", "/annuaire/index.html"):
+                     "/api/web-version", "/webhooks/helloasso", "/annuaire/", "/annuaire/index.html",
+                     "/bureau", "/bureau/", "/bureau/adherents", "/static-web/alj-core.js"):
             self.assertIsNone(r("GET", path), path)
         self.assertIsNone(r("POST", "/webhooks/helloasso"))
         self.assertIsNone(r("OPTIONS", "/api/send-email"))
@@ -119,7 +120,7 @@ class TestRoles(unittest.TestCase):
         for d in api_auth.ADMIN_EMAIL_DOMAINS:
             self.assertIn(d.replace(".", "\\\\."), rules)
 
-        for page in ("competitions.html", "index.html"):
+        for page in ("competitions.html", "index.html", os.path.join("shared", "alj-core.js")):
             with open(os.path.join(_code_root, "web", page), encoding="utf-8") as f:
                 html = f.read()
 
@@ -176,7 +177,8 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
         return self.client.get(path, headers=headers)
 
     def test_public_routes(self):
-        for path in ("/health", "/api/web-version", "/webhooks/helloasso"):
+        for path in ("/health", "/api/web-version", "/webhooks/helloasso",
+                     "/bureau/", "/bureau/adherents", "/static-web/alj-core.js"):
             self.assertEqual(self.get(path).status_code, 200, path)
 
     def test_protected_routes(self):

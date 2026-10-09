@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
+<meta name="alj-web-version" content="13">
+<title>ALJ Escalade — Bureau · Accueil (v13)</title>
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<link rel="stylesheet" href="/static-web/alj.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="shell"></div>
+<script type="module">
+import { startBureau } from "/static-web/alj-shell.js";
+
+startBureau({
+  page: "accueil",
+  title: "Accueil",
+  onReady: ({ role }) => {
+    const qui = role === "admin" ? "administrateur" : "coach";
+    document.getElementById("content").innerHTML = `
+      <div class="grid-links">
+        <a class="card link-card" href="/bureau/adherents">
+          <b>👥 Adhérents</b>
+          <span>Liste des adhérents, filtre par tarif et fiche détaillée.</span>
+        </a>
+        <a class="card link-card" href="/bureau/outils">
+          <b>🛠️ Outils</b>
+          <span>Carte interactive et analyse des effectifs.</span>
+        </a>
+        <a class="card link-card" href="/competitions?vue=pwa">
+          <b>🏆 Compétitions</b>
+          <span>Compétitions, participants et paiements HelloAsso.</span>
+        </a>
+        <a class="card link-card" href="/competitions?vue=mobile">
+          <b>📱 Version mobile</b>
+          <span>Ouvre l'application smartphone et mémorise ce choix sur cet appareil.</span>
+        </a>
+      </div>
+      <p class="muted">Connecté en tant que ${qui}. Les données sont lues en temps réel depuis Firestore.</p>`;
+  }
+});
+</script>
+</body>
+</html>
