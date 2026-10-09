@@ -162,6 +162,16 @@ class TestBureauFiles(unittest.TestCase):
         self.assertEqual(required_role("POST", "/api/attestations/preview"), "admin")
         self.assertEqual(required_role("POST", "/api/attestations/send"), "admin")
 
+    def test_outils_page_tabs_and_iframes_wiring(self):
+        """La page outils.html intègre la carte et le TCD via onglets et iframes apiFetch."""
+        html = _read(os.path.join(BUREAU, "outils.html"))
+        for elem in ("tab-btn-map", "tab-btn-pivot", "pane-map", "pane-pivot",
+                      "iframe-map", "iframe-pivot", "pivot-season-select", "tools-refresh-btn"):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/map")', html)
+        self.assertIn('apiFetch(url)', html)
+        self.assertIn('frame.srcdoc = html;', html)
+
     def test_apply_template_variables_adherents_extension(self):
         """Les variables {tarif} et {season} sont correctement résolues pour les adhérents."""
         from domain.utils import apply_template_variables

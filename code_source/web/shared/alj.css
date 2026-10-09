@@ -200,6 +200,19 @@ textarea.fld-input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba
 }
 #toast.show { opacity: 1; }
 
+/* ----- Page Outils (iframes / TCD / Carte) ----- */
+.tools-wrap {
+  height: calc(100vh - 170px); min-height: 580px; display: flex; flex-direction: column; gap: 10px;
+}
+.tools-frame {
+  flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}
+.tools-loading {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  background: #F8FAFC; border: 1px dashed var(--line); border-radius: 10px;
+  color: var(--muted); font-size: 14px;
+}
+
 /* Écran étroit (bureau consulté sur téléphone) : menu en bandeau en haut */
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }

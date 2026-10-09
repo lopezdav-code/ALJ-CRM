@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="16">
-<title>ALJ Escalade — Bureau · Outils (v16)</title>
+<meta name="alj-web-version" content="17">
+<title>ALJ Escalade — Bureau · Outils (v17)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -15,18 +15,189 @@
 </head>
 <body>
 <div id="shell"></div>
+
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
+import { apiFetch, initFirebase } from "/static-web/alj-core.js";
+
+const esc = s => (s == null ? "" : String(s))
+  .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 startBureau({
   page: "outils",
   title: "Outils",
-  onReady: () => {
-    document.getElementById("content").innerHTML = `
-      <div class="card">
-        <h2>🚧 En construction</h2>
-        <p>Étape 4 : la carte interactive et l'analyse des effectifs seront affichées ici.</p>
-      </div>`;
+  onReady: ({ user, role, isAdmin }) => {
+    const content = document.getElementById("content");
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:12px; padding:12px 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div class="m-name" style="font-size:16px;">🛠️ Outils d'analyse & cartographie</div>
+            <div class="m-sub">Visualisation spatiale des adhérents et tableau croisé dynamique des inscriptions.</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div class="filter-chips">
+              <span class="filter-chip active" id="tab-btn-map" style="font-size:13px; padding:6px 14px;">📍 Carte géographique</span>
+              <span class="filter-chip" id="tab-btn-pivot" style="font-size:13px; padding:6px 14px;">📊 Analyse des effectifs (TCD)</span>
+            </div>
+            <button class="btn btn-muted btn-mini" id="tools-refresh-btn" title="Recharger l'outil actif">🔄 Recharger</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Onglet 1 : Carte des adhérents (/map) -->
+      <div class="tools-wrap" id="pane-map">
+        <div class="tools-loading" id="loading-map">
+          <span>⏳ Chargement de la carte géographique des adhérents…</span>
+        </div>
+        <iframe id="iframe-map" class="tools-frame" style="display:none;" sandbox="allow-scripts allow-same-origin allow-popups" title="Carte Leaflet des adhérents"></iframe>
+      </div>
+
+      <!-- Onglet 2 : Tableau Croisé Dynamique (/pivot) -->
+      <div class="tools-wrap" id="pane-pivot" style="display:none;">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:2px;">
+          <label class="muted" style="font-size:12.5px; font-weight:600;">Saison à analyser :</label>
+          <select id="pivot-season-select" class="select-input" style="padding:4px 8px; font-size:12.5px;">
+            <option value="Toutes les saisons">Toutes les saisons</option>
+          </select>
+        </div>
+        <div class="tools-loading" id="loading-pivot">
+          <span>⏳ Chargement du tableau croisé dynamique…</span>
+        </div>
+        <iframe id="iframe-pivot" class="tools-frame" style="display:none;" sandbox="allow-scripts allow-same-origin allow-popups allow-modals" title="Tableau Croisé Dynamique"></iframe>
+      </div>
+
+      <div id="toast"></div>
+    `;
+
+    function toast(msg, ms = 4000) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    let activeTab = "map"; // 'map' | 'pivot'
+    let mapLoaded = false;
+    let pivotLoaded = false;
+    let currentPivotSeason = "Toutes les saisons";
+
+    const tabBtnMap = document.getElementById("tab-btn-map");
+    const tabBtnPivot = document.getElementById("tab-btn-pivot");
+    const paneMap = document.getElementById("pane-map");
+    const panePivot = document.getElementById("pane-pivot");
+    const refreshBtn = document.getElementById("tools-refresh-btn");
+    const seasonSelect = document.getElementById("pivot-season-select");
+
+    async function loadMap(force = false) {
+      if (mapLoaded && !force) return;
+      const loading = document.getElementById("loading-map");
+      const frame = document.getElementById("iframe-map");
+      loading.style.display = "flex";
+      loading.innerHTML = "<span>⏳ Chargement de la carte géographique…</span>";
+      frame.style.display = "none";
+
+      try {
+        const res = await apiFetch("/map");
+        if (res.ok) {
+          const html = await res.text();
+          frame.srcdoc = html;
+          frame.style.display = "block";
+          loading.style.display = "none";
+          mapLoaded = true;
+        } else {
+          loading.innerHTML = `<span style="color:var(--red)">❌ Erreur lors du chargement de la carte (HTTP ${res.status}).</span>`;
+        }
+      } catch (err) {
+        console.error("Erreur chargement /map :", err);
+        loading.innerHTML = `<span style="color:var(--red)">❌ Erreur de connexion réseau : ${esc(err.message)}</span>`;
+      }
+    }
+
+    async function loadPivot(season = "Toutes les saisons", force = false) {
+      if (pivotLoaded && !force && season === currentPivotSeason) return;
+      currentPivotSeason = season;
+      const loading = document.getElementById("loading-pivot");
+      const frame = document.getElementById("iframe-pivot");
+      loading.style.display = "flex";
+      loading.innerHTML = "<span>⏳ Chargement du tableau croisé dynamique…</span>";
+      frame.style.display = "none";
+
+      try {
+        const url = "/pivot" + (season && season !== "Toutes les saisons" ? `?season=${encodeURIComponent(season)}` : "");
+        const res = await apiFetch(url);
+        if (res.ok) {
+          const html = await res.text();
+          frame.srcdoc = html;
+          frame.style.display = "block";
+          loading.style.display = "none";
+          pivotLoaded = true;
+        } else {
+          loading.innerHTML = `<span style="color:var(--red)">❌ Erreur lors du chargement du TCD (HTTP ${res.status}).</span>`;
+        }
+      } catch (err) {
+        console.error("Erreur chargement /pivot :", err);
+        loading.innerHTML = `<span style="color:var(--red)">❌ Erreur de connexion réseau : ${esc(err.message)}</span>`;
+      }
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      if (tab === "map") {
+        tabBtnMap.classList.add("active");
+        tabBtnPivot.classList.remove("active");
+        paneMap.style.display = "flex";
+        panePivot.style.display = "none";
+        loadMap();
+      } else {
+        tabBtnPivot.classList.add("active");
+        tabBtnMap.classList.remove("active");
+        panePivot.style.display = "flex";
+        paneMap.style.display = "none";
+        loadPivot(seasonSelect.value || "Toutes les saisons");
+      }
+    }
+
+    tabBtnMap.addEventListener("click", () => switchTab("map"));
+    tabBtnPivot.addEventListener("click", () => switchTab("pivot"));
+
+    refreshBtn.addEventListener("click", () => {
+      if (activeTab === "map") {
+        loadMap(true);
+        toast("🔄 Carte réactualisée.");
+      } else {
+        loadPivot(seasonSelect.value || "Toutes les saisons", true);
+        toast("🔄 Tableau croisé dynamique réactualisé.");
+      }
+    });
+
+    seasonSelect.addEventListener("change", e => {
+      loadPivot(e.target.value, true);
+    });
+
+    // Chargement des saisons depuis Firestore pour peupler le sélecteur TCD
+    try {
+      const { db } = initFirebase();
+      db.collection("crm_seasons").get().then(snap => {
+        const seasons = [];
+        snap.forEach(d => {
+          const x = d.data();
+          if (x && x._deleted !== true && x.name) seasons.push(x.name);
+        });
+        seasons.sort().reverse();
+        if (seasons.length) {
+          seasonSelect.innerHTML = '<option value="Toutes les saisons">Toutes les saisons</option>' +
+            seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+        }
+      }).catch(err => {
+        console.warn("Impossible de lister crm_seasons pour les outils :", err);
+      });
+    } catch (e) {}
+
+    // Chargement initial de la carte
+    loadMap();
   }
 });
 </script>
