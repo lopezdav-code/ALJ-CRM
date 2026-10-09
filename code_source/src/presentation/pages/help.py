@@ -106,8 +106,8 @@ class HelpPage(QWidget):
             "<b>Format :</b> base partagée en ligne dans <b>Firestore</b> (collections <code>crm_*</code>) ; "
             "<code>database.db</code> n'est plus qu'une copie locale, mise à jour automatiquement "
             "(envoi des modifications toutes les 15 s, réception de celles des autres postes toutes les 2 min).<br>"
-            "<b>Provenance :</b> Synchronisée depuis l'API HelloAsso. Une copie est encore déposée sur Google Drive "
-            "(<code>GOOGLE_DRIVE_DB_ID</code>) pour l'annuaire web, en lecture seule.<br>"
+            "<b>Provenance :</b> Synchronisée depuis l'API HelloAsso. La référence partagée est Firestore ; "
+            "l'annuaire web le lit directement (plus de copie sur Google Drive).<br>"
             "<b>Rôle :</b> C'est le pivot central de l'application. Elle recense l'intégralité des "
             "<i>coordonnées des adhérents, tarifs réglés, justificatifs de paiement et statuts de commandes</i> "
             "au format relationnel (users / orders / purchases / purchase_options)."
@@ -140,7 +140,7 @@ class HelpPage(QWidget):
         pip_desc = QLabel(
             "<b>1. Chargement initial :</b> Au démarrage, l'application lit de façon asynchrone le fichier n°3 de référence local.<br>"
             "<b>2. Rapprochement Web :</b> L'action de synchronisation HelloAsso rapatrie automatiquement les nouvelles inscriptions et les fusionne sans perte avec les correctifs manuels du club.<br>"
-            "<b>3. Sauvegarde automatique :</b> Le fichier consolidé est réimporté sur Google Drive de façon sécurisée.<br>"
+            "<b>3. Sauvegarde automatique :</b> Les modifications sont envoyées vers Firestore de façon sécurisée.<br>"
             "<b>4. Exploitation :</b> Vous pouvez ensuite générer les fiches de cours (Excel), les fiches d'urgences, les attestations de paiement PDF, ou mener vos campagnes de communication par courriel."
         )
         pip_desc.setWordWrap(True)

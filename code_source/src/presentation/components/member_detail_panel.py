@@ -741,7 +741,7 @@ class MemberDetailPanel(QFrame):
             self.add_editable_row(self.sec_ffme, "📜 Diplômes FFME :", "raw_diplomas", member.raw_diplomas)
 
             # Section 6 : Note d'explication
-            lbl_comm = QLabel("⚠️ Les modifications seront directement enregistrées dans la base de données SQLite locale et partagées sur Google Drive.")
+            lbl_comm = QLabel("⚠️ Les modifications seront directement enregistrées dans la base de données SQLite locale et partagées via Firestore.")
             lbl_comm.setStyleSheet("font-size: 11px; color: #1E293B; font-weight: 500; font-style: italic;")
             lbl_comm.setWordWrap(True)
             self.sec_comment.addWidget(lbl_comm)
@@ -875,8 +875,8 @@ class MemberDetailPanel(QFrame):
                 
                 msg_text = (
                     "Les modifications ont été enregistrées avec succès dans la base de données locale !\n\n"
-                    "⚡ Pour maximiser la rapidité de l'application, le téléversement vers Google Drive est mis en attente. "
-                    "Il sera exécuté automatiquement lors de la fermeture de l'application."
+                    "⚡ Pour maximiser la rapidité de l'application, l'envoi vers Firestore est groupé. "
+                    "Il part automatiquement dans quelques secondes et à la fermeture de l'application."
                 )
 
                 QMessageBox.information(

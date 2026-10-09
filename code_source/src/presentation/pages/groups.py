@@ -714,8 +714,8 @@ class GroupsPage(QWidget):
             
             msg_text = (
                 "Le planning (créneaux, animateurs et correspondances HelloAsso) a été enregistré avec succès !\n\n"
-                "⚡ Pour maximiser la rapidité de l'application, le téléversement vers Google Drive est mis en attente. "
-                "Il sera exécuté automatiquement lors de la fermeture de l'application."
+                "⚡ Pour maximiser la rapidité de l'application, l'envoi vers Firestore est groupé. "
+                "Il part automatiquement dans quelques secondes et à la fermeture de l'application."
             )
             
             QMessageBox.information(

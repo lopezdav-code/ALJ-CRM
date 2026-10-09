@@ -23,7 +23,7 @@ class SyncHelloAssoWorker(QThread):
     def run(self):
         try:
             self.progress.emit("Démarrage de la synchronisation HelloAsso...", 10)
-            self.progress.emit("Téléchargement du Drive et intégration en arrière-plan...", 50)
+            self.progress.emit("Synchronisation Firestore et intégration en arrière-plan...", 50)
             
             from create_excel import update_membership_excel
             success, new_participants, result = update_membership_excel()
@@ -910,7 +910,7 @@ class FFMEMergeWorker(QThread):
                 from infrastructure.secret_store import SecretStore
                 db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
                 if db_drive_id:
-                    self.progress.emit("Synchronisation de la base SQLite sur Google Drive...", 85)
+                    self.progress.emit("Synchronisation de la base avec Firestore...", 85)
                     db_local_path = SqliteRepository.get_db_path()
                     GoogleDriveClient.upload_file(db_drive_id, db_local_path)
                     
@@ -967,7 +967,7 @@ class AutonomesMergeWorker(QThread):
                 from infrastructure.secret_store import SecretStore
                 db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
                 if db_drive_id:
-                    self.progress.emit("Synchronisation de la base SQLite sur Google Drive...", 85)
+                    self.progress.emit("Synchronisation de la base avec Firestore...", 85)
                     db_local_path = SqliteRepository.get_db_path()
                     GoogleDriveClient.upload_file(db_drive_id, db_local_path)
 
@@ -993,6 +993,18 @@ class UploadDriveFileWorker(QThread):
             from infrastructure.google_drive_client import GoogleDriveClient
             import os
             
+            from infrastructure.cloud_database import CloudDatabase
+            if CloudDatabase.is_enabled():
+                self.progress.emit("Envoi des modifications vers Firestore...", 30)
+                report = CloudDatabase.sync(progress=lambda m: self.progress.emit(m, 60))
+                if CloudDatabase._last_error:
+                    self.finished.emit(False, f"Envoi vers Firestore impossible : {CloudDatabase._last_error}")
+                    return
+                self.progress.emit("Envoi terminé !", 100)
+                self.finished.emit(True, "La base a été synchronisée avec Firestore "
+                                         f"({report.get('pushed', 0)} envoyée(s), {report.get('pulled', 0)} reçue(s)).")
+                return
+
             self.progress.emit("Connexion à Google Drive...", 20)
             
             db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
@@ -1210,7 +1222,7 @@ class SaisonMergeWorker(QThread):
                 from infrastructure.google_drive_client import GoogleDriveClient
                 db_drive_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
                 if db_drive_id:
-                    self.progress.emit("Synchronisation de la base SQLite sur Google Drive...", 85)
+                    self.progress.emit("Synchronisation de la base avec Firestore...", 85)
                     db_local_path = SqliteRepository.get_db_path()
                     GoogleDriveClient.upload_file(db_drive_id, db_local_path)
 

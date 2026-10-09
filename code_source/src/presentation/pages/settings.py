@@ -43,8 +43,8 @@ class SettingsPage(QWidget):
             ("HelloAsso Client ID :", "HELLOASSO_CLIENT_ID", ""),
             ("Campagne d'adhésion HelloAsso (slug) :", "CAMPAIGN_SLUG", "adhesion-escalade-2026-2027-amicale-laique-escalade-2"),
             ("Base principale (firestore = partagée en ligne, drive = ancien fichier partagé) :", "MEMBER_BACKEND", "firestore"),
-            ("Google Drive SQLite DB ID (export de la base pour l'annuaire web) :", "GOOGLE_DRIVE_DB_ID", ""),
-            ("Google Drive SQLite DB ID (Base compétitions) :", "GOOGLE_DRIVE_COMPETITION_DB_ID", ""),
+            ("Google Drive SQLite DB ID (ancien mode / retour arrière uniquement) :", "GOOGLE_DRIVE_DB_ID", ""),
+            ("Google Drive SQLite DB ID (ancienne base compétitions, obsolète) :", "GOOGLE_DRIVE_COMPETITION_DB_ID", ""),
             ("Google Cloud Client ID :", "GMAIL_CLIENT_ID", ""),
             ("Adresse Expéditeur Gmail :", "GMAIL_USER_EMAIL", "")
         ]
@@ -190,7 +190,7 @@ class SettingsPage(QWidget):
         buttons_layout.addWidget(self.google_test_btn)
 
         # Bouton Envoyer la base de données SQLite locale sur le Google Drive
-        self.upload_db_btn = QPushButton("📤 Envoyer BDD locale sur Drive")
+        self.upload_db_btn = QPushButton("📤 Envoyer BDD locale vers Firestore")
         self.upload_db_btn.setCursor(Qt.PointingHandCursor)
         self.upload_db_btn.setStyleSheet("""
             QPushButton {
@@ -263,7 +263,13 @@ class SettingsPage(QWidget):
         layout.addStretch()
 
     def upload_db_to_drive(self):
-        """Téléverse la base de données locale vers Google Drive (mise à jour ou création)."""
+        """Envoie la base locale vers Firestore (ou Drive en mode retour arrière)."""
+        from infrastructure.cloud_database import CloudDatabase
+        if CloudDatabase.is_enabled():
+            main_win = self.window()
+            if main_win and hasattr(main_win, "start_drive_upload_workflow"):
+                main_win.start_drive_upload_workflow()
+            return
         from infrastructure.sqlite_repository import SqliteRepository
         from infrastructure.google_drive_client import GoogleDriveClient
         import os
@@ -302,7 +308,7 @@ class SettingsPage(QWidget):
                 success = GoogleDriveClient.upload_file(db_drive_id, db_local_path)
                 
                 self.upload_db_btn.setEnabled(True)
-                self.upload_db_btn.setText("📤 Envoyer BDD locale sur Drive")
+                self.upload_db_btn.setText("📤 Envoyer BDD locale vers Firestore")
                 
                 if success:
                     QMessageBox.information(self, "Succès", "La base de données existante sur Google Drive a été mise à jour avec succès !")
@@ -317,7 +323,7 @@ class SettingsPage(QWidget):
         new_id = GoogleDriveClient.create_file("database.db", db_local_path)
         
         self.upload_db_btn.setEnabled(True)
-        self.upload_db_btn.setText("📤 Envoyer BDD locale sur Drive")
+        self.upload_db_btn.setText("📤 Envoyer BDD locale vers Firestore")
         
         if new_id:
             SecretStore.set_secret("GOOGLE_DRIVE_DB_ID", new_id)

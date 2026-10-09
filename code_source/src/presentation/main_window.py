@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
 
         # Statuts de connexion en pastilles discrètes
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
-        status_text = "🟢 Drive Connecté"
+        status_text = "🟢 Google connecté"
         if gmail_user:
             status_text += f" ({gmail_user.strip()})"
         self.drive_status = QLabel(status_text)
@@ -256,7 +256,7 @@ class MainWindow(QMainWindow):
         
         # Mettre à jour dynamiquement l'adresse e-mail de connexion affichée dans l'en-tête
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
-        status_text = "🟢 Drive Connecté"
+        status_text = "🟢 Google connecté"
         if gmail_user:
             status_text += f" ({gmail_user.strip()})"
         self.drive_status.setText(status_text)
@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
         self.on_nav_changed(2)
 
     def start_drive_sync_workflow(self):
-        """Déclenche le téléchargement du tableur de référence depuis Google Drive en tâche de fond."""
+        """Synchronise la base depuis Firestore (ou Drive en mode retour arrière) en tâche de fond."""
         drive_db_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
 
         print("🔄 [MAIN] Lancement du worker de téléchargement seul depuis Google Drive...")
@@ -320,8 +320,8 @@ class MainWindow(QMainWindow):
 
             QMessageBox.information(
                 self,
-                "Téléchargement Google Drive",
-                "Le fichier d'adhérents le plus récent a été récupéré avec succès depuis Google Drive !"
+                "Synchronisation Firestore",
+                "La base d'adhérents la plus récente a été récupérée avec succès depuis Firestore !"
             )
             # La base locale vient d'être remplacée : invalider le cache mémoire de
             # l'onglet Adhérents pour qu'il réaffiche les données à jour
@@ -339,11 +339,11 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(
                 self,
-                "Échec Google Drive",
-                f"Le téléchargement Google Drive a échoué :\n\n{result_message}"
+                "Échec Firestore",
+                f"La synchronisation a échoué :\n\n{result_message}"
             )
     def start_drive_upload_workflow(self):
-        """Déclenche le téléversement de la base SQLite locale vers Google Drive en arrière-plan."""
+        """Envoie la base locale vers Firestore (ou Drive en mode retour arrière) en arrière-plan."""
         print("📤 [MAIN] Lancement du worker de sauvegarde SQLite vers Google Drive...")
         from presentation.workers import UploadDriveFileWorker
         self.upload_worker = UploadDriveFileWorker()
@@ -362,17 +362,17 @@ class MainWindow(QMainWindow):
 
             QMessageBox.information(
                 self,
-                "Sauvegarde Google Drive",
-                "Votre base de données SQLite locale a été téléversée et sauvegardée avec succès sur Google Drive !"
+                "Envoi vers Firestore",
+                "Vos modifications ont été envoyées avec succès vers Firestore !"
             )
         else:
             QMessageBox.critical(
                 self,
                 "Échec de Sauvegarde",
-                f"La sauvegarde sur Google Drive a échoué :\n\n{result_message}"
+                f"L'envoi a échoué :\n\n{result_message}"
             )
     def start_sync_workflow(self):
-        """Déclenche la synchronisation HelloAsso & Google Drive en arrière-plan."""
+        """Déclenche la synchronisation HelloAsso & Firestore en arrière-plan."""
         drive_file_id = SecretStore.get_secret("GOOGLE_DRIVE_FILE_ID")
         campaign_slug = SecretStore.get_secret("CAMPAIGN_SLUG") or f"adhesion-escalade-{get_active_season()}-amicale-laique-escalade-2"
 
@@ -684,7 +684,7 @@ class MainWindow(QMainWindow):
         import os
         
         # Créer un indicateur d'attente
-        progress = QProgressDialog("Sauvegarde locale et synchronisation Google Drive en cours...", None, 0, 0, self)
+        progress = QProgressDialog("Sauvegarde locale et synchronisation Firestore en cours...", None, 0, 0, self)
         progress.setWindowTitle("Fermeture de l'application")
         progress.setWindowModality(Qt.WindowModal)
         progress.setCancelButton(None) # Pas de bouton d'annulation

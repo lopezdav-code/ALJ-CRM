@@ -493,7 +493,7 @@ class ReportsPage(QWidget):
         db_layout.setContentsMargins(18, 16, 18, 16)
         db_layout.setSpacing(10)
         db_layout.addLayout(self._make_card_title(
-            "☁️", "#DBEAFE", "Télécharger la BDD", "Base de données • Google Drive"))
+            "☁️", "#DBEAFE", "Synchroniser la BDD", "Base de données • Firestore"))
 
         # Informations : dates de dernier import / fichier Drive
         db_info_frame = QFrame()
@@ -517,7 +517,7 @@ class ReportsPage(QWidget):
         db_info_grid.addWidget(k1, 0, 0)
         db_info_grid.addWidget(self.drive_sync_lbl, 0, 1)
 
-        k2 = QLabel("☁️ Date du fichier Drive (database.db)")
+        k2 = QLabel("☁️ Dernière synchro Firestore")
         k2.setStyleSheet("color: #64748B; font-size: 11px;")
         self.drive_db_date_lbl = QLabel("—")
         self.drive_db_date_lbl.setStyleSheet("color: #1E293B; font-size: 11px; font-weight: bold;")
@@ -528,23 +528,23 @@ class ReportsPage(QWidget):
 
         # Rappel de fonctionnement
         db_recall = QLabel(
-            "💡 La BDD est sauvegardée sur Google Drive (envoi automatique à la fermeture du logiciel). "
-            "Un cache local est en place : faites la mise à jour si plusieurs personnes travaillent sur la BDD."
+            "💡 La BDD est partagée en ligne dans Firestore : vos modifications partent automatiquement (toutes les 15 s et à la fermeture du logiciel). "
+            "database.db n'est qu'une copie locale : forcez la synchronisation pour recevoir tout de suite les changements des autres postes."
         )
         db_recall.setWordWrap(True)
         db_recall.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic; background: transparent; border: none;")
         db_layout.addWidget(db_recall)
 
-        # Actions : telecharger depuis Drive / envoyer sur Drive
+        # Actions : recevoir depuis Firestore / envoyer vers Firestore
         db_btn_layout = QHBoxLayout()
         db_btn_layout.setSpacing(10)
-        btn_download_db = QPushButton("⬇️  Télécharger depuis Drive")
+        btn_download_db = QPushButton("⬇️  Recevoir depuis Firestore")
         btn_download_db.setCursor(Qt.PointingHandCursor)
         btn_download_db.setStyleSheet(self.QSS_BTN_SECONDARY)
         btn_download_db.clicked.connect(self.start_drive_sync_workflow)
         db_btn_layout.addWidget(btn_download_db)
 
-        btn_upload_db = QPushButton("⬆️  Envoyer la BDD sur Drive")
+        btn_upload_db = QPushButton("⬆️  Envoyer la BDD vers Firestore")
         btn_upload_db.setCursor(Qt.PointingHandCursor)
         btn_upload_db.setStyleSheet(self.QSS_BTN_PRIMARY)
         btn_upload_db.clicked.connect(self.start_drive_upload_workflow)
@@ -589,7 +589,7 @@ class ReportsPage(QWidget):
 
         ha_recall = QLabel(
             "💡 Récupère les nouvelles inscriptions HelloAsso de la saison et les fusionne "
-            "automatiquement avec la base locale, puis sauvegarde sur Google Drive."
+            "automatiquement avec la base locale, puis synchronise avec Firestore."
         )
         ha_recall.setWordWrap(True)
         ha_recall.setStyleSheet("color: #94A3B8; font-size: 11px; font-style: italic; background: transparent; border: none;")
@@ -1030,6 +1030,18 @@ class ReportsPage(QWidget):
         """Interroge Google Drive en arrière-plan pour afficher la date de dernière
         modification du fichier database.db hébergé sur Drive."""
         from infrastructure.google_drive_client import GoogleDriveClient
+        from infrastructure.cloud_database import CloudDatabase
+        if CloudDatabase.is_enabled():
+            import datetime
+            st = CloudDatabase.status()
+            if st.get("last_error"):
+                self.drive_db_date_lbl.setText("Firestore injoignable")
+            elif st.get("last_sync"):
+                self.drive_db_date_lbl.setText(
+                    datetime.datetime.fromtimestamp(st["last_sync"]).strftime("%d/%m/%Y %H:%M:%S"))
+            else:
+                self.drive_db_date_lbl.setText("Pas encore synchronisée")
+            return
         file_id = SecretStore.get_secret("GOOGLE_DRIVE_DB_ID")
         if not file_id:
             self.drive_db_date_lbl.setText("Aucun ID Drive configuré")
@@ -1062,7 +1074,7 @@ class ReportsPage(QWidget):
     # principale (mêmes workers et boîtes de dialogue que l'Import Data)
     # ------------------------------------------------------------------
     def start_drive_sync_workflow(self):
-        """Télécharge la BDD la plus récente depuis Google Drive (workflow principal)."""
+        """Reçoit la BDD la plus récente depuis Firestore (workflow principal)."""
         main_win = self.window()
         if main_win and hasattr(main_win, "start_drive_sync_workflow"):
             main_win.start_drive_sync_workflow()
@@ -1071,7 +1083,7 @@ class ReportsPage(QWidget):
             QMessageBox.warning(self, "Indisponible", "Action disponible uniquement depuis la fenêtre principale.")
 
     def start_drive_upload_workflow(self):
-        """Envoie la BDD locale sur Google Drive (workflow principal)."""
+        """Envoie la BDD locale vers Firestore (workflow principal)."""
         main_win = self.window()
         if main_win and hasattr(main_win, "start_drive_upload_workflow"):
             main_win.start_drive_upload_workflow()
