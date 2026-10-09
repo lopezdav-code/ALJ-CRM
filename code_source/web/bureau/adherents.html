@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="15">
-<title>ALJ Escalade — Bureau · Adhérents (v15)</title>
+<meta name="alj-web-version" content="16">
+<title>ALJ Escalade — Bureau · Adhérents (v16)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -153,6 +153,45 @@ startBureau({
         </div>
       </div>
 
+      <!-- Modale d'attestation de paiement PDF (Administrateurs uniquement) -->
+      <div id="attestation-modal" class="modal-overlay" style="display:none">
+        <div class="modal-content card" style="max-width:760px;">
+          <div class="modal-header">
+            <div class="m-name" style="font-size:16px;">📄 Attestation de paiement</div>
+            <button class="icon-btn" id="att-modal-close" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px; border:none; cursor:pointer;">✕</button>
+          </div>
+
+          <div class="card" style="background:#F8FAFC; border:1px solid #E2E8F0; margin-bottom:12px; padding:10px 14px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+              <div>
+                <b id="att-dest-name" style="font-size:15px; color:#1E293B;">—</b>
+                <div id="att-dest-payer" style="font-size:12.5px; color:var(--muted); margin-top:2px;">—</div>
+                <div id="att-dest-email" style="font-size:12.5px; color:var(--blue); margin-top:2px;">—</div>
+              </div>
+              <div style="text-align:right;">
+                <div id="att-dest-amount" style="font-size:16px; font-weight:800; color:#16A34A;">— €</div>
+                <div id="att-dest-badge" style="margin-top:3px;"></div>
+              </div>
+            </div>
+            <div id="att-ineligible-warn" style="display:none; color:var(--red); font-weight:700; font-size:12px; margin-top:8px;"></div>
+          </div>
+
+          <div class="section-h" style="margin:4px 0 8px;">👁 Aperçu du document PDF</div>
+          <div id="att-preview-container" style="background:#E2E8F0; border-radius:8px; min-height:360px; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; margin-bottom:12px;">
+            <div id="att-preview-loading" class="muted" style="padding:20px; text-align:center;">
+              ⏳ Génération du PDF en mémoire…
+            </div>
+            <iframe id="att-pdf-frame" style="width:100%; height:460px; border:none; display:none;" title="Aperçu attestation"></iframe>
+          </div>
+
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn btn-muted" id="att-cancel-btn">Fermer</button>
+            <button class="btn btn-muted" id="att-download-btn" disabled>📥 Télécharger le PDF</button>
+            <button class="btn btn-primary" id="att-send-btn" disabled>🚀 Envoyer par e-mail</button>
+          </div>
+        </div>
+      </div>
+
       <div id="toast"></div>
     `;
 
@@ -183,9 +222,12 @@ startBureau({
     let selectedUserId = null;
     let displayedMembers = [];
 
-    // Modèles d'e-mails chargés depuis l'API
+    // Modèles d'e-mails et état actif
     let emailTemplates = [];
     let activeEmailMember = null;
+    let activeAttestationMember = null;
+    let currentAttestationBlobUrl = null;
+    let currentAttestationPdfBlob = null;
 
     async function loadEmailTemplates() {
       try {
@@ -215,6 +257,9 @@ startBureau({
       return `<span class="badge" style="background:${color}">${esc(st || "—")}</span>`;
     }
 
+    // ==========================================
+    // Modale d'e-mail personnalisé
+    // ==========================================
     function updateEmailPreview() {
       const previewBox = document.getElementById("em-preview-box");
       if (!previewBox || !activeEmailMember) return;
@@ -271,7 +316,6 @@ startBureau({
       activeEmailMember = null;
     }
 
-    // Gestion du sélecteur de modèle d'e-mail
     document.getElementById("em-template-select").addEventListener("change", e => {
       const tmplName = e.target.value;
       if (!tmplName) return;
@@ -292,7 +336,6 @@ startBureau({
       if (e.target.id === "email-modal") closeEmailModal();
     });
 
-    // Envoi de l'e-mail à l'adhérent
     document.getElementById("em-submit-btn").addEventListener("click", async () => {
       if (!activeEmailMember) return;
       const m = activeEmailMember;
@@ -360,6 +403,156 @@ startBureau({
       }
     });
 
+    // ==========================================
+    // Modale d'attestation de paiement PDF
+    // ==========================================
+    async function openAttestationModal(member) {
+      if (!member) return;
+      activeAttestationMember = member;
+
+      if (currentAttestationBlobUrl) {
+        URL.revokeObjectURL(currentAttestationBlobUrl);
+        currentAttestationBlobUrl = null;
+        currentAttestationPdfBlob = null;
+      }
+
+      document.getElementById("att-dest-name").textContent = `${member.first_name} ${member.last_name}`;
+      document.getElementById("att-dest-payer").textContent = member.payer ? `Payeur : ${member.payer}` : "Payeur : Adhérent";
+      const email = (member.email_primary || "").trim();
+      document.getElementById("att-dest-email").textContent = email ? `✉️ ${email}` : "Aucune adresse e-mail";
+      document.getElementById("att-dest-amount").textContent = `${member.amount != null ? member.amount : "0"} €`;
+      document.getElementById("att-dest-badge").innerHTML = renderStatusBadge(member.status_norm);
+
+      const warnEl = document.getElementById("att-ineligible-warn");
+      const downloadBtn = document.getElementById("att-download-btn");
+      const sendBtn = document.getElementById("att-send-btn");
+      const loadingEl = document.getElementById("att-preview-loading");
+      const frameEl = document.getElementById("att-pdf-frame");
+
+      frameEl.style.display = "none";
+      frameEl.src = "";
+      loadingEl.style.display = "block";
+      loadingEl.textContent = "⏳ Génération de l'attestation PDF en mémoire…";
+
+      const amountVal = Number(member.amount || 0);
+      const isAnnule = (member.status_norm || "").toLowerCase().includes("annul");
+
+      if (amountVal <= 0 || isAnnule) {
+        const motif = isAnnule ? "la commande est annulée" : "le montant est nul (0 €)";
+        warnEl.textContent = `⚠️ Impossible de générer une attestation : ${motif}.`;
+        warnEl.style.display = "block";
+        loadingEl.textContent = "Document non disponible pour cette inscription.";
+        downloadBtn.disabled = true;
+        sendBtn.disabled = true;
+        document.getElementById("attestation-modal").style.display = "flex";
+        return;
+      }
+
+      warnEl.style.display = "none";
+      downloadBtn.disabled = true;
+      sendBtn.disabled = true;
+      document.getElementById("attestation-modal").style.display = "flex";
+
+      // Appel à l'API pour générer le PDF de prévisualisation
+      try {
+        const res = await apiFetch("/api/attestations/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ member, season: currentSeason })
+        });
+
+        if (res.ok) {
+          const blob = await res.blob();
+          currentAttestationPdfBlob = blob;
+          currentAttestationBlobUrl = URL.createObjectURL(blob);
+          frameEl.src = currentAttestationBlobUrl;
+          frameEl.style.display = "block";
+          loadingEl.style.display = "none";
+          downloadBtn.disabled = false;
+          sendBtn.disabled = !(email && email.includes("@"));
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          loadingEl.textContent = "❌ Erreur de génération : " + (errData.message || res.statusText);
+        }
+      } catch (err) {
+        console.error("Erreur aperçu attestation :", err);
+        loadingEl.textContent = "❌ Erreur de connexion au serveur : " + err.message;
+      }
+    }
+
+    function closeAttestationModal() {
+      document.getElementById("attestation-modal").style.display = "none";
+      if (currentAttestationBlobUrl) {
+        URL.revokeObjectURL(currentAttestationBlobUrl);
+        currentAttestationBlobUrl = null;
+        currentAttestationPdfBlob = null;
+      }
+      activeAttestationMember = null;
+    }
+
+    document.getElementById("att-modal-close").addEventListener("click", closeAttestationModal);
+    document.getElementById("att-cancel-btn").addEventListener("click", closeAttestationModal);
+    document.getElementById("attestation-modal").addEventListener("click", e => {
+      if (e.target.id === "attestation-modal") closeAttestationModal();
+    });
+
+    document.getElementById("att-download-btn").addEventListener("click", () => {
+      if (!currentAttestationBlobUrl || !activeAttestationMember) return;
+      const m = activeAttestationMember;
+      const a = document.createElement("a");
+      a.href = currentAttestationBlobUrl;
+      const ln = (m.last_name || "ADHERENT").toUpperCase();
+      const fn = (m.first_name || "Adherent").charAt(0).toUpperCase() + (m.first_name || "").slice(1).toLowerCase();
+      a.download = `Attestation_${ln}_${fn}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+
+    document.getElementById("att-send-btn").addEventListener("click", async () => {
+      if (!activeAttestationMember) return;
+      const m = activeAttestationMember;
+      const email = (m.email_primary || "").trim();
+      if (!email || !email.includes("@")) {
+        toast("⚠️ Cet adhérent n'a pas d'adresse e-mail valide.");
+        return;
+      }
+
+      if (!confirm(`Envoyer l'attestation de paiement PDF à ${m.first_name} ${m.last_name} <${email}> ?`)) {
+        return;
+      }
+
+      const sendBtn = document.getElementById("att-send-btn");
+      sendBtn.disabled = true;
+      sendBtn.textContent = "⏳ Envoi en cours…";
+
+      try {
+        const res = await apiFetch("/api/attestations/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ member: m, season: currentSeason })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          toast(`✅ Attestation envoyée avec succès à ${m.first_name} ${m.last_name} (${email}) !`);
+          closeAttestationModal();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          toast("❌ Échec d'envoi de l'attestation : " + (data.message || res.statusText), 9000);
+        }
+      } catch (err) {
+        console.error("Erreur envoi attestation :", err);
+        toast("❌ Erreur de communication réseau : " + err.message, 9000);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "🚀 Envoyer par e-mail";
+      }
+    });
+
+    // ==========================================
+    // Rendu du panneau latéral de détail
+    // ==========================================
     function renderDetailPanel(member) {
       const panel = document.getElementById("detail-pane");
       if (!member) {
@@ -416,7 +609,7 @@ startBureau({
         <div class="detail-actions">
           ${isAdmin ? `
             <button class="btn btn-primary btn-mini" id="btn-action-email" title="Envoyer un e-mail personnalisé à cet adhérent">✉️ E-mail</button>
-            <button class="btn btn-muted btn-mini" id="btn-action-attestation" title="Générer et envoyer l'attestation de paiement (Étape 3)">📄 Attestation</button>
+            <button class="btn btn-muted btn-mini" id="btn-action-attestation" title="Générer l'attestation PDF et l'envoyer">📄 Attestation</button>
           ` : `
             <span class="muted" style="font-size:11.5px; font-style:italic;">👁️ Mode consultation coach (actions réservées aux administrateurs)</span>
           `}
@@ -437,7 +630,7 @@ startBureau({
           openEmailModal(member);
         });
         document.getElementById("btn-action-attestation")?.addEventListener("click", () => {
-          alert(`📄 Génération d'attestation pour ${member.first_name} ${member.last_name}\n\nCette fonctionnalité sera activée à l'Étape 3 du portail bureau (WeasyPrint PDF en mémoire).`);
+          openAttestationModal(member);
         });
       }
     }

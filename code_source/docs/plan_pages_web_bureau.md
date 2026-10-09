@@ -101,7 +101,7 @@ Page minimale : liens vers Adhérents, Outils, Compétitions et Version mobile. 
 | 0 | Socle | `shared/*`, route `/bureau`, menu latéral, accueil à 4 liens, redirection ordinateur, tests de version | 1 — **fait (v13)** |
 | 1 | Adhérents | Tableau, détail, filtre sous-catégories repris de l'index, recherche | 1,5 — **fait (v14)** |
 | 2 | E-mail | Bouton, fenêtre modèle/aperçu, envoi à un adhérent | 0,5 — **fait (v15)** |
-| 3 | Attestation | Refactor, WeasyPrint, aperçu, envoi + date d'envoi | 2 |
+| 3 | Attestation | Refactor, WeasyPrint, aperçu, envoi + date d'envoi | 2 — **fait (v16)** |
 | 4 | Outils | Iframes carte et effectifs | 0,5 |
 | 5 | Recette | Tests navigateur sans écran, essai réel admin/coach, déploiement | 1 |
 

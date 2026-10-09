@@ -37,13 +37,26 @@ class EmailRepository:
             print(f"⚠️ Impossible d'écrire dans le journal d'audit des e-mails : {e}")
 
     @classmethod
-    def send_email(cls, to_email: str, subject: str, body: str, attachment_path: str = "", html_body: str = None, inline_images: list = None, from_email: str = None, from_name: str = None) -> bool:
+    def send_email(
+        cls,
+        to_email: str,
+        subject: str,
+        body: str,
+        attachment_path: str = "",
+        html_body: str = None,
+        inline_images: list = None,
+        from_email: str = None,
+        from_name: str = None,
+        attachment_bytes: bytes = None,
+        attachment_filename: str = None
+    ) -> bool:
         """
         Envoie un e-mail avec pièce jointe en sélectionnant dynamiquement le meilleur canal configuré (Gmail API ou SMTP).
         Si html_body est fourni, une version HTML (multipart/alternative) est jointe au texte brut,
         avec les images inline éventuelles (liste de tuples (chemin, Content-ID)).
         `from_email` permet de choisir l'adresse d'expédition (doit être un alias vérifié du compte émetteur).
         `from_name` permet d'afficher un nom lisible dans la colonne « De » des messageries.
+        `attachment_bytes` et `attachment_filename` permettent de joindre un fichier généré en mémoire sans écriture disque.
         """
         # Récupérer les identifiants depuis le SecretStore
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
@@ -122,6 +135,22 @@ class EmailRepository:
                 except Exception as e:
                     cls.log_audit(to_email, subject, "FAIL", f"Erreur de lecture de la pièce jointe {filename} : {e}")
                     raise Exception(f"Impossible de lire la pièce jointe {filename} : {e}")
+
+        # Ajout d'une pièce jointe générée en mémoire (sans écriture sur le disque)
+        if attachment_bytes and attachment_filename:
+            try:
+                import unicodedata
+                ascii_filename = unicodedata.normalize('NFKD', str(attachment_filename)).encode('ascii', 'ignore').decode('ascii')
+                if not ascii_filename:
+                    ascii_filename = "attestation.pdf"
+                part = MIMEBase("application", "pdf" if ascii_filename.lower().endswith(".pdf") else "octet-stream")
+                part.set_payload(attachment_bytes)
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f"attachment; filename={ascii_filename}")
+                msg.attach(part)
+            except Exception as e:
+                cls.log_audit(to_email, subject, "FAIL", f"Erreur lors de l'attachement en mémoire {attachment_filename} : {e}")
+                raise Exception(f"Impossible d'attacher le fichier mémoire {attachment_filename} : {e}")
 
         if use_oauth2:
             try:

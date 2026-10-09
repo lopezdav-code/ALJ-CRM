@@ -115,6 +115,53 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/api/email-templates")', html)
         self.assertIn('apiFetch("/api/send-email"', html)
 
+    def test_adherents_attestation_modal_and_api_wiring(self):
+        """L'Étape 3 intègre la modale d'attestation et le câblage aux endpoints PDF."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        for elem in ("attestation-modal", "att-download-btn", "att-send-btn", "att-pdf-frame",
+                      "att-preview-loading", "att-ineligible-warn"):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/api/attestations/preview"', html)
+        self.assertIn('apiFetch("/api/attestations/send"', html)
+
+    def test_build_attestation_pure_function_rules(self):
+        """build_attestation respecte les règles de montant, d'annulation et de payeur."""
+        from domain.attestation import build_attestation, get_safe_pdf_filename, render_attestation_pdf
+
+        # 1. Validation montant manquant ou nul
+        with self.assertRaises(ValueError):
+            build_attestation({"first_name": "Jean", "last_name": "Dupont", "amount": 0})
+        with self.assertRaises(ValueError):
+            build_attestation({"first_name": "Jean", "last_name": "Dupont", "amount": -10})
+
+        # 2. Validation commande annulée
+        with self.assertRaises(ValueError):
+            build_attestation({"first_name": "Jean", "last_name": "Dupont", "amount": 150, "status": "Annulé"})
+
+        # 3. Payeur par défaut = adhérent
+        m = {"first_name": "alex", "last_name": "martin", "amount": 195, "season_name": "2026-2027"}
+        html = build_attestation(m, season="2026-2027", date_jour="14 juillet 2026")
+        self.assertIn("MARTIN", html)
+        self.assertIn("Alex", html)
+        self.assertIn("195,00", html)
+        self.assertIn("14 juillet 2026", html)
+        self.assertIn("2026-2027", html)
+
+        # 4. Rendu PDF valide
+        pdf_bytes = render_attestation_pdf(html)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 300)
+
+        # 5. Nom de fichier sécurisé
+        fn = get_safe_pdf_filename(m["last_name"], m["first_name"], "CMD-99")
+        self.assertEqual(fn, "Attestation_MARTIN_Alex_CMD-99.pdf")
+
+    def test_attestation_endpoints_require_admin_role(self):
+        """Les endpoints /api/attestations exigent le rôle admin."""
+        from infrastructure.api_auth import required_role
+        self.assertEqual(required_role("POST", "/api/attestations/preview"), "admin")
+        self.assertEqual(required_role("POST", "/api/attestations/send"), "admin")
+
     def test_apply_template_variables_adherents_extension(self):
         """Les variables {tarif} et {season} sont correctement résolues pour les adhérents."""
         from domain.utils import apply_template_variables

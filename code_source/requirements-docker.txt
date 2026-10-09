@@ -11,3 +11,4 @@ python-dotenv==1.2.2
 geopy==2.4.1
 pillow>=10.0.0
 lxml>=5.0.0
+weasyprint>=60.0

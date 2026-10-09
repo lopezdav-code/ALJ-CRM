@@ -15,18 +15,28 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# 1. Installation des dépendances Python conteneurisées
+# 1. Dépendances système pour WeasyPrint (génération des attestations PDF sur Cloud Run)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz0b \
+    libfontconfig1 \
+    libjpeg62-turbo \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Installation des dépendances Python conteneurisées
 COPY requirements-docker.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements-docker.txt
 
-# 2. Copie du code source et des ressources web / templates
+# 3. Copie du code source et des ressources web / templates
 COPY src/ ./src/
 COPY web/ ./web/
 COPY doc/ ./doc/
 COPY VERSION ./VERSION
 
-# 3. Création d'un utilisateur non-root pour la sécurité et attribution des droits
+# 4. Création d'un utilisateur non-root pour la sécurité et attribution des droits
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app/data && \
     chown -R appuser:appuser /app

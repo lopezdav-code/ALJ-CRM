@@ -13,7 +13,7 @@ if _src_dir not in sys.path:
 from typing import Optional
 
 from fastapi import FastAPI, Body, BackgroundTasks, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 # Importer les fonctions de notre script existant
@@ -1152,6 +1152,107 @@ def sync_helloasso_api():
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# --------------------------------------------------------------------------
+# Attestations de paiement PDF (un adhérent à la fois, admin uniquement)
+# --------------------------------------------------------------------------
+@app.post("/api/attestations/preview")
+def preview_attestation_api(data: Dict[str, Any] = Body(...)):
+    """Génère l'aperçu PDF d'une attestation de paiement (retourne application/pdf)."""
+    try:
+        from domain.attestation import build_attestation, render_attestation_pdf, get_safe_pdf_filename
+        member = data.get("member") or {}
+        season = data.get("season")
+        date_jour = data.get("date_jour")
+
+        html = build_attestation(member, season=season, date_jour=date_jour)
+        pdf_bytes = render_attestation_pdf(html)
+
+        last_name = member.get("last_name") or member.get("user_last_name") or "ADHERENT"
+        first_name = member.get("first_name") or member.get("user_first_name") or ""
+        order_ref = member.get("order_ref")
+        filename = get_safe_pdf_filename(last_name, first_name, order_ref)
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+@app.post("/api/attestations/send")
+def send_attestation_api(data: Dict[str, Any] = Body(...)):
+    """Génère une attestation PDF en mémoire, l'envoie par e-mail et met à jour la date d'envoi."""
+    try:
+        from domain.attestation import build_attestation, render_attestation_pdf, get_safe_pdf_filename
+        from domain.utils import apply_template_variables
+        from infrastructure.email_repository import EmailRepository
+
+        member = data.get("member") or {}
+        season = data.get("season")
+        to_email = (data.get("to_email") or member.get("email_primary") or "").strip()
+        if not to_email or "@" not in to_email:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Adresse e-mail du destinataire invalide ou manquante."})
+
+        html = build_attestation(member, season=season)
+        pdf_bytes = render_attestation_pdf(html)
+
+        last_name = member.get("last_name") or member.get("user_last_name") or "ADHERENT"
+        first_name = member.get("first_name") or member.get("user_first_name") or ""
+        order_ref = member.get("order_ref")
+        filename_pdf = get_safe_pdf_filename(last_name, first_name, order_ref)
+
+        raw_subject = data.get("subject") or "Attestation de paiement de cotisation - ALJ Escalade"
+        raw_body = data.get("body") or (
+            "Bonjour {first_name},\n\n"
+            "Veuillez trouver ci-joint votre attestation de paiement de cotisation pour la saison {season}.\n\n"
+            "Bien cordialement,\n"
+            "L'équipe ALJ Escalade\n"
+            "contact@alj-escalade.fr"
+        )
+        subject = apply_template_variables(raw_subject, member)
+        body = apply_template_variables(raw_body, member)
+
+        sender_email = data.get("sender_email")
+        sender_name = data.get("sender_name") or "ALJ Escalade"
+
+        ok = EmailRepository.send_email(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            attachment_bytes=pdf_bytes,
+            attachment_filename=filename_pdf,
+            from_email=sender_email,
+            from_name=sender_name
+        )
+        if not ok:
+            return JSONResponse(status_code=500, content={"status": "error", "message": "Échec d'envoi de l'e-mail."})
+
+        # Mise à jour de la date d'envoi dans Firestore si applicable
+        now_str = datetime.datetime.now().strftime("%d/%m/%Y")
+        try:
+            from infrastructure.firestore_client import FirestoreClient
+            fs_db = FirestoreClient.get_db()
+            pid = member.get("purchase_id")
+            if fs_db and pid:
+                fs_db.collection("crm_purchases").doc(str(pid)).set({
+                    "email_sent_date": now_str,
+                    "_modified_at": datetime.datetime.now()
+                }, merge=True)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Attestation envoyée avec succès à {to_email}.",
+            "email_sent_date": now_str,
+            "filename": filename_pdf
+        }
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 
 if __name__ == "__main__":

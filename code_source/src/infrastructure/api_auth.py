@@ -119,6 +119,8 @@ def required_role(method: str, path: str) -> Optional[str]:
         return None
     if path == "/api/planning" and method not in ("GET", "HEAD"):
         return "admin"  # firestore.rules : planning modifiable par les admins
+    if path.startswith("/api/attestations"):
+        return "admin"  # attestations réservées aux administrateurs
     return "coach"
 
 
