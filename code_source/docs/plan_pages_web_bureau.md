@@ -29,8 +29,8 @@ web/
     alj-shell.js        Menu latéral, en-tête, contrôle connexion/rôle (startBureau())   [étape 0 : fait]
     alj-vue.js          Choix ordinateur / smartphone des pages PWA (script classique)  [étape 0 : fait]
     alj.css             Charte (reprise de la PWA) + mise en page ordinateur            [étape 0 : fait]
-    alj-members.js      Chargement crm_* + reconstruction v_adherents_legacy (extrait de index.html)  [étape 1]
-    alj-filters.js      Filtre « sous-catégories » repris de index.html (voir §3)        [étape 1]
+    alj-members.js      Chargement crm_* + reconstruction v_adherents_legacy (extrait de index.html)  [étape 1 : fait]
+    alj-filters.js      Filtre « sous-catégories » repris de index.html (voir §3)        [étape 1 : fait]
 ```
 
 - **Choix de la page d'accueil** (étape 0, fait) : les pages PWA (`/`, `/competitions`, `/index`) chargent
@@ -99,8 +99,8 @@ Page minimale : liens vers Adhérents, Outils, Compétitions et Version mobile. 
 | # | Étape | Contenu | Jours |
 |---|---|---|---|
 | 0 | Socle | `shared/*`, route `/bureau`, menu latéral, accueil à 4 liens, redirection ordinateur, tests de version | 1 — **fait (v13)** |
-| 1 | Adhérents | Tableau, détail, filtre sous-catégories repris de l'index, recherche | 1,5 |
-| 2 | E-mail | Bouton, fenêtre modèle/aperçu, envoi à un adhérent | 0,5 |
+| 1 | Adhérents | Tableau, détail, filtre sous-catégories repris de l'index, recherche | 1,5 — **fait (v14)** |
+| 2 | E-mail | Bouton, fenêtre modèle/aperçu, envoi à un adhérent | 0,5 — **fait (v15)** |
 | 3 | Attestation | Refactor, WeasyPrint, aperçu, envoi + date d'envoi | 2 |
 | 4 | Outils | Iframes carte et effectifs | 0,5 |
 | 5 | Recette | Tests navigateur sans écran, essai réel admin/coach, déploiement | 1 |

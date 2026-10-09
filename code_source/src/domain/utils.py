@@ -88,16 +88,24 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
         first = str(member.get("user_first_name") or member.get("first_name") or member.get("prenom") or "").strip().title()
         last = str(member.get("user_last_name") or member.get("last_name") or member.get("nom") or "").strip().upper()
         licence = str(member.get("licence_ffme") or member.get("num_licence") or "").strip()
+        tarif = str(member.get("tarif_name") or member.get("tarif") or "").strip()
+        season = str(member.get("season_name") or member.get("season") or "").strip()
     else:
         first = str(getattr(member, "user_first_name", getattr(member, "first_name", getattr(member, "prenom", ""))) or "").strip().title()
         last = str(getattr(member, "user_last_name", getattr(member, "last_name", getattr(member, "nom", ""))) or "").strip().upper()
         licence = str(getattr(member, "licence_ffme", getattr(member, "num_licence", "")) or "").strip()
+        tarif = str(getattr(member, "tarif_name", getattr(member, "tarif", "")) or "").strip()
+        season = str(getattr(member, "season_name", getattr(member, "season", "")) or "").strip()
 
     out = out.replace("{Prénom}", first)
     out = out.replace("{Nom}", last)
     out = out.replace("{first_name}", first)
     out = out.replace("{last_name}", last)
     out = out.replace("{num_licence}", licence)
+    if tarif:
+        out = out.replace("{tarif}", tarif)
+    if season:
+        out = out.replace("{season}", season)
 
     for key in ("no_competition", "name_competition", "montant_competition", "date_competition"):
         val = str(ctx.get(key) or "").strip()

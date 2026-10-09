@@ -1,5 +1,5 @@
 // Doit correspondre à <meta name="alj-web-version"> de competitions.html, index.html et bureau/*.html
-const CACHE_NAME = "alj-escalade-v13";
+const CACHE_NAME = "alj-escalade-v15";
 const ASSETS_TO_CACHE = [
   "/competitions",
   "/index",
@@ -13,6 +13,8 @@ const ASSETS_TO_CACHE = [
   "/static-web/alj-core.js",
   "/static-web/alj-shell.js",
   "/static-web/alj-vue.js",
+  "/static-web/alj-members.js",
+  "/static-web/alj-filters.js",
   "/manifest.webmanifest",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",

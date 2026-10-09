@@ -45,7 +45,8 @@ class TestBureauFiles(unittest.TestCase):
     def test_pages_exist(self):
         for name in ("index.html", "adherents.html", "outils.html"):
             self.assertTrue(os.path.exists(os.path.join(BUREAU, name)), name)
-        for name in ("alj.css", "alj-core.js", "alj-shell.js", "alj-vue.js"):
+        for name in ("alj.css", "alj-core.js", "alj-shell.js", "alj-vue.js",
+                      "alj-members.js", "alj-filters.js"):
             self.assertTrue(os.path.exists(os.path.join(SHARED, name)), name)
 
     def test_routes_serve_only_known_pages(self):
@@ -80,8 +81,56 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn(f'CACHE_NAME = "alj-escalade-v{version}"', sw)
         for asset in ("/bureau/", "/bureau/adherents", "/bureau/outils",
                       "/static-web/alj.css", "/static-web/alj-core.js",
-                      "/static-web/alj-shell.js", "/static-web/alj-vue.js"):
+                      "/static-web/alj-shell.js", "/static-web/alj-vue.js",
+                      "/static-web/alj-members.js", "/static-web/alj-filters.js"):
             self.assertIn(f'"{asset}"', sw)
+
+    def test_adherents_page_imports_exist_in_modules(self):
+        """Chaque symbole importé par adherents.html doit être exporté par alj-members.js et alj-filters.js."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        members_js = _read(os.path.join(SHARED, "alj-members.js"))
+        filters_js = _read(os.path.join(SHARED, "alj-filters.js"))
+
+        m_block = re.search(r"import\s*\{([^}]+)\}\s*from\s*\"/static-web/alj-members\.js\"", html, re.S).group(1)
+        for sym in [s.strip() for s in m_block.split(",") if s.strip()]:
+            self.assertRegex(members_js, rf"export (function|const|async function) {sym}\b", sym)
+
+        f_block = re.search(r"import\s*\{([^}]+)\}\s*from\s*\"/static-web/alj-filters\.js\"", html, re.S).group(1)
+        for sym in [s.strip() for s in f_block.split(",") if s.strip()]:
+            self.assertRegex(filters_js, rf"export (function|const|async function) {sym}\b", sym)
+
+    def test_adherents_page_elements(self):
+        """La page adherents.html contient le tableau, les filtres et le panneau de détail."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        for elem in ("members-table", "members-tbody", "detail-pane", "search-input",
+                      "season-select", "export-csv-btn", "status-chips", "filter-box"):
+            self.assertIn(f'id="{elem}"', html)
+
+    def test_adherents_email_modal_and_api_wiring(self):
+        """L'Étape 2 intègre la modale d'e-mail et le câblage aux endpoints d'e-mail."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        for elem in ("email-modal", "em-template-select", "em-subject", "em-body",
+                      "em-signature", "em-preview-box", "em-submit-btn", "em-cancel-btn"):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/api/email-templates")', html)
+        self.assertIn('apiFetch("/api/send-email"', html)
+
+    def test_apply_template_variables_adherents_extension(self):
+        """Les variables {tarif} et {season} sont correctement résolues pour les adhérents."""
+        from domain.utils import apply_template_variables
+        member = {
+            "first_name": "camille",
+            "last_name": "durand",
+            "licence_ffme": "654321",
+            "tarif_name": "Jeunes 2010",
+            "season_name": "2026-2027"
+        }
+        text = "Bonjour {first_name} {Nom}, votre inscription au groupe {tarif} pour la saison {season} (licence {num_licence}) est validée."
+        rendered = apply_template_variables(text, member)
+        self.assertEqual(
+            rendered,
+            "Bonjour Camille DURAND, votre inscription au groupe Jeunes 2010 pour la saison 2026-2027 (licence 654321) est validée."
+        )
 
     def test_pwa_entry_pages_check_device_before_rendering(self):
         """competitions.html et index.html chargent alj-vue.js avant Firebase (redirection ordinateur)."""

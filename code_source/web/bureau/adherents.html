@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="13">
-<title>ALJ Escalade — Bureau · Adhérents (v13)</title>
+<meta name="alj-web-version" content="15">
+<title>ALJ Escalade — Bureau · Adhérents (v15)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -15,18 +15,704 @@
 </head>
 <body>
 <div id="shell"></div>
+
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
+import { initFirebase, apiFetch } from "/static-web/alj-core.js";
+import {
+  startMembersListener,
+  normKey,
+  fmtDay,
+  fmtDate,
+  telHref,
+  STATUS_COLORS
+} from "/static-web/alj-members.js";
+import {
+  FILTER_KEY,
+  buildCreneauItems,
+  computeFilterCache,
+  allowedTarifKeys,
+  filterMembers,
+  sortMembers,
+  exportMembersCsv,
+  isWaiting
+} from "/static-web/alj-filters.js";
+
+const esc = s => (s == null ? "" : String(s))
+  .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 startBureau({
   page: "adherents",
   title: "Adhérents",
-  onReady: () => {
-    document.getElementById("content").innerHTML = `
-      <div class="card">
-        <h2>🚧 En construction</h2>
-        <p>Étape 1 : la liste des adhérents, avec le filtre par tarif de l'annuaire, arrive ici.</p>
-      </div>`;
+  onReady: ({ user, role, isAdmin }) => {
+    const content = document.getElementById("content");
+    content.innerHTML = `
+      <div class="toolbar-wrap">
+        <div class="toolbar-row">
+          <select id="season-select" class="select-input" title="Choisir la saison"></select>
+          <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher (nom, prénom, tarif, licence, e-mail, téléphone)…">
+          <button class="btn btn-muted btn-mini" id="toggle-filter-box" title="Afficher ou masquer la sélection des créneaux">📂 Créneaux / Tarifs</button>
+          <button class="btn btn-muted btn-mini" id="export-csv-btn" title="Télécharger la liste actuellement filtrée en fichier CSV">📥 Export CSV</button>
+        </div>
+
+        <div class="filter-box" id="filter-box" hidden>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <b>🧗 Sélection des créneaux & tarifs</b>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-muted btn-mini" id="cren-all">Tout cocher</button>
+              <button class="btn btn-muted btn-mini" id="cren-none">Tout décocher</button>
+            </div>
+          </div>
+          <p class="muted" style="margin:0 0 8px; font-size:11.5px;">
+            Cochez ou décochez les groupes pour affiner l'affichage. Par défaut, les listes d'attente sont exclues.
+          </p>
+          <div id="creneau-list"></div>
+        </div>
+
+        <div class="toolbar-row" style="justify-content:space-between;">
+          <div class="filter-chips" id="status-chips"></div>
+          <span class="muted" id="count-summary" style="font-size:12.5px;">Chargement des données…</span>
+        </div>
+      </div>
+
+      <div class="adherents-layout">
+        <div class="table-pane">
+          <div class="data-table-wrap">
+            <table class="data-table" id="members-table">
+              <thead>
+                <tr>
+                  <th data-sort="last_name">Nom <span class="sort-ico">▲</span></th>
+                  <th data-sort="first_name">Prénom <span class="sort-ico"></span></th>
+                  <th data-sort="categorie">Catégorie <span class="sort-ico"></span></th>
+                  <th data-sort="tarif_name">Tarif <span class="sort-ico"></span></th>
+                  <th data-sort="status_norm">Statut <span class="sort-ico"></span></th>
+                  <th data-sort="creneau_groupe">Créneau <span class="sort-ico"></span></th>
+                  <th data-sort="email_primary">E-mail <span class="sort-ico"></span></th>
+                  <th data-sort="phone">Téléphone <span class="sort-ico"></span></th>
+                  <th data-sort="licence_ffme">Licence <span class="sort-ico"></span></th>
+                </tr>
+              </thead>
+              <tbody id="members-tbody">
+                <tr><td colspan="9" style="text-align:center; padding:30px;" class="muted">Chargement en cours…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="detail-pane" id="detail-pane">
+          <div class="empty-detail">
+            Sélectionnez un adhérent dans le tableau pour afficher sa fiche complète et ses options.
+          </div>
+        </div>
+      </div>
+
+      <!-- Modale d'envoi d'e-mail unitaire (Administrateurs uniquement) -->
+      <div id="email-modal" class="modal-overlay" style="display:none">
+        <div class="modal-content card">
+          <div class="modal-header">
+            <div class="m-name" style="font-size:16px;">✉️ Envoyer un e-mail à l'adhérent</div>
+            <button class="icon-btn" id="email-modal-close" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px; border:none; cursor:pointer;">✕</button>
+          </div>
+
+          <div class="card" style="background:#F8FAFC; border:1px solid #E2E8F0; margin-bottom:12px; padding:10px 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <b id="em-dest-name" style="font-size:14px; color:#1E293B;">—</b>
+                <div id="em-dest-email" style="font-size:12.5px; color:var(--blue); margin-top:2px;">—</div>
+              </div>
+              <span id="em-dest-badge"></span>
+            </div>
+            <div id="em-no-email-warn" style="display:none; color:var(--red); font-weight:700; font-size:12px; margin-top:6px;">
+              ⚠️ Cet adhérent n'a pas d'adresse e-mail renseignée. L'envoi est impossible.
+            </div>
+          </div>
+
+          <label class="fld">Modèle d'e-mail</label>
+          <select id="em-template-select" class="select-input" style="width:100%; margin-bottom:8px;">
+            <option value="">-- E-mail libre / personnalisé --</option>
+          </select>
+
+          <label class="fld">Sujet de l'e-mail *</label>
+          <input type="text" id="em-subject" class="search-input" placeholder="Sujet de votre message…" style="width:100%; margin-bottom:8px;">
+
+          <label class="fld">Message (Balises : {first_name}, {last_name}, {num_licence}, {tarif}, {season}) *</label>
+          <textarea id="em-body" class="fld-input" rows="6" placeholder="Bonjour {first_name}, …" style="width:100%; margin-bottom:8px;"></textarea>
+
+          <label style="display:flex; align-items:center; gap:6px; margin:6px 0 12px; font-size:12.5px; color:#334155; cursor:pointer;">
+            <input type="checkbox" id="em-signature" checked style="width:auto; margin:0; accent-color:var(--blue);">
+            <span>Ajouter la signature officielle ALJ Escalade</span>
+          </label>
+
+          <div class="section-h" style="margin:8px 0 6px;">👁 Aperçu en direct</div>
+          <div id="em-preview-box" class="card" style="background:#F8FAFC; border:1px dashed #CBD5E1; font-size:12.5px; line-height:1.5; white-space:pre-wrap; max-height:140px; overflow-y:auto; margin-bottom:12px;"></div>
+
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn btn-muted" id="em-cancel-btn">Annuler</button>
+            <button class="btn btn-primary" id="em-submit-btn">🚀 Envoyer via Gmail</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="toast"></div>
+    `;
+
+    function toast(msg, ms = 4000) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    // État local de la page
+    let rawMembersData = { members: [], seasons: [], activeSeason: "", creneaux: [], planning: [] };
+    let itemsCache = [];
+    let filterCache = { members: [], others: {} };
+
+    let filters = Object.assign(
+      { status: "", season: "", groups: {}, others: {}, search: "" },
+      (function() {
+        try { return JSON.parse(localStorage.getItem(FILTER_KEY) || "{}"); } catch (e) { return {}; }
+      })()
+    );
+
+    let currentSeason = filters.season || "";
+    let sortKey = "last_name";
+    let sortAsc = true;
+    let selectedUserId = null;
+    let displayedMembers = [];
+
+    // Modèles d'e-mails chargés depuis l'API
+    let emailTemplates = [];
+    let activeEmailMember = null;
+
+    async function loadEmailTemplates() {
+      try {
+        const res = await apiFetch("/api/email-templates");
+        if (res.ok) {
+          const data = await res.json();
+          emailTemplates = data.templates || [];
+          const sel = document.getElementById("em-template-select");
+          if (sel) {
+            sel.innerHTML = '<option value="">-- E-mail libre / personnalisé --</option>' +
+              emailTemplates.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
+          }
+        }
+      } catch (e) {
+        console.warn("Impossible de charger les modèles d'e-mails :", e);
+      }
+    }
+
+    function saveFilters() {
+      filters.season = currentSeason;
+      filters.search = document.getElementById("search-input").value;
+      try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch (e) {}
+    }
+
+    function renderStatusBadge(st) {
+      const color = STATUS_COLORS[st] || "#94A3B8";
+      return `<span class="badge" style="background:${color}">${esc(st || "—")}</span>`;
+    }
+
+    function updateEmailPreview() {
+      const previewBox = document.getElementById("em-preview-box");
+      if (!previewBox || !activeEmailMember) return;
+
+      const m = activeEmailMember;
+      const ctx = {
+        first_name: m.first_name || "",
+        last_name: m.last_name || "",
+        Prénom: m.first_name || "",
+        Nom: m.last_name || "",
+        num_licence: m.licence_ffme || "",
+        tarif: m.tarif_name || "",
+        season: m.season_name || currentSeason
+      };
+
+      let subj = document.getElementById("em-subject").value || "";
+      let body = document.getElementById("em-body").value || "";
+
+      for (const [k, v] of Object.entries(ctx)) {
+        const reg = new RegExp("{" + k + "}", "g");
+        subj = subj.replace(reg, v);
+        body = body.replace(reg, v);
+      }
+
+      const addSig = document.getElementById("em-signature").checked;
+      const sigText = addSig ? "\n\n---\nALJ Escalade — Section de l'Amicale Laïque de Jonage\ncontact@alj-escalade.fr" : "";
+
+      previewBox.textContent = `Sujet : ${subj}\n\n${body}${sigText}`;
+    }
+
+    function openEmailModal(member) {
+      if (!member) return;
+      activeEmailMember = member;
+
+      document.getElementById("em-dest-name").textContent = `${member.first_name} ${member.last_name}`;
+      const email = (member.email_primary || "").trim();
+      document.getElementById("em-dest-email").textContent = email ? `✉️ ${email}` : "Aucune adresse e-mail";
+      document.getElementById("em-dest-badge").innerHTML = renderStatusBadge(member.status_norm);
+
+      const hasValidEmail = email && email.includes("@");
+      document.getElementById("em-no-email-warn").style.display = hasValidEmail ? "none" : "block";
+      document.getElementById("em-submit-btn").disabled = !hasValidEmail;
+
+      document.getElementById("em-template-select").value = "";
+      document.getElementById("em-subject").value = "";
+      document.getElementById("em-body").value = "";
+      updateEmailPreview();
+
+      document.getElementById("email-modal").style.display = "flex";
+    }
+
+    function closeEmailModal() {
+      document.getElementById("email-modal").style.display = "none";
+      activeEmailMember = null;
+    }
+
+    // Gestion du sélecteur de modèle d'e-mail
+    document.getElementById("em-template-select").addEventListener("change", e => {
+      const tmplName = e.target.value;
+      if (!tmplName) return;
+      const found = emailTemplates.find(t => t.name === tmplName);
+      if (found) {
+        document.getElementById("em-subject").value = found.subject || "";
+        document.getElementById("em-body").value = found.body || "";
+        updateEmailPreview();
+      }
+    });
+
+    document.getElementById("em-subject").addEventListener("input", updateEmailPreview);
+    document.getElementById("em-body").addEventListener("input", updateEmailPreview);
+    document.getElementById("em-signature").addEventListener("change", updateEmailPreview);
+    document.getElementById("email-modal-close").addEventListener("click", closeEmailModal);
+    document.getElementById("em-cancel-btn").addEventListener("click", closeEmailModal);
+    document.getElementById("email-modal").addEventListener("click", e => {
+      if (e.target.id === "email-modal") closeEmailModal();
+    });
+
+    // Envoi de l'e-mail à l'adhérent
+    document.getElementById("em-submit-btn").addEventListener("click", async () => {
+      if (!activeEmailMember) return;
+      const m = activeEmailMember;
+      const email = (m.email_primary || "").trim();
+      if (!email || !email.includes("@")) {
+        toast("⚠️ Adresse e-mail invalide pour cet adhérent.");
+        return;
+      }
+
+      const subj = document.getElementById("em-subject").value.trim();
+      const body = document.getElementById("em-body").value.trim();
+      if (!subj || !body) {
+        toast("⚠️ Veuillez renseigner le sujet et le message.");
+        return;
+      }
+
+      if (!confirm(`Envoyer cet e-mail à ${m.first_name} ${m.last_name} <${email}> ?`)) {
+        return;
+      }
+
+      const submitBtn = document.getElementById("em-submit-btn");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "⏳ Envoi en cours…";
+
+      try {
+        const payload = {
+          subject: subj,
+          body: body,
+          add_signature: document.getElementById("em-signature").checked,
+          recipients: [{
+            id: m.user_id,
+            first_name: m.first_name,
+            last_name: m.last_name,
+            email: email,
+            num_licence: m.licence_ffme,
+            tarif: m.tarif_name,
+            season: m.season_name
+          }]
+        };
+
+        const res = await apiFetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "success" || data.status === "partial") {
+            toast(`✅ E-mail envoyé avec succès à ${m.first_name} ${m.last_name} !`);
+            closeEmailModal();
+          } else {
+            const errDetail = data.message || (data.details && data.details[0] && data.details[0].error) || "Erreur d'envoi.";
+            toast("❌ Échec d'envoi : " + errDetail, 9000);
+          }
+        } else {
+          toast("❌ Erreur serveur : " + (res.statusText || res.status), 9000);
+        }
+      } catch (err) {
+        console.error("Erreur d'envoi d'e-mail :", err);
+        toast("❌ Erreur réseau ou de connexion : " + err.message, 9000);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "🚀 Envoyer via Gmail";
+      }
+    });
+
+    function renderDetailPanel(member) {
+      const panel = document.getElementById("detail-pane");
+      if (!member) {
+        panel.innerHTML = `<div class="empty-detail">Sélectionnez un adhérent dans le tableau pour afficher sa fiche complète.</div>`;
+        return;
+      }
+
+      const rows = [];
+      const addRow = (icon, label, val) => {
+        if (val !== "" && val != null) {
+          rows.push(`<tr><th>${icon} ${esc(label)}</th><td>${esc(val)}</td></tr>`);
+        }
+      };
+
+      addRow("🎂", "Date de naissance", member.birth_date ? `${fmtDay(member.birth_date)}${member.age != null ? ` (${member.age} ans)` : ""}` : "");
+      addRow("⚧", "Sexe", member.gender);
+      addRow("📍", "Adresse", [member.address, [member.zip_code, member.city].filter(Boolean).join(" ")].filter(Boolean).join(", "));
+      addRow("📞", "Téléphone", member.phone);
+      addRow("✉️", "E-mail principal", member.email_primary);
+      addRow("✉️", "E-mail secondaire", member.email_secondary);
+      addRow("🪪", "Licence FFME", member.licence_ffme);
+      if (member.emergency1_name || member.emergency1_phone) {
+        addRow("🚨", "Urgence 1", [member.emergency1_name, member.emergency1_phone].filter(Boolean).join(" · "));
+      }
+      if (member.emergency2_name || member.emergency2_phone) {
+        addRow("🚨", "Urgence 2", [member.emergency2_name, member.emergency2_phone].filter(Boolean).join(" · "));
+      }
+      addRow("🩺", "Santé & Engagement", [
+        member.health_commitment && ("engagement : " + member.health_commitment),
+        member.document_sante && ("document : " + member.document_sante)
+      ].filter(Boolean).join(" · "));
+      addRow("📷", "Droit à l'image", member.photo_auth);
+      addRow("🔴", "Badge rouge", member.badge_rouge);
+      addRow("🧗", "Autonomie bloc", member.autonomie_bloc);
+      if (member.payer && normKey(member.payer) !== normKey(member.first_name + " " + member.last_name)) {
+        addRow("💳", "Payeur", member.payer + (member.payer_email ? ` (${member.payer_email})` : ""));
+      }
+      addRow("🧾", "Commande HelloAsso", [fmtDay(member.order_date), member.order_ref].filter(Boolean).join(" · "));
+      addRow("💶", "Montant réglé", member.amount != null && member.amount !== "" ? `${member.amount} €` : "");
+      addRow("🧗", "Créneau", member.creneau_groupe ? `${member.creneau_groupe}${member.creneau_details ? ` (${member.creneau_details})` : ""}` : "");
+
+      const tel = telHref(member.phone);
+      const email = member.email_primary || "";
+
+      panel.innerHTML = `
+        <div class="detail-header">
+          <div>
+            <div class="detail-name">${esc(member.first_name)} ${esc(member.last_name)}</div>
+            <div class="detail-sub">${esc(member.tarif_name || "—")} · Saison ${esc(member.season_name)}</div>
+          </div>
+          <div>${renderStatusBadge(member.status_norm)}</div>
+        </div>
+
+        <div class="detail-actions">
+          ${isAdmin ? `
+            <button class="btn btn-primary btn-mini" id="btn-action-email" title="Envoyer un e-mail personnalisé à cet adhérent">✉️ E-mail</button>
+            <button class="btn btn-muted btn-mini" id="btn-action-attestation" title="Générer et envoyer l'attestation de paiement (Étape 3)">📄 Attestation</button>
+          ` : `
+            <span class="muted" style="font-size:11.5px; font-style:italic;">👁️ Mode consultation coach (actions réservées aux administrateurs)</span>
+          `}
+        </div>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          ${tel ? `<a class="btn btn-muted btn-mini" href="tel:${esc(tel)}" style="text-decoration:none;">📞 Appeler</a>` : ""}
+          ${email ? `<a class="btn btn-muted btn-mini" href="mailto:${esc(email)}" style="text-decoration:none;">✉️ Écrire</a>` : ""}
+        </div>
+
+        <table class="detail-kv">
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      `;
+
+      if (isAdmin) {
+        document.getElementById("btn-action-email")?.addEventListener("click", () => {
+          openEmailModal(member);
+        });
+        document.getElementById("btn-action-attestation")?.addEventListener("click", () => {
+          alert(`📄 Génération d'attestation pour ${member.first_name} ${member.last_name}\n\nCette fonctionnalité sera activée à l'Étape 3 du portail bureau (WeasyPrint PDF en mémoire).`);
+        });
+      }
+    }
+
+    function renderFilterChips() {
+      const chipsEl = document.getElementById("status-chips");
+      chipsEl.innerHTML = "";
+      const totalMembers = filterCache.members ? filterCache.members.length : 0;
+
+      const addChip = (label, val, count) => {
+        const span = document.createElement("span");
+        span.className = "filter-chip" + ((filters.status || "") === val ? " active" : "");
+        span.textContent = `${label} (${count})`;
+        span.addEventListener("click", () => {
+          filters.status = (filters.status === val) ? "" : val;
+          saveFilters();
+          renderFilterChips();
+          refreshDisplay();
+        });
+        chipsEl.appendChild(span);
+      };
+
+      addChip("Tous", "", totalMembers);
+      for (const st of ["Validé", "Traité", "Terminé", "En cours", "Annulé"]) {
+        const count = filterCache.members ? filterCache.members.filter(m => m.status_norm === st).length : 0;
+        if (count > 0) addChip(st, st, count);
+      }
+    }
+
+    function renderFilterCreneaux() {
+      const wrap = document.getElementById("creneau-list");
+      wrap.innerHTML = "";
+
+      for (const it of itemsCache) {
+        if (it.kind === "section" || it.kind === "sub") {
+          const d = document.createElement("div");
+          d.className = it.kind === "section" ? "section-h" : "subsection-h";
+          d.textContent = (it.kind === "section" ? "📁 " : "📂 ") + it.label;
+          wrap.appendChild(d);
+        } else {
+          wrap.appendChild(createCreneauRow(it.label, it.raw, it.count, false));
+        }
+      }
+
+      const otherKeys = Object.keys(filterCache.others || {}).sort((a, b) => a.localeCompare(b, "fr"));
+      if (otherKeys.length) {
+        const d = document.createElement("div");
+        d.className = "section-h";
+        d.textContent = "📁 Autres tarifs (hors créneau)";
+        wrap.appendChild(d);
+        for (const t of otherKeys) {
+          wrap.appendChild(createCreneauRow(t, "other:" + t, filterCache.others[t], true));
+        }
+      }
+    }
+
+    function createCreneauRow(label, rawName, count, isOther) {
+      const labelEl = document.createElement("label");
+      labelEl.className = "opt";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      const store = isOther ? filters.others : filters.groups;
+      cb.checked = store[rawName] !== undefined ? store[rawName] : !isWaiting(rawName, label);
+      cb.addEventListener("change", () => {
+        store[rawName] = cb.checked;
+        saveFilters();
+        refreshDisplay();
+      });
+
+      const span = document.createElement("span");
+      span.textContent = label;
+      const countEl = document.createElement("span");
+      countEl.className = "n";
+      countEl.textContent = count || 0;
+
+      labelEl.append(cb, span, countEl);
+      return labelEl;
+    }
+
+    function refreshDisplay() {
+      const allowed = allowedTarifKeys(itemsCache, filterCache, filters);
+      const filtered = filterMembers(filterCache.members || [], filters, allowed);
+      displayedMembers = sortMembers(filtered, sortKey, sortAsc);
+
+      // Compteurs
+      const summaryEl = document.getElementById("count-summary");
+      summaryEl.textContent = `${displayedMembers.length} adhérent${displayedMembers.length > 1 ? "s" : ""} affiché${displayedMembers.length > 1 ? "s" : ""} sur ${filterCache.members.length} (saison ${currentSeason})`;
+
+      // Rendu du tableau
+      const tbody = document.getElementById("members-tbody");
+      if (!displayedMembers.length) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px;" class="muted">Aucun adhérent ne correspond aux filtres actifs.</td></tr>`;
+      } else {
+        tbody.innerHTML = displayedMembers.map(m => {
+          const isSelected = String(m.user_id) === String(selectedUserId);
+          return `
+            <tr data-id="${esc(m.user_id)}"${isSelected ? ' class="selected"' : ""}>
+              <td class="cell-name">${esc(m.last_name)}</td>
+              <td>${esc(m.first_name)}</td>
+              <td class="cell-sub">${esc(m.categorie || "—")}</td>
+              <td class="cell-sub">${esc(m.tarif_name || "—")}</td>
+              <td>${renderStatusBadge(m.status_norm)}</td>
+              <td class="cell-sub">${esc(m.creneau_groupe || "—")}</td>
+              <td>${m.email_primary ? `<a href="mailto:${esc(m.email_primary)}" onclick="event.stopPropagation()">${esc(m.email_primary)}</a>` : "—"}</td>
+              <td>${m.phone ? `<a href="tel:${esc(telHref(m.phone))}" onclick="event.stopPropagation()">${esc(m.phone)}</a>` : "—"}</td>
+              <td class="cell-sub">${esc(m.licence_ffme || "—")}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      // Mise à jour de la sélection
+      if (selectedUserId) {
+        const found = displayedMembers.find(m => String(m.user_id) === String(selectedUserId));
+        if (found) {
+          renderDetailPanel(found);
+        } else if (displayedMembers.length > 0) {
+          selectedUserId = displayedMembers[0].user_id;
+          renderDetailPanel(displayedMembers[0]);
+          const firstRow = tbody.querySelector(`tr[data-id="${selectedUserId}"]`);
+          if (firstRow) firstRow.classList.add("selected");
+        } else {
+          renderDetailPanel(null);
+        }
+      } else if (displayedMembers.length > 0) {
+        selectedUserId = displayedMembers[0].user_id;
+        renderDetailPanel(displayedMembers[0]);
+        const firstRow = tbody.querySelector(`tr[data-id="${selectedUserId}"]`);
+        if (firstRow) firstRow.classList.add("selected");
+      } else {
+        renderDetailPanel(null);
+      }
+
+      // Indicateurs de tri dans les en-têtes
+      document.querySelectorAll("#members-table th[data-sort]").forEach(th => {
+        const k = th.dataset.sort;
+        const ico = th.querySelector(".sort-ico");
+        if (k === sortKey) {
+          th.classList.add("sorted");
+          if (ico) ico.textContent = sortAsc ? "▲" : "▼";
+        } else {
+          th.classList.remove("sorted");
+          if (ico) ico.textContent = "";
+        }
+      });
+    }
+
+    // Gestion du clic de tri sur les colonnes du tableau
+    document.querySelectorAll("#members-table th[data-sort]").forEach(th => {
+      th.addEventListener("click", () => {
+        const k = th.dataset.sort;
+        if (sortKey === k) {
+          sortAsc = !sortAsc;
+        } else {
+          sortKey = k;
+          sortAsc = true;
+        }
+        refreshDisplay();
+      });
+    });
+
+    // Clic sur une ligne du tableau pour sélectionner un adhérent
+    document.getElementById("members-tbody").addEventListener("click", e => {
+      const tr = e.target.closest("tr[data-id]");
+      if (!tr) return;
+      const uid = tr.dataset.id;
+      selectedUserId = uid;
+      document.querySelectorAll("#members-tbody tr").forEach(r => r.classList.remove("selected"));
+      tr.classList.add("selected");
+      const member = displayedMembers.find(m => String(m.user_id) === String(uid));
+      if (member) renderDetailPanel(member);
+    });
+
+    // Recherche instantanée
+    const searchInput = document.getElementById("search-input");
+    searchInput.value = filters.search || "";
+    searchInput.addEventListener("input", () => {
+      saveFilters();
+      refreshDisplay();
+    });
+
+    // Sélecteur de saison
+    const seasonSelect = document.getElementById("season-select");
+    seasonSelect.addEventListener("change", e => {
+      currentSeason = e.target.value;
+      saveFilters();
+      filterCache = computeFilterCache(rawMembersData.members, rawMembersData.creneaux, itemsCache, currentSeason);
+      renderFilterChips();
+      renderFilterCreneaux();
+      refreshDisplay();
+    });
+
+    // Bascule du volet de filtrage des créneaux
+    const filterBox = document.getElementById("filter-box");
+    const toggleFilterBtn = document.getElementById("toggle-filter-box");
+    toggleFilterBtn.addEventListener("click", () => {
+      filterBox.hidden = !filterBox.hidden;
+      toggleFilterBtn.classList.toggle("btn-primary", !filterBox.hidden);
+    });
+
+    // Boutons tout cocher / tout décocher
+    document.getElementById("cren-all").addEventListener("click", () => {
+      for (const it of itemsCache) if (it.kind === "group") filters.groups[it.raw] = true;
+      if (filterCache.others) for (const t of Object.keys(filterCache.others)) filters.others["other:" + t] = true;
+      saveFilters();
+      renderFilterCreneaux();
+      refreshDisplay();
+    });
+    document.getElementById("cren-none").addEventListener("click", () => {
+      for (const it of itemsCache) if (it.kind === "group") filters.groups[it.raw] = false;
+      if (filterCache.others) for (const t of Object.keys(filterCache.others)) filters.others["other:" + t] = false;
+      saveFilters();
+      renderFilterCreneaux();
+      refreshDisplay();
+    });
+
+    // Bouton Export CSV
+    document.getElementById("export-csv-btn").addEventListener("click", () => {
+      if (!displayedMembers.length) {
+        toast("⚠️ Aucun adhérent à exporter avec les filtres actuels.");
+        return;
+      }
+      exportMembersCsv(displayedMembers, currentSeason);
+    });
+
+    // Chargement des modèles d'e-mails si admin
+    if (isAdmin) {
+      loadEmailTemplates();
+    }
+
+    // Connexion Firestore et écoute temps réel
+    const { db } = initFirebase();
+    startMembersListener(db, {
+      onData: data => {
+        rawMembersData = data;
+        itemsCache = buildCreneauItems(data.creneaux);
+
+        // Initialisation de la saison
+        seasonSelect.innerHTML = data.seasons.map(s => `
+          <option value="${esc(s)}">${esc(s)}${s === data.activeSeason ? " (active)" : ""}</option>
+        `).join("");
+
+        if (!data.seasons.includes(currentSeason)) {
+          currentSeason = data.activeSeason || data.seasons[0] || "";
+        }
+        seasonSelect.value = currentSeason;
+
+        filterCache = computeFilterCache(data.members, data.creneaux, itemsCache, currentSeason);
+
+        // Initialisation des filtres de groupes si non encore définis
+        for (const it of itemsCache) {
+          if (it.kind === "group" && filters.groups[it.raw] === undefined) {
+            filters.groups[it.raw] = !isWaiting(it.raw, it.label);
+          }
+        }
+        for (const t of Object.keys(filterCache.others)) {
+          const k = "other:" + t;
+          if (filters.others[k] === undefined) {
+            filters.others[k] = !isWaiting(t, t);
+          }
+        }
+
+        renderFilterChips();
+        renderFilterCreneaux();
+        refreshDisplay();
+      },
+      onStatus: msg => {
+        const syncEl = document.getElementById("sync-info");
+        if (syncEl) syncEl.textContent = msg;
+      },
+      onError: err => {
+        console.error("Erreur de synchronisation des adhérents :", err);
+      }
+    });
   }
 });
 </script>

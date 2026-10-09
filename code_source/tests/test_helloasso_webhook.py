@@ -59,6 +59,7 @@ class TestHelloAssoWebhookService(unittest.TestCase):
         self.assertEqual(items[0]["id"], 9001)
         self.assertEqual(items[0]["amount"], 1800)
 
+    @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.get_app_setting", return_value="")
     @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.apply_helloasso_payment")
     @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.set_item_link")
     @patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.sync_helloasso_mirror")
@@ -72,7 +73,8 @@ class TestHelloAssoWebhookService(unittest.TestCase):
         mock_list_links,
         mock_sync_mirror,
         mock_set_link,
-        mock_apply_payment
+        mock_apply_payment,
+        mock_get_setting
     ):
         """Vérifie le rapprochement complet d'un item avec mise à jour du paiement."""
         mock_comp = MagicMock()
