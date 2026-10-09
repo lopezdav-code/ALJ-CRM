@@ -833,13 +833,31 @@ class CompetitionsPage(QWidget):
         col1.addWidget(self.input_id_ffme)
         row1.addLayout(col1, 1)
         col2 = QVBoxLayout()
-        col2.addWidget(field_label("Date de la compétition"))
+        col2.addWidget(field_label("Date de début"))
         self.input_date = QDateEdit()
         self.input_date.setCalendarPopup(True)
         self.input_date.setDisplayFormat("dd/MM/yyyy")
         self.input_date.setStyleSheet("QDateEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px; }")
         col2.addWidget(self.input_date)
         row1.addLayout(col2, 1)
+        col2b = QVBoxLayout()
+        col2b.addWidget(field_label("Date de fin"))
+        fin_row = QHBoxLayout()
+        self.input_date_fin = QDateEdit()
+        self.input_date_fin.setCalendarPopup(True)
+        self.input_date_fin.setDisplayFormat("dd/MM/yyyy")
+        self.input_date_fin.setStyleSheet("QDateEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px; }")
+        fin_row.addWidget(self.input_date_fin, 1)
+        self.btn_duree_2j = QPushButton("2 jours")
+        self.btn_duree_2j.setToolTip("Fin = début + 1 jour (la date de fin reste modifiable)")
+        self.btn_duree_2j.clicked.connect(lambda: self.input_date_fin.setDate(self.input_date.date().addDays(1)))
+        fin_row.addWidget(self.btn_duree_2j)
+        col2b.addLayout(fin_row)
+        row1.addLayout(col2b, 1)
+        # Par défaut la fin suit le début ; une saisie manuelle de la fin coupe ce lien.
+        self._fin_auto = True
+        self.input_date.dateChanged.connect(self._on_date_debut_changed)
+        self.input_date_fin.userDateChanged.connect(lambda _d: setattr(self, "_fin_auto", False))
         col3 = QVBoxLayout()
         col3.addWidget(field_label("Tarif d'inscription (€)"))
         self.input_prix = QDoubleSpinBox()
@@ -1235,6 +1253,9 @@ class CompetitionsPage(QWidget):
             d = datetime.date.fromisoformat(c.date_competition)
             from PySide6.QtCore import QDate
             self.input_date.setDate(QDate(d.year, d.month, d.day))
+            df = datetime.date.fromisoformat(c.date_fin) if c.date_fin else d
+            self.input_date_fin.setDate(QDate(df.year, df.month, df.day))
+            self._fin_auto = df == d
         self.input_prix.setValue(c.prix)
         self.input_statut.setCurrentIndex(
             list(LIBELLES_STATUT_COMPETITION.keys()).index(c.statut)
@@ -1255,6 +1276,12 @@ class CompetitionsPage(QWidget):
         select_coach(self.input_coach3, c.coach3_id)
         
         self.details_hint.setText(f"Édition de « {c.nom} » (ID interne #{c.id}).")
+
+    def _on_date_debut_changed(self, qd):
+        """La date de fin suit le début tant qu'elle n'a pas été saisie à la main ;
+        elle ne peut jamais précéder le début."""
+        if getattr(self, "_fin_auto", True) or self.input_date_fin.date() < qd:
+            self.input_date_fin.setDate(qd)
 
     def _clear_form(self):
         self.input_nom.clear()
@@ -1289,6 +1316,10 @@ class CompetitionsPage(QWidget):
         comp.nom = nom
         comp.id_ffme = self.input_id_ffme.text().strip()
         comp.date_competition = f"{d.year():04d}-{d.month():02d}-{d.day():02d}"
+        df = self.input_date_fin.date()
+        if df < d:
+            df = d
+        comp.date_fin = f"{df.year():04d}-{df.month():02d}-{df.day():02d}"
         comp.prix = round(self.input_prix.value(), 2)
         comp.statut = list(LIBELLES_STATUT_COMPETITION.keys())[self.input_statut.currentIndex()]
         comp.coach1_id = self.input_coach1.currentData()

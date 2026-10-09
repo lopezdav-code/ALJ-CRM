@@ -34,6 +34,16 @@ def normalize_key_part(s) -> str:
     s = normalize_string(s)
     return s.replace("-", "").replace(" ", "").replace(":", "")
 
+def format_periode(debut, fin=None) -> str:
+    """Période d'une compétition pour les e-mails : « 12/03/2026 » ou
+    « 12/03/2026 au 13/03/2026 » (fin vide ou identique au début = un seul jour)."""
+    def fr(v):
+        parts = str(v or "").strip().split("-")
+        return f"{parts[2][:2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else str(v or "").strip()
+    d, f = fr(debut), fr(fin)
+    return d if (not f or f == d or not d) else f"{d} au {f}"
+
+
 def format_montant(prix) -> str:
     """Formate un montant en euros pour les e-mails : 15 -> « 15 », 15.5 -> « 15,50 »
     (séparateur décimal français, centimes nuls omis). None / vide / invalide -> « »."""

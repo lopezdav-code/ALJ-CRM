@@ -75,7 +75,8 @@ class Competition:
     id: int = None
     id_ffme: str = ""
     nom: str = ""
-    date_competition: str = ""       # ISO AAAA-MM-JJ
+    date_competition: str = ""       # date de début, ISO AAAA-MM-JJ
+    date_fin: str = ""               # date de fin ISO ; vide = même jour que le début
     prix: float = 0.0                # tarif d'inscription en euros
     statut: str = STATUT_EN_PREPARATION
     helloasso_ref: str = ""          # slug ou URL de la campagne HelloAsso dédiée
@@ -94,6 +95,7 @@ class Competition:
             "id_ffme": self.id_ffme,
             "nom": self.nom,
             "date_competition": self.date_competition,
+            "date_fin": self.date_fin,
             "prix": self.prix,
             "statut": self.statut,
             "helloasso_ref": self.helloasso_ref,
@@ -111,6 +113,7 @@ class Competition:
             id_ffme=str(row.get("id_ffme") or ""),
             nom=str(row.get("nom") or ""),
             date_competition=str(row.get("date_competition") or ""),
+            date_fin=str(row.get("date_fin") or ""),
             prix=float(row.get("prix") or 0.0),
             statut=str(row.get("statut") or STATUT_EN_PREPARATION),
             helloasso_ref=str(row.get("helloasso_ref") or ""),

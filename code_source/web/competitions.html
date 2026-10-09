@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="11">
-<title>ALJ Escalade — Gestion des Compétitions (v11)</title>
+<meta name="alj-web-version" content="12">
+<title>ALJ Escalade — Gestion des Compétitions (v12)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -156,7 +156,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v11</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v12</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="annuaire-link" href="/index" title="Annuaire des adhérents" style="display:none;align-items:center;text-decoration:none">📇</a>
@@ -213,8 +213,15 @@
           <input type="text" id="f-idffme" placeholder="EVT-2026-001">
         </div>
         <div>
-          <label class="fld">Date</label>
+          <label class="fld">Date de début</label>
           <input type="date" id="f-date">
+        </div>
+        <div>
+          <label class="fld">Date de fin</label>
+          <div style="display:flex;gap:6px">
+            <input type="date" id="f-date-fin" style="flex:1;min-width:0">
+            <button type="button" class="btn" id="btn-2jours" title="Fin = début + 1 jour (modifiable)" style="white-space:nowrap">2 jours</button>
+          </div>
         </div>
       </div>
       <div class="grid3" style="margin-top:2px">
@@ -1031,7 +1038,7 @@ function todayIso() {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 /* Épreuve passée = date strictement antérieure à aujourd'hui (les épreuves sans date ne le sont jamais). */
-function isPastComp(c) { return !!(c && c.date_competition) && String(c.date_competition) < todayIso(); }
+function isPastComp(c) { return !!(c && c.date_competition) && String(c.date_fin || c.date_competition) < todayIso(); }
 /* <option> du sélecteur d'épreuves : actives d'abord, archivées dans un groupe à part. */
 function compOptionsHtml(list) {
   const opt = c => `<option value="${esc(String(c.id))}">${esc(c.nom)} (${esc(c.date_competition || "?")})</option>`;
@@ -1096,7 +1103,7 @@ function compCardHtml(c) {
       <div class="row-flex">
         <div style="flex:1;min-width:0">
           <div class="m-name">${esc(c.nom)}</div>
-          <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(c.date_competition || "sans date")} · 💶 ${Number(c.prix || 0).toFixed(2)} €</div>
+          <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(periodeTxt(c))} · 💶 ${Number(c.prix || 0).toFixed(2)} €</div>
           <div class="m-sub" style="margin-top:2px; color: #1E3A8A; font-weight: 600;">
             (${nbParticipe} participant${nbParticipe > 1 ? "s" : ""} · ${nbEnAttente} en attente · ${nbPaye} payé${nbPaye > 1 ? "s" : ""})
           </div>
@@ -1166,6 +1173,8 @@ function openEdit(id) {
   $("#f-nom").value = c.nom || "";
   $("#f-idffme").value = c.id_ffme || "";
   $("#f-date").value = c.date_competition || "";
+  $("#f-date-fin").value = c.date_fin || c.date_competition || "";
+  finAuto = !c.date_fin || c.date_fin === c.date_competition;
   $("#f-prix").value = c.prix != null ? c.prix : 0;
   $("#f-statut").value = c.statut || "en_preparation";
   populateCoachDropdowns();
@@ -1196,11 +1205,39 @@ function openCreateForm() {
   const nom = $("#f-nom");
   if (nom) nom.focus();
 }
+var finAuto = true;
+function addDaysIso(iso, n) {
+  const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+// Date de fin saisie ; jamais avant le début ; vide si pas de début.
+function dateFinValue() {
+  const d = $("#f-date").value || "", f = $("#f-date-fin").value || "";
+  if (!d) return "";
+  return !f || f < d ? d : f;
+}
+function periodeTxt(c) {
+  const d = c && c.date_competition;
+  if (!d) return "sans date";
+  const fr = s => s.split("-").reverse().join("/");
+  return (c.date_fin && c.date_fin > d) ? fr(d) + " → " + fr(c.date_fin) : d;
+}
+(function initDateFin() {
+  const deb = $("#f-date"), fin = $("#f-date-fin");
+  deb.addEventListener("change", () => {
+    if (finAuto || (fin.value && fin.value < deb.value)) fin.value = deb.value;
+  });
+  fin.addEventListener("input", () => { finAuto = false; });
+  $("#btn-2jours").addEventListener("click", () => {
+    if (!deb.value) { deb.focus(); return; }
+    fin.value = addDaysIso(deb.value, 1); finAuto = false;
+  });
+})();
 function resetCompForm() {
   editCompId = null;
   editSourcePage = null;
   $("#f-form-title").textContent = "➕ Nouvelle compétition";
-  $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = "";
+  $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = ""; $("#f-date-fin").value = ""; finAuto = true;
   $("#f-prix").value = ""; $("#f-statut").value = "en_preparation";
   populateCoachDropdowns();
   $("#f-coach1").value = "";
@@ -1231,6 +1268,7 @@ async function createCompetition() {
       nom: nom,
       id_ffme: $("#f-idffme").value.trim(),
       date_competition: $("#f-date").value || "",
+      date_fin: dateFinValue(),
       prix: parseFloat($("#f-prix").value || "0") || 0,
       statut: $("#f-statut").value,
       coach_ids: coachIds,
@@ -1273,6 +1311,7 @@ async function updateCompetition() {
       nom: nom,
       id_ffme: $("#f-idffme").value.trim(),
       date_competition: $("#f-date").value || "",
+      date_fin: dateFinValue(),
       prix: parseFloat($("#f-prix").value || "0") || 0,
       statut: $("#f-statut").value,
       coach_ids: coachIds,
@@ -1636,7 +1675,7 @@ function openEditCoach(id) {
   $("#coach-competitions-list").innerHTML = owned.map(comp => `
     <div class="card" onclick="showPage('comps'); openEdit('${esc(String(comp.id))}')">
       <div class="m-name">${esc(comp.nom)}</div>
-      <div class="m-sub">🪪 ${esc(comp.id_ffme || "—")} · 📅 ${esc(comp.date_competition || "sans date")}</div>
+      <div class="m-sub">🪪 ${esc(comp.id_ffme || "—")} · 📅 ${esc(periodeTxt(comp))}</div>
     </div>
   `).join("") || `<div class="empty">Aucune épreuve assignée à ce coach.</div>`;
 }
@@ -2459,11 +2498,9 @@ function updateEmailPreview() {
   const firstRec = recipients[0];
   previewDestSpan.textContent = `${firstRec.prenom || ""} ${firstRec.nom || ""} (${firstRec.email || "email absent"})`;
 
-  let dateFmt = comp?.date_competition || "";
-  if (dateFmt && dateFmt.includes("-")) {
-    const p = dateFmt.split("-");
-    if (p.length === 3) dateFmt = `${p[2]}/${p[1]}/${p[0]}`;
-  }
+  const frDate = s => (s && s.split("-").length === 3) ? s.split("-").reverse().join("/") : (s || "");
+  let dateFmt = frDate(comp?.date_competition || "");
+  if (dateFmt && comp?.date_fin && comp.date_fin > comp.date_competition) dateFmt += " au " + frDate(comp.date_fin);
 
   const ctx = {
     first_name: (firstRec.prenom || "").trim(),

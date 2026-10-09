@@ -1491,14 +1491,8 @@ class CommunicationsPage(QWidget):
             return None
         from domain.utils import format_montant
         
-        date_raw = str(comp.date_competition or "").strip()
-        date_formatted = ""
-        if date_raw:
-            parts = date_raw.split("-")
-            if len(parts) == 3:
-                date_formatted = f"{parts[2]}/{parts[1]}/{parts[0]}"
-            else:
-                date_formatted = date_raw
+        from domain.utils import format_periode
+        date_formatted = format_periode(comp.date_competition, comp.date_fin)
 
         return {
             "competition_id": comp.id,
