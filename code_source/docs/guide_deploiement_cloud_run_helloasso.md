@@ -200,3 +200,19 @@ Vérifiez dans la PWA mobile que l'adhérent Lucas MARTIN passe immédiatement e
 3. Sélectionnez le modèle **« Convocation compétition »**.
 4. Vérifiez que l'aperçu dynamique remplace `{PRENOM}`, `{NOM_COMPETITION}`, `{LIEU}` et `{DATE_COMPETITION}`.
 5. Cliquez sur **« Envoyer l'e-mail »** et vérifiez la confirmation d'expédition via l'API Gmail.
+
+### Test E : Portail Bureau Web (Ordinateur)
+1. Depuis un ordinateur de bureau ou portable (écran ≥ 1024 px), ouvrez l'URL du service :
+   ```
+   https://alj-escalade-api-xxxxxxxx-ew.a.run.app/bureau/
+   ```
+   *(La redirection automatique depuis `/` vers `/bureau/` s'opère pour tout navigateur d'ordinateur).*
+2. Connectez-vous avec votre compte Google autorisé (`@alj-escalade.fr` ou compte administrateur).
+3. Accédez à la page **Adhérents** (`/bureau/adherents`) :
+   - Vérifiez l'affichage complet du tableau avec le tri interactif sur chaque colonne.
+   - Testez le filtrage des sous-catégories (par défaut, les listes d'attente sont exclues).
+   - Sélectionnez un adhérent : sa fiche d'identité complète apparaît dans le panneau latéral droit.
+   - Cliquez sur **« ✉️ E-mail »** : composez un message avec modèle et visualisez l'aperçu dynamique.
+   - Cliquez sur **« 📄 Attestation »** : prévisualisez l'attestation PDF générée par WeasyPrint en mémoire, téléchargez-la ou envoyez-la en un clic par e-mail.
+4. Accédez à la page **Outils** (`/bureau/outils`) :
+   - Basculez entre la **Carte géographique interactive** (Leaflet) et l'**Analyse des effectifs** (Tableau Croisé Dynamique avec sélecteur de saison).

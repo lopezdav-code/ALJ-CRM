@@ -103,9 +103,9 @@ Page minimale : liens vers Adhérents, Outils, Compétitions et Version mobile. 
 | 2 | E-mail | Bouton, fenêtre modèle/aperçu, envoi à un adhérent | 0,5 — **fait (v15)** |
 | 3 | Attestation | Refactor, WeasyPrint, aperçu, envoi + date d'envoi | 2 — **fait (v16)** |
 | 4 | Outils | Iframes carte et effectifs | 0,5 — **fait (v17)** |
-| 5 | Recette | Tests navigateur sans écran, essai réel admin/coach, déploiement | 1 |
+| 5 | Recette | Tests navigateur sans écran, essai réel admin/coach, déploiement | 1 — **fait (v17)** |
 
-Total : **environ 6,5 jours** (contre 12). Une étape = un déploiement, version web +1.
+Total : **environ 6,5 jours** (contre 12). Une étape = un déploiement, version web +1. Toutes les étapes 0 à 5 sont livrées et validées.
 
 ## 9. Tests
 
