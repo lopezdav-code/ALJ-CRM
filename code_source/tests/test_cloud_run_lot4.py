@@ -27,7 +27,7 @@ class TestCloudRunLot4(unittest.TestCase):
         with open(version_file, "r", encoding="utf-8") as f:
             v_content = f.read().strip()
         self.assertEqual(APP_VERSION, v_content, "La version dans constants.py et VERSION doivent correspondre.")
-        self.assertEqual(APP_VERSION, "2.5.9")
+        self.assertEqual(APP_VERSION, "2.6.0")
 
     def test_requirements_docker(self):
         """Vérifie que requirements-docker.txt exclut les paquets Windows lourds."""

@@ -143,10 +143,19 @@
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { initFirebase, apiFetch, fmtDay } from "/static-web/alj-core.js";
+import { initFirebase, apiFetch } from "/static-web/alj-core.js";
 
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = id => document.getElementById(id);
+const fmtDay = s => {
+  if (!s) return "";
+  const str = String(s).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const fr = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (fr) return `${fr[1].padStart(2, "0")}/${fr[2].padStart(2, "0")}/${fr[3]}`;
+  return str;
+};
 
 const DISCIPLINE_COLORS = {
   "Bloc": "#7C3AED",
