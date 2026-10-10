@@ -42,3 +42,5 @@ dist_release/
 Thumbs.db
 desktop.ini
 ~$*
+
+.idea

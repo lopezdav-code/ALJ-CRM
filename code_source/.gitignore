@@ -15,6 +15,11 @@ doc/geo_cache.json
 doc/signature.jpg
 doc/QrCode/
 
+# ===== Local development environment (Firebase emulator) =====
+dev/.emulator-data/*
+!dev/.emulator-data/.gitkeep
+data-dev/
+
 # ===== Environnement Python =====
 venv/
 __pycache__/
