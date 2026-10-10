@@ -1,11 +1,11 @@
-/* Initialisation Firebase unique pour toutes les pages (PWA et portail bureau).
-   Script classique (pas un module) : utilisable par les pages en <script> comme par
-   alj-core.js. Doit être chargé après les SDK firebase-*-compat.js et après
-   /runtime-config.js, qui définit window.ALJ_RUNTIME (servi par server.py).
+/* Single Firebase initialisation for every page (PWA and office portal).
+   Classic script (not a module): usable from pages through <script> as well as from
+   alj-core.js. Must be loaded after the firebase-*-compat.js SDKs and after
+   /runtime-config.js, which defines window.ALJ_RUNTIME (served by server.py).
 
-   - Production : configuration du projet du club, rien d'autre.
-   - Développement (ALJ_RUNTIME.env === "dev") : projet « demo-alj » branché sur
-     l'émulateur Firebase local (Auth + Firestore). Aucun appel aux services réels. */
+   - Production: the club's project configuration, nothing else.
+   - Development (ALJ_RUNTIME.env === "dev"): "demo-alj" project connected to the
+     local Firebase emulator (Auth + Firestore). No call to the real services. */
 (function () {
   "use strict";
 
@@ -27,7 +27,7 @@
       if (document.getElementById("alj-dev-banner")) return;
       const b = document.createElement("div");
       b.id = "alj-dev-banner";
-      b.textContent = "DEV — émulateur Firebase (" + runtime.projectId + ") : données fictives";
+      b.textContent = "DEV — Firebase emulator (" + runtime.projectId + "): fake data";
       b.setAttribute("role", "status");
       b.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;padding:4px 12px;"
         + "background:#b45309;color:#fff;font:600 12px/1.4 system-ui,sans-serif;text-align:center;"
@@ -38,7 +38,7 @@
     else document.addEventListener("DOMContentLoaded", add);
   }
 
-  /* Idempotent : renvoie { auth, db } (compat). */
+  /* Idempotent: returns { auth, db } (compat). */
   function init() {
     if (services) return services;
     const config = isEmulator
@@ -57,12 +57,12 @@
     return services;
   }
 
-  /* Connexion via l'émulateur Auth : sélecteur de comptes fictifs (aucun Google réel).
-     Redirection plutôt que popup : la connexion peut être lancée sans clic (?login=1). */
+  /* Sign-in through the Auth emulator: fake account picker (no real Google).
+     Redirect rather than popup: sign-in can start without a click (?login=1). */
   function devLogin() {
     return init().auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider());
   }
-  /* Retour du sélecteur de l'émulateur : vrai si une connexion vient d'aboutir. */
+  /* Back from the emulator's account picker: true if a sign-in just completed. */
   async function completeDevLogin() {
     if (!isEmulator) return false;
     const result = await init().auth.getRedirectResult();

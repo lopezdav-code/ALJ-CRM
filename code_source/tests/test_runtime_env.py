@@ -1,10 +1,10 @@
 """
-Tests du mode d'exécution (production par défaut / dev sur l'émulateur Firebase) :
-- production inchangée sans variable, rien d'exposé au navigateur ;
-- mode dev refusé sur Cloud Run ou sans émulateur (fail-closed) ;
-- URL, jeton et projet Firestore redirigés vers l'émulateur en dev uniquement ;
-- route /runtime-config.js ;
-- garde du script de données fictives.
+Runtime mode tests (production by default / dev on the Firebase emulator):
+- production unchanged without variables, nothing exposed to the browser;
+- dev mode rejected on Cloud Run or without the emulator (fail-closed);
+- Firestore URL, token and project redirected to the emulator in dev only;
+- /runtime-config.js route;
+- guard of the fake data script.
 """
 
 import os
@@ -33,38 +33,38 @@ DEV_KEYS = list(DEV_ENV) + ["K_SERVICE", "ALJ_PUBLIC_FIRESTORE_EMULATOR", "ALJ_P
 
 
 def _env(**values):
-    """Environnement propre : variables du mode dev retirées puis `values` appliquées."""
+    """Clean environment: dev mode variables removed, then `values` applied."""
     base = {k: v for k, v in os.environ.items() if k not in DEV_KEYS}
     base.update(values)
     return patch.dict(os.environ, base, clear=True)
 
 
-class TestProductionParDefaut(unittest.TestCase):
+class TestProductionByDefault(unittest.TestCase):
 
-    def test_prod_sans_variable(self):
+    def test_prod_without_variables(self):
         with _env():
             self.assertEqual(runtime_env.env(), "prod")
             self.assertFalse(runtime_env.is_dev())
-            runtime_env.validate()  # ne lève rien
+            runtime_env.validate()  # raises nothing
             self.assertEqual(runtime_env.firestore_base_url(), "https://firestore.googleapis.com/v1")
             self.assertIsNone(runtime_env.emulator_token())
             self.assertIsNone(runtime_env.project_id_override())
             self.assertEqual(runtime_env.client_config(), {"env": "prod"})
 
-    def test_emulateur_ignore_hors_mode_dev(self):
-        """Une variable d'émulateur oubliée dans le shell ne détourne pas la production."""
+    def test_emulator_ignored_outside_dev_mode(self):
+        """A leftover emulator variable in the shell does not divert production."""
         with _env(FIRESTORE_EMULATOR_HOST="localhost:8081"):
             self.assertIsNone(runtime_env.firestore_emulator_host())
             self.assertEqual(runtime_env.firestore_base_url(), "https://firestore.googleapis.com/v1")
 
-    def test_valeur_inconnue_vaut_prod(self):
+    def test_unknown_value_means_prod(self):
         with _env(ALJ_ENV="staging"):
             self.assertEqual(runtime_env.env(), "prod")
 
 
-class TestModeDev(unittest.TestCase):
+class TestDevMode(unittest.TestCase):
 
-    def test_redirection_vers_emulateur(self):
+    def test_redirects_to_emulator(self):
         with _env(**DEV_ENV):
             runtime_env.validate()
             self.assertEqual(runtime_env.firestore_base_url(), "http://localhost:8081/v1")
@@ -75,19 +75,19 @@ class TestModeDev(unittest.TestCase):
                 "firestoreEmulator": "localhost:8081", "authEmulator": "http://localhost:9099",
             })
 
-    def test_refuse_sur_cloud_run(self):
+    def test_rejected_on_cloud_run(self):
         with _env(K_SERVICE="alj-escalade-api", **DEV_ENV):
             with self.assertRaises(RuntimeError):
                 runtime_env.validate()
 
-    def test_refuse_sans_emulateur(self):
+    def test_rejected_without_emulator(self):
         for missing in ("FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_HOST"):
             values = {k: v for k, v in DEV_ENV.items() if k != missing}
             with self.subTest(missing=missing), _env(**values):
                 with self.assertRaises(RuntimeError):
                     runtime_env.validate()
 
-    def test_clients_firestore_branches_sur_emulateur(self):
+    def test_firestore_clients_use_emulator(self):
         with _env(**DEV_ENV):
             store = RestStore()
             self.assertEqual(store.project_id, "demo-alj")
@@ -98,13 +98,13 @@ class TestModeDev(unittest.TestCase):
             self.assertTrue(FirestoreClient.database_url().startswith("http://localhost:8081/v1/projects/demo-alj/"))
 
 
-class TestRouteRuntimeConfig(unittest.TestCase):
+class TestRuntimeConfigRoute(unittest.TestCase):
 
     def setUp(self):
         from server import app
         self.client = TestClient(app)
 
-    def test_production_publique_sans_detail(self):
+    def test_production_public_without_details(self):
         with _env(ALJ_API_AUTH="required"):
             resp = self.client.get("/runtime-config.js")
         self.assertEqual(resp.status_code, 200)
@@ -112,16 +112,16 @@ class TestRouteRuntimeConfig(unittest.TestCase):
         self.assertIn("javascript", resp.headers["content-type"])
         self.assertEqual(resp.text.strip(), 'window.ALJ_RUNTIME = Object.freeze({"env": "prod"});')
 
-    def test_dev_expose_l_emulateur(self):
+    def test_dev_exposes_emulator(self):
         with _env(**DEV_ENV):
             resp = self.client.get("/runtime-config.js")
         self.assertIn('"env": "dev"', resp.text)
         self.assertIn('"projectId": "demo-alj"', resp.text)
 
 
-class TestGardeSeed(unittest.TestCase):
+class TestSeedGuard(unittest.TestCase):
 
-    def test_refuse_hors_emulateur(self):
+    def test_rejected_outside_emulator(self):
         sys.path.insert(0, os.path.join(_code_root, "dev", "seed"))
         try:
             import seed_emulator

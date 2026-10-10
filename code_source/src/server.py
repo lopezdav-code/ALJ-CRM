@@ -27,7 +27,7 @@ from domain.constants import get_active_season, APP_VERSION
 from infrastructure.secret_store import SecretStore
 from infrastructure import runtime_env
 
-# Mode dev (émulateur Firebase) incohérent ou lancé sur Cloud Run : arrêt immédiat.
+# Inconsistent dev mode (Firebase emulator) or dev mode on Cloud Run: stop immediately.
 runtime_env.validate()
 
 
@@ -57,7 +57,7 @@ async def cloud_db_middleware(request, call_next):
     Enregistré avant le contrôle d'accès : il ne s'exécute qu'après lui."""
     path = request.url.path
     relevant = path.startswith("/api/") or path in ("/map", "/pivot")
-    # Cloud Run, ou dev local sur l'émulateur : le cache suit Firestore comme en production
+    # Cloud Run, or local dev on the emulator: the cache follows Firestore as in production
     server_mode = os.environ.get("K_SERVICE") or runtime_env.is_dev()
     if relevant and server_mode and CloudDatabase.is_enabled():
         await run_in_threadpool(CloudDatabase.ensure_fresh, 30)
@@ -957,7 +957,7 @@ def get_sw():
 
 @app.get("/runtime-config.js", include_in_schema=False)
 def get_runtime_config():
-    """Configuration d'exécution du navigateur (émulateur Firebase en dev, rien en production)."""
+    """Browser runtime configuration (Firebase emulator in dev, nothing in production)."""
     payload = json.dumps(runtime_env.client_config(), ensure_ascii=False)
     return Response(
         content=f"window.ALJ_RUNTIME = Object.freeze({payload});\n",

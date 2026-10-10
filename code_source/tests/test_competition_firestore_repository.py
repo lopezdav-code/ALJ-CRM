@@ -601,7 +601,7 @@ class TestFirestoreClientPrecondition(unittest.TestCase):
         self.assertEqual(list(fields), ["nom"])
 
     def test_update_fields_envoie_la_precondition(self):
-        """Précondition dans le corps d'un :commit (le paramètre d'URL est ignoré par l'émulateur)."""
+        """Precondition in the body of a :commit (the URL parameter is ignored by the emulator)."""
         with patch.object(fc.requests, "post") as mock_post, \
              patch.object(FirestoreClient, "get_access_token", return_value="tok"):
             mock_post.return_value.status_code = 200
@@ -614,7 +614,7 @@ class TestFirestoreClientPrecondition(unittest.TestCase):
         self.assertEqual(write["update"]["name"], "projects/p/databases/(default)/documents/competitions/1")
         self.assertEqual(list(write["update"]["fields"]), ["x"])
 
-    def test_update_fields_sans_precondition_utilise_patch(self):
+    def test_update_fields_without_precondition_uses_patch(self):
         with patch.object(fc.requests, "patch") as mock_patch, \
              patch.object(FirestoreClient, "get_access_token", return_value="tok"):
             mock_patch.return_value.status_code = 200

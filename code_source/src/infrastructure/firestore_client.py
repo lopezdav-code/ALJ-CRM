@@ -131,7 +131,7 @@ class FirestoreClient:
 
     @classmethod
     def get_access_token(cls) -> str:
-        """Jeton d'accès : émulateur en dev, metadata server sur GCP/Cloud Run, OAuth2 du club sinon."""
+        """Access token: emulator in dev, metadata server on GCP/Cloud Run, the club's OAuth2 otherwise."""
         emulator_tok = runtime_env.emulator_token()
         if emulator_tok:
             return emulator_tok
@@ -252,9 +252,9 @@ class FirestoreClient:
         fields = dict_to_firestore_fields(patch)
         try:
             if expected_update_time:
-                # Précondition dans le corps d'un :commit (forme également utilisée par
-                # cloud_database) : le paramètre d'URL `currentDocument.updateTime` est
-                # ignoré par l'émulateur Firestore, qui refuse alors toute écriture.
+                # Precondition in the body of a :commit (same form as cloud_database uses):
+                # the `currentDocument.updateTime` URL parameter is ignored by the
+                # Firestore emulator, which then rejects every write.
                 pid = project_id or cls.get_project_id()
                 name = f"{DATABASE_PATH.format(pid=pid)}/{collection_name}/{doc_id}"
                 body = {"writes": [{

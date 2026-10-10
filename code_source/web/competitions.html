@@ -577,7 +577,7 @@
 "use strict";
 
 /* ===================== Firebase (Auth + Firestore temps réel) ===================== */
-// Configuration du projet et émulateur (dev) : /static-web/alj-firebase.js
+// Project configuration and emulator (dev): /static-web/alj-firebase.js
 const { auth, db: fsdb } = ALJFirebase.init();
 
 let user = null;                 // compte Firebase Auth connecté
@@ -761,7 +761,7 @@ const OAUTH_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.goog
 const OAUTH_SCOPES = "openid email profile";
 
 function login() {
-  if (ALJFirebase.isEmulator) { ALJFirebase.devLogin(); return; }  // dev : émulateur Auth
+  if (ALJFirebase.isEmulator) { ALJFirebase.devLogin(); return; }  // dev: Auth emulator
   const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
     b => b.toString(16).padStart(2, "0")).join("");
   sessionStorage.setItem("alj_oauth_state", state);
@@ -2683,7 +2683,7 @@ async function forceWebUpdate() {
 
   // Retour de Google après la redirection OAuth : access_token dans le fragment (#…)
   // → connexion Firebase avec le credential Google (pas de domaine tiers impliqué)
-  // Connexion demandée depuis une autre page du site (annuaire, bureau) : on y retourne
+  // Sign-in requested from another page of the site (directory, office): go back there
   const returnAfterLogin = () => {
     const back = sessionStorage.getItem("alj_after_login") || "";
     sessionStorage.removeItem("alj_after_login");
@@ -2698,7 +2698,7 @@ async function forceWebUpdate() {
       await auth.signInWithCredential(credential);
       if (returnAfterLogin()) return;
     } else if (await ALJFirebase.completeDevLogin()) {
-      // Dev : retour du sélecteur de comptes de l'émulateur Auth
+      // Dev: back from the Auth emulator's account picker
       if (returnAfterLogin()) return;
     } else if (new URLSearchParams(location.search).get("login") === "1") {
       // Arrivée depuis l'annuaire (bouton « Se connecter ») : lance la connexion Google

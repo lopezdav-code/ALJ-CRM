@@ -9,8 +9,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 import pytest
 
-# Variables du mode dev (dev/dev.env) : retirées pour que les tests restent en mode
-# production même si le développeur les a chargées dans son shell.
+# Dev mode variables (dev/dev.env): removed so the tests stay in production mode
+# even if the developer loaded them into their shell.
 _DEV_ENV_KEYS = ("ALJ_ENV", "FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_HOST",
                  "MEMBER_BACKEND", "ALJ_DATA_DIR",
                  "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM_EMAIL",

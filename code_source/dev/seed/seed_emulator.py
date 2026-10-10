@@ -1,18 +1,18 @@
 """
-Remplit l'émulateur Firestore local avec des données FICTIVES (univers Harry Potter).
+Fills the local Firestore emulator with FAKE data (Harry Potter universe).
 
     cd code_source
     set -a && source dev/dev.env && set +a
     python dev/seed/seed_emulator.py
 
-Réinitialise entièrement la base de l'émulateur puis reproduit le chemin de production :
-1. base SQLite temporaire au schéma courant, alimentée par les mêmes fonctions que
-   l'import HelloAsso (`SqliteRepository.upsert_members`, `save_planning_data`, …) ;
-2. envoi vers Firestore avec `cloud_database.import_database` (format `crm_*` réel) ;
-3. projection `adherents` / `planning` de la PWA, encadrants et compétitions via
+Fully resets the emulator database, then follows the production path:
+1. temporary SQLite database with the current schema, filled by the same functions as
+   the HelloAsso import (`SqliteRepository.upsert_members`, `save_planning_data`, …);
+2. push to Firestore with `cloud_database.import_database` (real `crm_*` format);
+3. PWA `adherents` / `planning` projection, coaches and competitions through
    `CompetitionFirestoreRepository`.
 
-Refuse de s'exécuter hors du mode dev (ALJ_ENV=dev + émulateur + projet demo-alj).
+Refuses to run outside dev mode (ALJ_ENV=dev + emulator + demo-alj project).
 """
 import datetime
 import json
@@ -34,27 +34,27 @@ from infrastructure import runtime_env  # noqa: E402
 SEED = 42
 SEASON = "2026-2027"
 PREVIOUS_SEASON = "2025-2026"
-RETURNING_RATIO = 0.7          # part des adhérents déjà inscrits la saison précédente
-EMAIL_DOMAIN = "poudlard.example"   # domaine réservé : aucun e-mail ne peut être délivré
+RETURNING_RATIO = 0.7          # share of members already registered the previous season
+EMAIL_DOMAIN = "poudlard.example"   # reserved domain: no e-mail can ever be delivered
 
-# Comptes Google fictifs de l'émulateur Auth, un par rôle (cf. firestore.rules / api_auth) :
-# (identifiant, e-mail, nom affiché, custom claims)
+# Fake Google accounts in the Auth emulator, one per role (see firestore.rules / api_auth):
+# (uid, e-mail, display name, custom claims)
 DEV_ACCOUNTS = [
     ("dev-dumbledore", "albus.dumbledore@alj-escalade.fr", "Albus Dumbledore (admin)", {}),
     ("dev-snape", f"severus.snape@{EMAIL_DOMAIN}", "Severus Snape (coach)", {"coach": True}),
-    ("dev-filch", f"argus.filch@{EMAIL_DOMAIN}", "Argus Filch (lecture)", {"readonly": True}),
+    ("dev-filch", f"argus.filch@{EMAIL_DOMAIN}", "Argus Filch (read-only)", {"readonly": True}),
 ]
 
 
 def ensure_emulator() -> str:
-    """Double garde : mode dev + émulateur + projet demo-*. Retourne l'hôte Firestore."""
+    """Double guard: dev mode + emulator + demo-* project. Returns the Firestore host."""
     runtime_env.validate()
     host = runtime_env.firestore_emulator_host()
     project = runtime_env.project_id_override() or ""
     if not host or not project.startswith("demo-"):
-        raise SystemExit("❌ Refusé : ce script n'écrit que dans l'émulateur Firebase "
-                         "(ALJ_ENV=dev, FIRESTORE_EMULATOR_HOST, projet demo-*). "
-                         "Lancez : set -a && source dev/dev.env && set +a")
+        raise SystemExit("❌ Refused: this script only writes to the Firebase emulator "
+                         "(ALJ_ENV=dev, FIRESTORE_EMULATOR_HOST, demo-* project). "
+                         "Run: set -a && source dev/dev.env && set +a")
     return host
 
 
@@ -65,12 +65,12 @@ def reset_emulator(host: str, project: str) -> None:
 
 
 def drop_server_cache() -> None:
-    """Supprime le cache SQLite du serveur dev (ALJ_DATA_DIR) : la réinitialisation ne laisse
-    pas de suppressions à synchroniser, le serveur reconstruira son cache depuis l'émulateur."""
+    """Deletes the dev server's SQLite cache (ALJ_DATA_DIR): the reset leaves no deletions
+    to sync, and the server rebuilds its cache from the emulator."""
     from infrastructure.sqlite_repository import SqliteRepository
     if not os.environ.get("ALJ_DATA_DIR"):
-        # Sans dossier dédié, le chemin par défaut serait la base du poste (data/) : on n'y touche pas.
-        print("ℹ️  ALJ_DATA_DIR non défini : cache du serveur dev conservé.")
+        # Without a dedicated folder, the default path would be this machine's database (data/): leave it alone.
+        print("ℹ️  ALJ_DATA_DIR not set: dev server cache kept.")
         return
     db = SqliteRepository.get_db_path()
     for path in (db, db + "-wal", db + "-shm"):
@@ -79,9 +79,9 @@ def drop_server_cache() -> None:
 
 
 def seed_auth_accounts(auth_host: str, project: str) -> None:
-    """Recrée les comptes de connexion (fournisseur google.com simulé, rôles par custom claims)."""
+    """Recreates the login accounts (simulated google.com provider, roles through custom claims)."""
     base = f"http://{auth_host}"
-    admin = {"Authorization": "Bearer owner"}   # jeton admin de l'émulateur
+    admin = {"Authorization": "Bearer owner"}   # emulator admin token
     requests.delete(f"{base}/emulator/v1/projects/{project}/accounts", timeout=30).raise_for_status()
     for sub, email, name, claims in DEV_ACCOUNTS:
         id_token = json.dumps({"sub": sub, "email": email, "email_verified": True, "name": name})
@@ -99,10 +99,10 @@ def seed_auth_accounts(auth_host: str, project: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# Données
+# Data
 # --------------------------------------------------------------------------
 def planning_items(coaches):
-    """Créneaux de la saison (bornes de naissance cohérentes avec age_rules)."""
+    """Season slots (birth-date bounds consistent with age_rules)."""
     snape, mcgonagall, flitwick, sprout, lupin, hagrid = coaches
     items = [
         ("Loisir - Enfants 2017-2019", "cours", "U8-U10", "Mercredi", "14h00-15h30",
@@ -125,14 +125,15 @@ def planning_items(coaches):
          [], ["Autonomes bloc"], "", ""),
     ]
     return [
-        {"id": i, "groupe": g, "type": t, "categorie_age": cat, "jour": jour, "horaires": h,
-         "encadrants": enc, "helloasso_tarifs": tarifs, "naissance_min": nmin, "naissance_max": nmax,
+        {"id": i, "groupe": group, "type": kind, "categorie_age": age_cat, "jour": day, "horaires": hours,
+         "encadrants": coach_names, "helloasso_tarifs": rates, "naissance_min": born_min, "naissance_max": born_max,
          "whatsapp_link": ""}
-        for i, (g, t, cat, jour, h, enc, tarifs, nmin, nmax) in enumerate(items, start=1)
+        for i, (group, kind, age_cat, day, hours, coach_names, rates, born_min, born_max)
+        in enumerate(items, start=1)
     ]
 
 
-TARIF_AMOUNTS = {"cours": 210.0, "compétition": 260.0, "autonome": 150.0}
+AMOUNT_BY_TYPE = {"cours": 210.0, "compétition": 260.0, "autonome": 150.0}
 
 
 def ascii_slug(text: str) -> str:
@@ -141,7 +142,7 @@ def ascii_slug(text: str) -> str:
 
 
 def build_people(fake, rng, planning):
-    """Une personne = identité stable + créneau choisi selon son année de naissance."""
+    """One person = stable identity + slot picked from their birth year."""
     from hp_names import ADULTS, STUDENTS
     youth = [p for p in planning if p["naissance_min"]]
     adults = [p for p in planning if not p["naissance_min"]]
@@ -160,7 +161,7 @@ def build_people(fake, rng, planning):
 
 
 def member_record(fake, rng, person, season, order_no):
-    """Enregistrement au format de l'import HelloAsso (clés lues par schema_v2)."""
+    """Record in the HelloAsso import format (keys read by schema_v2)."""
     from hp_names import PARENTS
     from infrastructure.schema_v2 import DOB_COLUMN
     first, last, group = person["first"], person["last"], person["group"]
@@ -172,7 +173,7 @@ def member_record(fake, rng, person, season, order_no):
         payer_first, payer_email = first, email
     start_year = int(season[:4])
     order_date = fake.date_between_dates(datetime.date(start_year, 6, 20), datetime.date(start_year, 9, 30))
-    incomplete = rng.random() < 0.12      # quelques fiches à compléter (cas réels à tester)
+    incomplete = rng.random() < 0.12      # a few incomplete records (real-world cases to test)
     insured = rng.random() < 0.8
     return {
         "order_ref": f"DEV-{season[:4]}-{order_no:04d}",
@@ -182,7 +183,7 @@ def member_record(fake, rng, person, season, order_no):
         "payer_firstName": payer_first,
         "payer_email": payer_email,
         "tarif_name": group["helloasso_tarifs"][0],
-        "amount": TARIF_AMOUNTS.get(group["type"], 200.0),
+        "amount": AMOUNT_BY_TYPE.get(group["type"], 200.0),
         "user_lastName": last.upper(),
         "user_firstName": first,
         DOB_COLUMN: person["birth"].strftime("%d/%m/%Y"),
@@ -216,7 +217,7 @@ EMAIL_TEMPLATES = [
 
 
 # --------------------------------------------------------------------------
-# Écriture
+# Writing
 # --------------------------------------------------------------------------
 def build_sqlite(path, fake, rng, coach_names):
     from infrastructure.sqlite_repository import SqliteRepository
@@ -256,12 +257,12 @@ def seed_competitions(coach_ids):
     competitors = [a["id"] for a in Repo.list_adherents(competition_only=True)]
     rng = random.Random(SEED)
     base_id = int(datetime.datetime(today.year, today.month, today.day).timestamp() * 1000)
-    for i, (nom, date, prix, statut, ha, c1, c2) in enumerate(specs):
-        comp = Competition(id=base_id + i, nom=nom, date_competition=date.isoformat(), prix=prix,
-                           statut=statut, helloasso_ref=ha, coach1_id=c1, coach2_id=c2)
+    for i, (name, date, price, status, ha_ref, coach1, coach2) in enumerate(specs):
+        comp = Competition(id=base_id + i, nom=name, date_competition=date.isoformat(), prix=price,
+                           statut=status, helloasso_ref=ha_ref, coach1_id=coach1, coach2_id=coach2)
         comp_id = Repo.save_competition(comp)
-        for adh_id in rng.sample(competitors, k=min(len(competitors), rng.randint(4, 9))):
-            Repo.add_participant(comp_id, adh_id, selectionne=rng.random() < 0.8)
+        for member_id in rng.sample(competitors, k=min(len(competitors), rng.randint(4, 9))):
+            Repo.add_participant(comp_id, member_id, selectionne=rng.random() < 0.8)
     return len(specs), len(competitors)
 
 
@@ -278,35 +279,35 @@ def main() -> int:
     fake = Faker("fr_FR")
     rng = random.Random(SEED)
 
-    print(f"🧹 Réinitialisation de l'émulateur ({host}, projet {project})")
+    print(f"🧹 Resetting the emulator ({host}, project {project})")
     reset_emulator(host, project)
     drop_server_cache()
 
     workdir = tempfile.mkdtemp(prefix="alj_seed_")
     db_path = os.path.join(workdir, "seed.db")
     n_cur, n_prev = build_sqlite(db_path, fake, rng, COACHES)
-    print(f"🧙 {n_cur} adhésions {SEASON}, {n_prev} adhésions {PREVIOUS_SEASON} (dont réinscriptions)")
+    print(f"🧙 {n_cur} memberships {SEASON}, {n_prev} memberships {PREVIOUS_SEASON} (re-registrations)")
 
     written = cdb.import_database(db_path, cdb.RestStore())
-    print(f"☁️  Collections crm_* : {written}")
+    print(f"☁️  crm_* collections: {written}")
 
-    # Encadrants : identifiants fixes, Snape en premier (id 1)
+    # Coaches: fixed ids, Snape first (id 1)
     coach_ids = []
-    for i, nom in enumerate(COACHES, start=1):
-        coach_ids.append(Repo.save_coach(nom, coach_id=i))
-    print(f"🧑‍🏫 Encadrants : {', '.join(COACHES)}")
+    for i, name in enumerate(COACHES, start=1):
+        coach_ids.append(Repo.save_coach(name, coach_id=i))
+    print(f"🧑‍🏫 Coaches: {', '.join(COACHES)}")
 
-    # Projection lue par la PWA (adherents / planning), depuis la base SQLite de seed
-    rep = Repo.sync_adherents_from_main(SEASON)
-    if rep.get("errors"):
-        print(f"⚠️  Projection adherents : {rep['errors']}")
+    # Projection read by the PWA (adherents / planning), from the seed SQLite database
+    report = Repo.sync_adherents_from_main(SEASON)
+    if report.get("errors"):
+        print(f"⚠️  adherents projection: {report['errors']}")
 
     n_comp, n_competitors = seed_competitions(coach_ids)
-    print(f"🏆 {n_comp} compétitions ({n_competitors} compétiteurs éligibles)")
+    print(f"🏆 {n_comp} competitions ({n_competitors} eligible competitors)")
 
     seed_auth_accounts(os.environ["FIREBASE_AUTH_EMULATOR_HOST"], project)
-    print("🔑 Comptes de connexion : " + ", ".join(email for _, email, _, _ in DEV_ACCOUNTS))
-    print("✅ Terminé — UI de l'émulateur : http://localhost:4000/firestore")
+    print("🔑 Login accounts: " + ", ".join(email for _, email, _, _ in DEV_ACCOUNTS))
+    print("✅ Done — emulator UI: http://localhost:4000/firestore")
     return 0
 
 

@@ -1,5 +1,5 @@
-# Émulateur Firebase (Auth + Firestore) pour le développement local — voir dev/README.md
-# firebase-tools 15 exige Node >= 20 et Java >= 21 (Debian trixie).
+# Firebase emulator (Auth + Firestore) for local development — see dev/README.md
+# firebase-tools 15 requires Node >= 20 and Java >= 21 (Debian trixie).
 FROM node:22-trixie-slim
 
 RUN apt-get update \
@@ -9,14 +9,14 @@ RUN apt-get update \
     && npm cache clean --force \
     && mkdir -p /workspace /persist && chown node:node /workspace /persist
 
-# Utilisateur non-root (uid 1000) : les données exportées dans dev/.emulator-data
-# restent modifiables par le développeur sur l'hôte.
+# Non-root user (uid 1000): the data exported to dev/.emulator-data
+# stays writable by the developer on the host.
 USER node
 WORKDIR /workspace
-# Pré-téléchargement des JAR des émulateurs dans l'image (démarrage hors ligne et rapide)
+# Pre-download the emulator JARs into the image (fast, offline startup)
 RUN firebase setup:emulators:firestore && firebase setup:emulators:ui
 
 EXPOSE 4000 8081 9099 9150
-# export/ : firebase-tools recrée le dossier cible, impossible sur le point de montage /persist
+# export/: firebase-tools recreates the target folder, which is impossible on the /persist mount point
 CMD ["firebase", "emulators:start", "--project", "demo-alj", "--only", "auth,firestore", \
      "--import=/persist/export", "--export-on-exit=/persist/export"]

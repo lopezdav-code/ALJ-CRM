@@ -23,7 +23,7 @@ export const COMPETITIONS_URL = "/competitions";
 export const WEB_VERSION = (document.querySelector('meta[name="alj-web-version"]') || {}).content || "?";
 
 /* ===================== Firebase ===================== */
-/* Configuration et émulateur (dev) : voir alj-firebase.js. */
+/* Configuration and emulator (dev): see alj-firebase.js. */
 export function initFirebase() {
   return window.ALJFirebase.init();
 }

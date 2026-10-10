@@ -1,6 +1,6 @@
-"""Noms fictifs (univers Harry Potter) pour les données de développement — aucune donnée réelle."""
+"""Fake names (Harry Potter universe) for development data — no real data."""
 
-# Encadrants (collection `coaches`) : l'ordre fixe les identifiants, Snape est le premier (id 1).
+# Coaches (`coaches` collection): the order sets the ids, Snape comes first (id 1).
 COACHES = [
     "Severus Snape",
     "Minerva McGonagall",
@@ -10,7 +10,7 @@ COACHES = [
     "Rubeus Hagrid",
 ]
 
-# Élèves de Poudlard : (prénom, nom, sexe) — adhérents « jeunes »
+# Hogwarts students: (first name, last name, sex) — youth members
 STUDENTS = [
     ("Harry", "Potter", "M"), ("Ginny", "Weasley", "F"), ("Ron", "Weasley", "M"),
     ("Hermione", "Granger", "F"), ("Fred", "Weasley", "M"), ("George", "Weasley", "M"),
@@ -28,7 +28,7 @@ STUDENTS = [
     ("Zacharias", "Smith", "M"), ("Gabrielle", "Delacour", "F"), ("Teddy", "Lupin", "M"),
 ]
 
-# Adultes (parents, anciens élèves, personnel) — adhérents « adultes »
+# Adults (parents, former students, staff) — adult members
 ADULTS = [
     ("Molly", "Weasley", "F"), ("Arthur", "Weasley", "M"), ("Bill", "Weasley", "M"),
     ("Charlie", "Weasley", "M"), ("Percy", "Weasley", "M"), ("Sirius", "Black", "M"),
@@ -39,7 +39,7 @@ ADULTS = [
     ("Poppy", "Pomfrey", "F"), ("Argus", "Filch", "M"),
 ]
 
-# Responsables légaux (payeurs) des jeunes, par nom de famille ; à défaut, Faker invente un prénom.
+# Legal guardians (payers) of the youth members, by last name; otherwise Faker makes up a first name.
 PARENTS = {
     "Weasley": "Molly", "Malfoy": "Narcissa", "Longbottom": "Augusta", "Lovegood": "Xenophilius",
     "Granger": "Jean", "Potter": "Lily", "Delacour": "Apolline", "Lupin": "Remus",

@@ -55,7 +55,7 @@ self.addEventListener("fetch", (event) => {
   // 1. Les requêtes d'API, OAuth ou POST vont directement sur le réseau
   if (
     event.request.method !== "GET" ||
-    url.pathname === "/runtime-config.js" ||   // configuration d'exécution : jamais en cache
+    url.pathname === "/runtime-config.js" ||   // runtime configuration: never cached
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/webhooks/") ||
     url.hostname.includes("googleapis.com") ||

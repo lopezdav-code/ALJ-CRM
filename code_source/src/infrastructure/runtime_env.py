@@ -1,24 +1,24 @@
 """
-Environnement d'exécution : production (défaut) ou développement local sur l'émulateur Firebase.
+Runtime environment: production (default) or local development on the Firebase emulator.
 
-Source unique de vérité pour tout ce qui diffère entre les deux modes côté Firestore
-(URL, jeton, projet) et configuration transmise au navigateur. Les e-mails ne sont pas
-concernés : en dev, le SMTP de l'application pointe vers Mailpit (dev/dev.env).
+Single source of truth for everything that differs between the two modes on the Firestore
+side (URL, token, project) and for the configuration sent to the browser. E-mails are not
+involved: in dev, the application's SMTP settings point to Mailpit (dev/dev.env).
 
-- ``ALJ_ENV`` absent ou ``prod`` : comportement de production inchangé (Cloud Run,
-  client lourd, serveur local sans émulateur).
-- ``ALJ_ENV=dev`` : tout passe par l'émulateur Firebase (Auth + Firestore) du projet
-  ``demo-alj``. Un projet ``demo-*`` n'existe pas en production : même mal configuré,
-  aucun appel ne peut atteindre les vraies données. Voir ``code_source/dev/``.
+- ``ALJ_ENV`` unset or ``prod``: unchanged production behaviour (Cloud Run, desktop
+  client, local server without emulator).
+- ``ALJ_ENV=dev``: everything goes through the Firebase emulator (Auth + Firestore) of the
+  ``demo-alj`` project. A ``demo-*`` project does not exist in production: even when
+  misconfigured, no call can reach the real data. See ``code_source/dev/``.
 
-Les variables d'environnement sont relues à chaque appel (tests, rechargement).
+Environment variables are read again on every call (tests, reload).
 """
 import os
 from typing import Any, Dict, Optional
 
 PROD_FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
 DEV_PROJECT_ID = "demo-alj"
-EMULATOR_ADMIN_TOKEN = "owner"  # jeton admin de l'émulateur : ignore les règles de sécurité
+EMULATOR_ADMIN_TOKEN = "owner"  # emulator admin token: bypasses the security rules
 
 DEFAULT_PUBLIC_FIRESTORE_EMULATOR = "localhost:8081"
 DEFAULT_PUBLIC_AUTH_EMULATOR = "http://localhost:9099"
@@ -33,22 +33,22 @@ def is_dev() -> bool:
 
 
 def firestore_emulator_host() -> Optional[str]:
-    """Hôte de l'émulateur Firestore (variable standard Firebase), uniquement en mode dev."""
+    """Firestore emulator host (standard Firebase variable), in dev mode only."""
     if not is_dev():
         return None
     return (os.environ.get("FIRESTORE_EMULATOR_HOST") or "").strip() or None
 
 
 def validate() -> None:
-    """Refuse un mode dev incohérent (fail-closed). Appelé au démarrage du serveur."""
+    """Reject an inconsistent dev mode (fail-closed). Called at server startup."""
     if not is_dev():
         return
     if os.environ.get("K_SERVICE"):
-        raise RuntimeError("ALJ_ENV=dev est interdit sur Cloud Run (K_SERVICE présent).")
+        raise RuntimeError("ALJ_ENV=dev is forbidden on Cloud Run (K_SERVICE is set).")
     missing = [k for k in ("FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_HOST")
                if not (os.environ.get(k) or "").strip()]
     if missing:
-        raise RuntimeError(f"ALJ_ENV=dev exige l'émulateur Firebase : {', '.join(missing)} manquant(s).")
+        raise RuntimeError(f"ALJ_ENV=dev requires the Firebase emulator: missing {', '.join(missing)}.")
 
 
 def firestore_base_url() -> str:
@@ -65,7 +65,7 @@ def project_id_override() -> Optional[str]:
 
 
 def client_config() -> Dict[str, Any]:
-    """Configuration exposée au navigateur (/runtime-config.js) : rien en production."""
+    """Configuration exposed to the browser (/runtime-config.js): nothing in production."""
     if not is_dev():
         return {"env": "prod"}
     return {
