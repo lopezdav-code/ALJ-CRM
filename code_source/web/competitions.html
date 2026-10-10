@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="18">
-<title>ALJ Escalade — Gestion des Compétitions (v18)</title>
+<meta name="alj-web-version" content="19">
+<title>ALJ Escalade — Gestion des Compétitions (v19)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,6 +16,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/runtime-config.js"></script>
+<script src="/static-web/alj-firebase.js"></script>
 <style>
   :root {
     --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
@@ -157,7 +159,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v18</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v19</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="annuaire-link" href="/index?vue=pwa" title="Annuaire des adhérents" style="display:none;align-items:center;text-decoration:none">📇</a>
@@ -575,17 +577,8 @@
 "use strict";
 
 /* ===================== Firebase (Auth + Firestore temps réel) ===================== */
-const firebaseConfig = {
-  apiKey: "AIzaSyDtwH7A6XokZZjUcyoL83gx9ZjyuN4IJoQ",
-  authDomain: "smart-amplifier-510811-n6.firebaseapp.com",
-  projectId: "smart-amplifier-510811-n6",
-  storageBucket: "smart-amplifier-510811-n6.firebasestorage.app",
-  messagingSenderId: "796572126711",
-  appId: "1:796572126711:web:a827fd60c313ba2c46f2f2"
-};
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const fsdb = firebase.firestore();
+// Configuration du projet et émulateur (dev) : /static-web/alj-firebase.js
+const { auth, db: fsdb } = ALJFirebase.init();
 
 let user = null;                 // compte Firebase Auth connecté
 let comps = [];                  // documents de la collection "competitions"
@@ -768,6 +761,7 @@ const OAUTH_CLIENT_ID = "796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.goog
 const OAUTH_SCOPES = "openid email profile";
 
 function login() {
+  if (ALJFirebase.isEmulator) { ALJFirebase.devLogin(); return; }  // dev : émulateur Auth
   const state = Array.from(crypto.getRandomValues(new Uint8Array(16)),
     b => b.toString(16).padStart(2, "0")).join("");
   sessionStorage.setItem("alj_oauth_state", state);
@@ -2689,16 +2683,23 @@ async function forceWebUpdate() {
 
   // Retour de Google après la redirection OAuth : access_token dans le fragment (#…)
   // → connexion Firebase avec le credential Google (pas de domaine tiers impliqué)
+  // Connexion demandée depuis une autre page du site (annuaire, bureau) : on y retourne
+  const returnAfterLogin = () => {
+    const back = sessionStorage.getItem("alj_after_login") || "";
+    sessionStorage.removeItem("alj_after_login");
+    if (/^\/[^\/\\]/.test(back)) { location.replace(back); return true; }
+    return false;
+  };
   try {
     const oauthToken = readOauthFragment();
     if (oauthToken) {
       setSyncInfo("Connexion Firebase…");
       const credential = firebase.auth.GoogleAuthProvider.credential(null, oauthToken);
       await auth.signInWithCredential(credential);
-      // Connexion demandée depuis une autre page du site (annuaire) : on y retourne
-      const back = sessionStorage.getItem("alj_after_login") || "";
-      sessionStorage.removeItem("alj_after_login");
-      if (/^\/[^\/\\]/.test(back)) { location.replace(back); return; }
+      if (returnAfterLogin()) return;
+    } else if (await ALJFirebase.completeDevLogin()) {
+      // Dev : retour du sélecteur de comptes de l'émulateur Auth
+      if (returnAfterLogin()) return;
     } else if (new URLSearchParams(location.search).get("login") === "1") {
       // Arrivée depuis l'annuaire (bouton « Se connecter ») : lance la connexion Google
       history.replaceState(null, "", location.pathname);

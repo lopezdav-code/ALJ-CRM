@@ -1,0 +1,34 @@
+# Environnement de développement local : émulateur Firebase (projet fictif demo-alj).
+#   docker compose -f dev/docker-compose.yml up -d     → UI http://localhost:4000
+name: alj-dev
+
+services:
+  firebase-emulator:
+    build: ./emulator
+    image: alj-firebase-emulator:15.31.0
+    ports:
+      - "127.0.0.1:4000:4000"   # interface de l'émulateur
+      - "127.0.0.1:8081:8081"   # Firestore
+      - "127.0.0.1:9099:9099"   # Auth
+      - "127.0.0.1:9150:9150"   # websocket de l'UI Firestore (onglet « Requests »)
+    volumes:
+      # firebase.json + firestore.rules (les vraies règles de production sont appliquées)
+      - ../firebase.json:/workspace/firebase.json:ro
+      - ../firestore.rules:/workspace/firestore.rules:ro
+      # Données persistées entre deux redémarrages (export à l'arrêt, import au démarrage)
+      # (sous-dossier export/ : firebase-tools recrée le dossier cible, impossible sur un point de montage)
+      - ./.emulator-data:/persist
+    stop_grace_period: 30s   # laisse le temps à --export-on-exit
+
+  # Capture SMTP : l'application envoie via son SMTP habituel (dev/dev.env), Mailpit garde
+  # les messages en mémoire sans jamais les relayer. Lecture : http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP (application → Mailpit)
+      - "127.0.0.1:8025:8025"   # interface web de lecture des e-mails capturés
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"       # l'application appelle toujours login() : tout identifiant accepté
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"   # … sans TLS (STARTTLS non proposé, l'application poursuit)
+      MP_MAX_MESSAGES: "500"
+      MP_VERBOSE: "true"                 # journalise chaque message reçu (docker compose logs -f mailpit)

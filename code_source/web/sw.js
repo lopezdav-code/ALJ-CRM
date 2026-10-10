@@ -1,5 +1,5 @@
 // Doit correspondre à <meta name="alj-web-version"> de competitions.html, index.html et bureau/*.html
-const CACHE_NAME = "alj-escalade-v18";
+const CACHE_NAME = "alj-escalade-v19";
 const ASSETS_TO_CACHE = [
   "/competitions",
   "/index",
@@ -17,6 +17,7 @@ const ASSETS_TO_CACHE = [
   "/static-web/alj-vue.js",
   "/static-web/alj-members.js",
   "/static-web/alj-filters.js",
+  "/static-web/alj-firebase.js",
   "/manifest.webmanifest",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
@@ -54,6 +55,7 @@ self.addEventListener("fetch", (event) => {
   // 1. Les requêtes d'API, OAuth ou POST vont directement sur le réseau
   if (
     event.request.method !== "GET" ||
+    url.pathname === "/runtime-config.js" ||   // configuration d'exécution : jamais en cache
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/webhooks/") ||
     url.hostname.includes("googleapis.com") ||

@@ -15,11 +15,11 @@ from typing import Dict, Any, List, Optional
 
 import requests
 
+from infrastructure import runtime_env
 from infrastructure.secret_store import SecretStore
 from infrastructure.google_drive_client import GoogleDriveClient
 
 DEFAULT_PROJECT_ID = "smart-amplifier-510811-n6"
-FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
 DATABASE_PATH = "projects/{pid}/databases/(default)/documents"
 
 # Le nombre maximal d'écritures par requête :commit est limité à 500.
@@ -123,6 +123,7 @@ class FirestoreClient:
         # un projet différent de celui du service Cloud Run), puis historique
         # GOOGLE_PROJECT_ID, puis le projet Firebase du club.
         return (
+            runtime_env.project_id_override() or
             SecretStore.get_secret("FIREBASE_PROJECT_ID") or
             SecretStore.get_secret("GOOGLE_PROJECT_ID") or
             DEFAULT_PROJECT_ID
@@ -130,7 +131,10 @@ class FirestoreClient:
 
     @classmethod
     def get_access_token(cls) -> str:
-        """Jeton d'accès : metadata server sur GCP/Cloud Run, OAuth2 du club sinon."""
+        """Jeton d'accès : émulateur en dev, metadata server sur GCP/Cloud Run, OAuth2 du club sinon."""
+        emulator_tok = runtime_env.emulator_token()
+        if emulator_tok:
+            return emulator_tok
         if os.environ.get("K_SERVICE") or os.environ.get("K_CONFIGURATION"):
             try:
                 url = ("http://metadata.google.internal/computeMetadata/v1/instance/"
@@ -145,7 +149,7 @@ class FirestoreClient:
     @classmethod
     def database_url(cls, project_id: Optional[str] = None) -> str:
         pid = project_id or cls.get_project_id()
-        return f"{FIRESTORE_BASE_URL}/{DATABASE_PATH.format(pid=pid)}"
+        return f"{runtime_env.firestore_base_url()}/{DATABASE_PATH.format(pid=pid)}"
 
     @classmethod
     def _headers(cls, access_token: Optional[str] = None) -> Dict[str, str]:
@@ -244,17 +248,27 @@ class FirestoreClient:
         patch = {k: v for k, v in (patch or {}).items() if k not in META_KEYS}
         if not patch:
             return False
-        url = f"{cls.database_url(project_id)}/{collection_name}/{doc_id}"
         field_paths = list(patch.keys())
-        params = []
-        for p in field_paths:
-            params.append(("updateMask.fieldPaths", p))
-        if expected_update_time:
-            params.append(("currentDocument.updateTime", expected_update_time))
-        payload = {"fields": dict_to_firestore_fields(patch)}
+        fields = dict_to_firestore_fields(patch)
         try:
-            resp = requests.patch(url, headers=cls._headers(access_token),
-                                  params=params, json=payload, timeout=30)
+            if expected_update_time:
+                # Précondition dans le corps d'un :commit (forme également utilisée par
+                # cloud_database) : le paramètre d'URL `currentDocument.updateTime` est
+                # ignoré par l'émulateur Firestore, qui refuse alors toute écriture.
+                pid = project_id or cls.get_project_id()
+                name = f"{DATABASE_PATH.format(pid=pid)}/{collection_name}/{doc_id}"
+                body = {"writes": [{
+                    "update": {"name": name, "fields": fields},
+                    "updateMask": {"fieldPaths": field_paths},
+                    "currentDocument": {"updateTime": expected_update_time},
+                }]}
+                resp = requests.post(f"{cls.database_url(pid)}:commit",
+                                     headers=cls._headers(access_token), json=body, timeout=30)
+            else:
+                url = f"{cls.database_url(project_id)}/{collection_name}/{doc_id}"
+                params = [("updateMask.fieldPaths", p) for p in field_paths]
+                resp = requests.patch(url, headers=cls._headers(access_token),
+                                      params=params, json={"fields": fields}, timeout=30)
         except requests.RequestException as e:
             raise FirestoreError(f"Firestore injoignable ({collection_name}/{doc_id}) : {e}")
         if resp.status_code in (200, 201):
@@ -294,7 +308,7 @@ class FirestoreClient:
         Retourne un rapport {written, errors_count, errors}.
         """
         pid = project_id or cls.get_project_id()
-        url = f"{FIRESTORE_BASE_URL}/{DATABASE_PATH.format(pid=pid)}:commit"
+        url = f"{runtime_env.firestore_base_url()}/{DATABASE_PATH.format(pid=pid)}:commit"
         headers = cls._headers(access_token)
         report = {"written": 0, "errors_count": 0, "errors": []}
         for chunk_start in range(0, len(writes), BATCH_WRITE_LIMIT):

@@ -576,5 +576,59 @@ class TestBureauAccess(unittest.TestCase):
         self.assertEqual(r("GET", "/api/email-status"), "coach")
 
 
+class TestFirebaseInitUnique(unittest.TestCase):
+    """Initialisation Firebase centralisée (alj-firebase.js) et configuration d'exécution
+    servie par le serveur (/runtime-config.js) : base du mode dev sur émulateur."""
+
+    PAGES = [os.path.join(WEB, "competitions.html"), os.path.join(WEB, "index.html")] + [
+        os.path.join(BUREAU, n) for n in sorted(os.listdir(BUREAU)) if n.endswith(".html")]
+
+    def test_pages_chargent_la_config_puis_l_init(self):
+        sdk = '<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>'
+        for path in self.PAGES:
+            html = _read(path)
+            i_sdk = html.index(sdk)
+            i_cfg = html.index('<script src="/runtime-config.js"></script>')
+            i_init = html.index('<script src="/static-web/alj-firebase.js"></script>')
+            self.assertLess(i_sdk, i_cfg, path)
+            self.assertLess(i_cfg, i_init, path)
+
+    def test_configuration_firebase_definie_une_seule_fois(self):
+        files = self.PAGES + [os.path.join(SHARED, n) for n in os.listdir(SHARED) if n.endswith(".js")]
+        owners = [os.path.basename(p) for p in files if "apiKey:" in _read(p)]
+        self.assertEqual(owners, ["alj-firebase.js"])
+        for path in files:
+            self.assertNotIn("firebase.initializeApp(", _read(path).replace(
+                "firebase.initializeApp(config)", ""), path)
+
+    def test_service_worker_ne_met_pas_en_cache_la_config(self):
+        sw = _read(get_sw().path)
+        self.assertIn('"/static-web/alj-firebase.js"', sw)
+        self.assertNotIn('"/runtime-config.js",', sw)
+        self.assertIn('url.pathname === "/runtime-config.js"', sw)
+
+    def test_runtime_config_est_publique(self):
+        self.assertIsNone(api_auth.required_role("GET", "/runtime-config.js"))
+
+
+class TestImportsModulesPartages(unittest.TestCase):
+    """Chaque nom importé depuis /static-web/*.js est bien exporté par ce module
+    (sinon SyntaxError au chargement de la page, invisible côté serveur)."""
+
+    IMPORT_RE = re.compile(r'import\s*\{([^}]*)\}\s*from\s*"/static-web/([\w.-]+\.js)"')
+    EXPORT_RE = re.compile(r'^export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+(\w+)', re.M)
+
+    def test_noms_importes_exportes(self):
+        files = [os.path.join(WEB, n) for n in os.listdir(WEB) if n.endswith(".html")]
+        files += [os.path.join(BUREAU, n) for n in os.listdir(BUREAU) if n.endswith(".html")]
+        files += [os.path.join(SHARED, n) for n in os.listdir(SHARED) if n.endswith(".js")]
+        for path in files:
+            for names, module in self.IMPORT_RE.findall(_read(path)):
+                exported = set(self.EXPORT_RE.findall(_read(os.path.join(SHARED, module))))
+                for name in filter(None, (n.split(" as ")[0].strip() for n in names.split(","))):
+                    with self.subTest(page=os.path.basename(path), module=module, name=name):
+                        self.assertIn(name, exported)
+
+
 if __name__ == "__main__":
     unittest.main()

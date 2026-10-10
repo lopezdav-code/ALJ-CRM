@@ -68,6 +68,7 @@ PUBLIC_PATHS = frozenset({
     "/index",
     "/sw.js",
     "/manifest.webmanifest",
+    "/runtime-config.js",
     "/favicon.ico",
     "/api/web-version",
     "/webhooks/helloasso",

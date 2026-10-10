@@ -25,6 +25,10 @@ load_dotenv()
 
 from domain.constants import get_active_season, APP_VERSION
 from infrastructure.secret_store import SecretStore
+from infrastructure import runtime_env
+
+# Mode dev (émulateur Firebase) incohérent ou lancé sur Cloud Run : arrêt immédiat.
+runtime_env.validate()
 
 
 def get_target_slug():
@@ -53,7 +57,9 @@ async def cloud_db_middleware(request, call_next):
     Enregistré avant le contrôle d'accès : il ne s'exécute qu'après lui."""
     path = request.url.path
     relevant = path.startswith("/api/") or path in ("/map", "/pivot")
-    if relevant and os.environ.get("K_SERVICE") and CloudDatabase.is_enabled():
+    # Cloud Run, ou dev local sur l'émulateur : le cache suit Firestore comme en production
+    server_mode = os.environ.get("K_SERVICE") or runtime_env.is_dev()
+    if relevant and server_mode and CloudDatabase.is_enabled():
         await run_in_threadpool(CloudDatabase.ensure_fresh, 30)
     response = await call_next(request)
     if relevant and request.method not in ("GET", "HEAD", "OPTIONS") and CloudDatabase.is_enabled():
@@ -948,6 +954,16 @@ def get_sw():
     if os.path.exists(p):
         return FileResponse(p, media_type="application/javascript")
     return HTMLResponse("Not found", status_code=404)
+
+@app.get("/runtime-config.js", include_in_schema=False)
+def get_runtime_config():
+    """Configuration d'exécution du navigateur (émulateur Firebase en dev, rien en production)."""
+    payload = json.dumps(runtime_env.client_config(), ensure_ascii=False)
+    return Response(
+        content=f"window.ALJ_RUNTIME = Object.freeze({payload});\n",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
 
 @app.get("/health")
 def health_check():

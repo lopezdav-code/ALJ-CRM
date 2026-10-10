@@ -3,15 +3,6 @@
    Ne contient aucune donnée d'adhérent. Les rôles sont des miroirs de
    firestore.rules et de src/infrastructure/api_auth.py (un test vérifie les listes). */
 
-export const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDtwH7A6XokZZjUcyoL83gx9ZjyuN4IJoQ",
-  authDomain: "smart-amplifier-510811-n6.firebaseapp.com",
-  projectId: "smart-amplifier-510811-n6",
-  storageBucket: "smart-amplifier-510811-n6.firebasestorage.app",
-  messagingSenderId: "796572126711",
-  appId: "1:796572126711:web:a827fd60c313ba2c46f2f2"
-};
-
 /* Mêmes listes que competitions.html / index.html. COACH_EMAILS contient aussi les
    administrateurs (convention des pages PWA). */
 export const ADMIN_DOMAIN = "alj-escalade.fr";
@@ -32,13 +23,9 @@ export const COMPETITIONS_URL = "/competitions";
 export const WEB_VERSION = (document.querySelector('meta[name="alj-web-version"]') || {}).content || "?";
 
 /* ===================== Firebase ===================== */
-let firebaseReady = false;
+/* Configuration et émulateur (dev) : voir alj-firebase.js. */
 export function initFirebase() {
-  if (!firebaseReady) {
-    firebase.initializeApp(FIREBASE_CONFIG);
-    firebaseReady = true;
-  }
-  return { auth: firebase.auth(), db: firebase.firestore() };
+  return window.ALJFirebase.init();
 }
 
 /* ===================== Rôles ===================== */

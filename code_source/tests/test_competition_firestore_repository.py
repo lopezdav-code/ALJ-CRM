@@ -601,20 +601,34 @@ class TestFirestoreClientPrecondition(unittest.TestCase):
         self.assertEqual(list(fields), ["nom"])
 
     def test_update_fields_envoie_la_precondition(self):
+        """Précondition dans le corps d'un :commit (le paramètre d'URL est ignoré par l'émulateur)."""
+        with patch.object(fc.requests, "post") as mock_post, \
+             patch.object(FirestoreClient, "get_access_token", return_value="tok"):
+            mock_post.return_value.status_code = 200
+            FirestoreClient.update_fields("competitions", "1", {"x": 1, "_update_time": "T"},
+                                          project_id="p", expected_update_time="T0")
+        self.assertTrue(mock_post.call_args.args[0].endswith("/projects/p/databases/(default)/documents:commit"))
+        write = mock_post.call_args.kwargs["json"]["writes"][0]
+        self.assertEqual(write["currentDocument"], {"updateTime": "T0"})
+        self.assertEqual(write["updateMask"], {"fieldPaths": ["x"]})
+        self.assertEqual(write["update"]["name"], "projects/p/databases/(default)/documents/competitions/1")
+        self.assertEqual(list(write["update"]["fields"]), ["x"])
+
+    def test_update_fields_sans_precondition_utilise_patch(self):
         with patch.object(fc.requests, "patch") as mock_patch, \
              patch.object(FirestoreClient, "get_access_token", return_value="tok"):
             mock_patch.return_value.status_code = 200
-            FirestoreClient.update_fields("competitions", "1", {"x": 1, "_update_time": "T"},
-                                          project_id="p", expected_update_time="T0")
+            FirestoreClient.update_fields("competitions", "1", {"x": 1}, project_id="p")
         params = mock_patch.call_args.kwargs["params"]
-        self.assertIn(("currentDocument.updateTime", "T0"), params)
-        self.assertEqual([v for k, v in params if k == "updateMask.fieldPaths"], ["x"])
+        self.assertEqual(params, [("updateMask.fieldPaths", "x")])
 
     def test_update_fields_conflit(self):
-        with patch.object(fc.requests, "patch") as mock_patch, \
+        with patch.object(fc.requests, "post") as mock_post, \
+             patch.object(fc.requests, "patch") as mock_patch, \
              patch.object(FirestoreClient, "get_access_token", return_value="tok"):
-            mock_patch.return_value.status_code = 400
-            mock_patch.return_value.text = '{"error": {"status": "FAILED_PRECONDITION"}}'
+            for mock in (mock_post, mock_patch):
+                mock.return_value.status_code = 400
+                mock.return_value.text = '{"error": {"status": "FAILED_PRECONDITION"}}'
             with self.assertRaises(fc.FirestoreConflictError):
                 FirestoreClient.update_fields("competitions", "1", {"x": 1},
                                               project_id="p", expected_update_time="T0")
