@@ -51,8 +51,8 @@ Arrêt : `Ctrl+C` pour le serveur, `docker compose -f dev/docker-compose.yml dow
 | Compte | Rôle |
 |---|---|
 | `albus.dumbledore@alj-escalade.fr` | admin |
-| `severus.snape@poudlard.example` | coach |
-| `argus.filch@poudlard.example` | lecture seule |
+| `severus.snape@hogwarts.example` | coach |
+| `argus.filch@hogwarts.example` | lecture seule |
 
 ### À savoir
 

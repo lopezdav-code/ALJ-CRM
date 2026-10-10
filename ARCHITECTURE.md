@@ -213,7 +213,7 @@ dev/run_server.sh                                   # http://localhost:8080/bure
 ```
 
 Connexion par le sélecteur de comptes de l'émulateur : `albus.dumbledore@alj-escalade.fr` (admin),
-`severus.snape@poudlard.example` (coach), `argus.filch@poudlard.example` (lecture seule).
+`severus.snape@hogwarts.example` (coach), `argus.filch@hogwarts.example` (lecture seule).
 
 Fonctionnement :
 
