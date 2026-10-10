@@ -70,7 +70,7 @@ class TestBureauFiles(unittest.TestCase):
     def test_bureau_pages_share_web_version(self):
         version = _current_version()
         self.assertRegex(version, r"^\d+$")
-        for name in ("index.html", "adherents.html", "outils.html"):
+        for name in ("index.html", "adherents.html", "communications.html", "competitions.html", "outils.html"):
             html = _read(os.path.join(BUREAU, name))
             self.assertIn(f'<meta name="alj-web-version" content="{version}">', html, name)
             self.assertRegex(html, rf"<title>[^<]*\(v{version}\)</title>", name)
@@ -79,7 +79,7 @@ class TestBureauFiles(unittest.TestCase):
         sw = _read(get_sw().path)
         version = _current_version()
         self.assertIn(f'CACHE_NAME = "alj-escalade-v{version}"', sw)
-        for asset in ("/bureau/", "/bureau/adherents", "/bureau/outils",
+        for asset in ("/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/outils",
                       "/static-web/alj.css", "/static-web/alj-core.js",
                       "/static-web/alj-shell.js", "/static-web/alj-vue.js",
                       "/static-web/alj-members.js", "/static-web/alj-filters.js"):
