@@ -1,8 +1,10 @@
+from __future__ import annotations
 import os
 import sqlite3
 import datetime
 import pandas as pd
 import json
+from typing import Optional, Tuple, List, Dict, Any
 from paths import CODE_ROOT, ROOT_DIR, DATA_ROOT, LEGACY_DB_PATH
 from domain.constants import CORRECTIVE_MAP
 from infrastructure import schema_v2
