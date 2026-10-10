@@ -353,7 +353,7 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('/bureau/communications', index)
 
         # Contrôles de la page
-        for elem in ("template-select", "btn-save-tpl", "btn-new-tpl", "btn-del-tpl",
+        for elem in ("template-select", "template-name-input", "btn-save-tpl", "btn-new-tpl", "btn-del-tpl",
                       "sender-email", "sender-name", "subject-input", "body-input",
                       "signature-checkbox", "whatsapp-input", "pv-from", "pv-subject", "pv-body"):
             self.assertIn(f'id="{elem}"', html)
@@ -415,14 +415,31 @@ class TestBureauFiles(unittest.TestCase):
             names = [t["name"] for t in res_list.get("templates", [])]
             self.assertIn("Test Nouveau Modèle", names)
 
-            # 3. Suppression du modèle
-            res_del = delete_email_template_api("Test Nouveau Modèle")
+            # 3. Renommage du modèle (old_name -> name)
+            rename_payload = {
+                "name": "Test Modèle Renommé",
+                "old_name": "Test Nouveau Modèle",
+                "subject": "Sujet mis à jour",
+                "body": "Bonjour {first_name}, corps mis à jour.",
+                "sender_email": "test@alj-escalade.fr",
+                "sender_name": "ALJ Test"
+            }
+            res_rename = save_email_template_api(rename_payload)
+            self.assertEqual(res_rename.get("status"), "success")
+
+            res_list_renamed = get_email_templates()
+            names_renamed = [t["name"] for t in res_list_renamed.get("templates", [])]
+            self.assertIn("Test Modèle Renommé", names_renamed)
+            self.assertNotIn("Test Nouveau Modèle", names_renamed)
+
+            # 4. Suppression du modèle
+            res_del = delete_email_template_api("Test Modèle Renommé")
             self.assertEqual(res_del.get("status"), "success")
 
-            # 4. Vérification que le modèle a disparu
+            # 5. Vérification que le modèle a disparu
             res_list2 = get_email_templates()
             names2 = [t["name"] for t in res_list2.get("templates", [])]
-            self.assertNotIn("Test Nouveau Modèle", names2)
+            self.assertNotIn("Test Modèle Renommé", names2)
         finally:
             SqliteRepository.set_db_path(orig_db_path)
             shutil.rmtree(temp_dir, ignore_errors=True)

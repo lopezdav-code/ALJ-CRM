@@ -1685,10 +1685,11 @@ class SqliteRepository:
             conn.close()
 
     @classmethod
-    def save_email_template(cls, name: str, subject: str, body: str, sender_email: str = "", sender_name: str = "") -> bool:
+    def save_email_template(cls, name: str, subject: str, body: str, sender_email: str = "", sender_name: str = "", old_name: Optional[str] = None) -> bool:
         """
         Enregistre ou met à jour un template d'email dans la BDD
         (avec son adresse et son nom d'affichage d'expédition).
+        Si old_name est fourni et différent de name, le template existant est renommé.
         Une adresse / un nom vide retombe sur les valeurs par défaut du club.
         """
         cls.setup_database()
@@ -1697,12 +1698,25 @@ class SqliteRepository:
         try:
             sender = (sender_email or "").strip() or DEFAULT_SENDER_EMAIL
             sname = (sender_name or "").strip() or DEFAULT_SENDER_NAME
+            new_name = name.strip()
+            clean_old = (old_name or "").strip()
+
+            if clean_old and clean_old != new_name:
+                cursor.execute("""
+                    UPDATE email_templates
+                    SET name = ?, subject = ?, body = ?, sender_email = ?, sender_name = ?
+                    WHERE name = ?
+                """, (new_name, subject.strip(), body.strip(), sender, sname, clean_old))
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return True
+
             cursor.execute("""
                 INSERT INTO email_templates (name, subject, body, sender_email, sender_name)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET subject = excluded.subject, body = excluded.body,
                     sender_email = excluded.sender_email, sender_name = excluded.sender_name
-            """, (name.strip(), subject.strip(), body.strip(), sender, sname))
+            """, (new_name, subject.strip(), body.strip(), sender, sname))
             conn.commit()
             return True
         except Exception as e:

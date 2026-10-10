@@ -1065,6 +1065,7 @@ def save_email_template_api(data: Dict[str, Any] = Body(...)):
     try:
         from infrastructure.sqlite_repository import SqliteRepository
         name = str(data.get("name") or "").strip()
+        old_name = str(data.get("old_name") or "").strip() or None
         subject = str(data.get("subject") or "").strip()
         body = str(data.get("body") or "").strip()
         sender_email = str(data.get("sender_email") or "").strip()
@@ -1080,7 +1081,8 @@ def save_email_template_api(data: Dict[str, Any] = Body(...)):
             subject=subject,
             body=body,
             sender_email=sender_email,
-            sender_name=sender_name
+            sender_name=sender_name,
+            old_name=old_name
         )
         if not ok:
             return JSONResponse(status_code=500, content={"status": "error", "message": f"Impossible d'enregistrer le modèle '{name}'."})

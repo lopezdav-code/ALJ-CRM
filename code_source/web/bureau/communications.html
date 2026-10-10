@@ -113,18 +113,30 @@ startBureau({
         <!-- Colonne gauche : Gestion et Édition du modèle -->
         <div style="display:flex; flex-direction:column; gap:14px;">
 
-          <!-- Carte 1 : Sélecteur de modèle (Design desktop) -->
+          <!-- Carte 1 : Sélecteur de modèle et Titre éditable (Design desktop) -->
           <div class="card" style="padding:14px;">
-            <div class="section-h" style="margin:0 0 8px;">📄 Modèle d'e-mail</div>
-            <div class="tpl-bar">
-              <select id="template-select" class="select-input" style="flex:1; min-width:200px; font-weight:600;"></select>
-              ${isAdmin ? `
-                <button class="btn btn-primary" id="btn-save-tpl">💾 Enregistrer</button>
-                <button class="btn btn-muted" id="btn-new-tpl">➕ Nouveau</button>
-                <button class="btn btn-muted" id="btn-del-tpl" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>
-              ` : `
-                <span class="muted" style="font-size:12px; font-style:italic;">Lecture seule (réservé aux admins)</span>
-              `}
+            <div class="section-h" style="margin:0 0 10px;">📄 Modèle d'e-mail</div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div class="tpl-bar">
+                <div style="flex:1; min-width:200px;">
+                  <label class="fld" style="margin:0 0 4px;">Sélectionner un modèle</label>
+                  <select id="template-select" class="select-input" style="width:100%; font-weight:600;"></select>
+                </div>
+                ${isAdmin ? `
+                  <div style="display:flex; gap:6px; align-items:flex-end;">
+                    <button class="btn btn-primary" id="btn-save-tpl">💾 Enregistrer</button>
+                    <button class="btn btn-muted" id="btn-new-tpl">➕ Nouveau</button>
+                    <button class="btn btn-muted" id="btn-del-tpl" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>
+                  </div>
+                ` : `
+                  <span class="muted" style="font-size:12px; font-style:italic; align-self:flex-end;">Lecture seule (réservé aux admins)</span>
+                `}
+              </div>
+
+              <div>
+                <label class="fld" style="margin-top:2px;">Titre / Nom du modèle *</label>
+                <input type="text" id="template-name-input" class="search-input" placeholder="Titre du modèle…" style="width:100%; font-weight:700; color:var(--blue);" ${isAdmin ? "" : "disabled"}>
+              </div>
             </div>
           </div>
 
@@ -287,6 +299,7 @@ startBureau({
 
     // Éléments du formulaire
     const tplSelect = document.getElementById("template-select");
+    const tplNameInput = document.getElementById("template-name-input");
     const senderEmailInput = document.getElementById("sender-email");
     const senderNameInput = document.getElementById("sender-name");
     const subjectInput = document.getElementById("subject-input");
@@ -331,6 +344,7 @@ startBureau({
       if (!t) return;
       currentTemplate = t;
       tplSelect.value = t.name;
+      if (tplNameInput) tplNameInput.value = t.name;
 
       subjectInput.value = t.subject || "";
       bodyInput.value = t.body || "";
@@ -427,9 +441,11 @@ startBureau({
     const btnSave = document.getElementById("btn-save-tpl");
     if (btnSave) {
       btnSave.addEventListener("click", async () => {
-        const name = tplSelect.value.trim();
-        if (!name) {
-          toast("⚠️ Veuillez sélectionner un modèle d'e-mail.");
+        const oldName = tplSelect.value.trim();
+        const newName = (tplNameInput ? tplNameInput.value : oldName).trim();
+
+        if (!newName) {
+          toast("⚠️ Le titre du modèle ne peut pas être vide.");
           return;
         }
 
@@ -455,7 +471,8 @@ startBureau({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: name,
+              name: newName,
+              old_name: oldName,
               subject: subj,
               body: body,
               sender_email: sEmail,
@@ -464,8 +481,8 @@ startBureau({
           });
 
           if (res.ok) {
-            toast(`💾 Modèle « ${name} » enregistré avec succès !`);
-            await loadTemplates(name);
+            toast(`💾 Modèle « ${newName} » enregistré avec succès !`);
+            await loadTemplates(newName);
           } else {
             const err = await res.json().catch(() => ({}));
             toast("❌ Erreur d'enregistrement : " + (err.message || res.statusText), 8000);
