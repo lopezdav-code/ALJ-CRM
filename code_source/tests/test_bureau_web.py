@@ -523,6 +523,16 @@ class TestBureauFiles(unittest.TestCase):
         for name in names:
             self.assertRegex(core, rf"export (function|const|async function) {name}\b", name)
 
+    def test_competitions_bureau_imports_exist_in_core(self):
+        """Chaque nom importé par bureau/competitions.html depuis alj-core.js existe bien."""
+        comp_html = _read(os.path.join(BUREAU, "competitions.html"))
+        core = _read(os.path.join(SHARED, "alj-core.js"))
+        block = re.search(r"import\s*\{([^}]+)\}\s*from\s*\"/static-web/alj-core\.js\"", comp_html).group(1)
+        names = [n.strip() for n in block.split(",") if n.strip()]
+        self.assertTrue(names)
+        for name in names:
+            self.assertRegex(core, rf"export (function|const|async function) {name}\b", name)
+
     def test_core_roles_match_api_and_rules(self):
         core = _read(os.path.join(SHARED, "alj-core.js"))
 

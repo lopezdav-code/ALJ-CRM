@@ -56,6 +56,17 @@ export function isStaff(role) {
   return role === "admin" || role === "coach";
 }
 
+/* ===================== Formatage ===================== */
+export function fmtDay(s) {
+  if (!s) return "";
+  const str = String(s).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const fr = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (fr) return `${fr[1].padStart(2, "0")}/${fr[2].padStart(2, "0")}/${fr[3]}`;
+  return str;
+}
+
 /* ===================== Connexion ===================== */
 /* La connexion Google passe par la page des compétitions (même origine, URI de
    redirection OAuth déjà autorisée), qui renvoie ensuite à la page d'origine. */
