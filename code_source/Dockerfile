@@ -47,8 +47,8 @@ USER appuser
 EXPOSE 8080
 
 # 5. Sonde de santé interne
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request, os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", 8080)}/health')"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request, os; port = os.environ.get('PORT', '8080'); urllib.request.urlopen('http://127.0.0.1:' + port + '/health')"
 
 # 6. Lancement du serveur FastAPI avec Uvicorn
-CMD exec uvicorn server:app --app-dir /app/src --host 0.0.0.0 --port ${PORT:-8080}
+CMD ["sh", "-c", "exec uvicorn server:app --app-dir /app/src --host 0.0.0.0 --port ${PORT:-8080}"]

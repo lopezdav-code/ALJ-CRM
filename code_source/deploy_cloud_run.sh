@@ -32,7 +32,7 @@ echo "  - Projet Google Cloud : $CURRENT_PROJECT"
 echo "  - Service             : $SERVICE_NAME"
 echo "  - Région              : $REGION"
 echo "  - Instances min/max   : 0 min (0€ au repos) / 2 max"
-echo "  - Mémoire             : 512 MiB (Free Tier)"
+echo "  - Mémoire             : 1 GiB (Free Tier)"
 echo ""
 
 read -p "Lancer le déploiement sur ce projet ? (O/n) : " CONFIRM
@@ -51,11 +51,11 @@ gcloud run deploy "$SERVICE_NAME" \
     --region "$REGION" \
     --platform managed \
     --allow-unauthenticated \
-    --memory 512Mi \
+    --memory 1Gi \
     --cpu 1 \
     --min-instances 0 \
     --max-instances 2 \
-    --timeout 60
+    --timeout 300
 
 echo ""
 echo "=============================================================================="
