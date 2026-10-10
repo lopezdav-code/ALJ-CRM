@@ -169,10 +169,18 @@ def build_attestation(
             html = re.sub(r'src=["\']logo\.png["\']', f'src="{logo_data}"', html)
 
     sig_path = _find_image_path("signature.jpg") or _find_image_path("doc/signature.jpg")
+    sig_data = None
     if sig_path:
         sig_data = _image_to_base64_data_uri(sig_path, "image/jpeg")
-        if sig_data:
-            html = re.sub(r'src=["\'](?:doc/)?signature\.jpg["\']', f'src="{sig_data}"', html)
+    if not sig_data:
+        try:
+            from domain.signature_asset import OFFICIAL_SIGNATURE_DATA_URI
+            sig_data = OFFICIAL_SIGNATURE_DATA_URI
+        except Exception:
+            sig_data = None
+
+    if sig_data:
+        html = re.sub(r'src=["\'](?:doc/)?signature\.jpg["\']', f'src="{sig_data}"', html)
 
     return html
 

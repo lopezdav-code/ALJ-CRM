@@ -197,6 +197,7 @@ export function buildMembersData(raw) {
       status: p.status || "",
       status_norm: normalizeStatus(p.status),
       document_sante: p.document_sante || "",
+      email_sent_date: p.email_sent_date || "",
       season_name: s.name || "",
       creneau_groupe: creneauGroupe,
       categorie: categorie,

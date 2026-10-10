@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="alj-web-version" content="17">
+<title>ALJ Escalade — Bureau · Communications (v17)</title>
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<link rel="stylesheet" href="/static-web/alj.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+.comm-layout {
+  display: grid;
+  grid-template-columns: minmax(440px, 1.25fr) minmax(360px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .comm-layout { grid-template-columns: 1fr; }
+}
+.tpl-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tag-btn {
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  color: #1E293B;
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: monospace;
+  transition: all .15s;
+}
+.tag-btn:hover {
+  background: #EFF6FF;
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.fmt-btn {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  color: #334155;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fmt-btn:hover {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
+.email-preview-box {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 13px;
+  color: #1E293B;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.email-preview-header {
+  border-bottom: 1px solid #E2E8F0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #64748B;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.email-preview-header b {
+  color: #1E293B;
+}
+.preview-body-content {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.preview-signature {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #E2E8F0;
+  font-size: 12px;
+  color: #475569;
+}
+</style>
+</head>
+<body>
+<div id="shell"></div>
+
+<script type="module">
+import { startBureau } from "/static-web/alj-shell.js";
+import { apiFetch } from "/static-web/alj-core.js";
+
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+startBureau({
+  page: "communications",
+  title: "Communications & Modèles d'e-mails",
+  onReady: ({ role, isAdmin }) => {
+    const content = document.getElementById("content");
+
+    content.innerHTML = `
+      <div class="comm-layout">
+        <!-- Colonne gauche : Gestion et Édition du modèle -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+
+          <!-- Carte 1 : Sélecteur de modèle (Design desktop) -->
+          <div class="card" style="padding:14px;">
+            <div class="section-h" style="margin:0 0 8px;">📄 Modèle d'e-mail</div>
+            <div class="tpl-bar">
+              <select id="template-select" class="select-input" style="flex:1; min-width:200px; font-weight:600;"></select>
+              ${isAdmin ? `
+                <button class="btn btn-primary" id="btn-save-tpl">💾 Enregistrer</button>
+                <button class="btn btn-muted" id="btn-new-tpl">➕ Nouveau</button>
+                <button class="btn btn-muted" id="btn-del-tpl" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>
+              ` : `
+                <span class="muted" style="font-size:12px; font-style:italic;">Lecture seule (réservé aux admins)</span>
+              `}
+            </div>
+          </div>
+
+          <!-- Carte 2 : Message et Expéditeur (Design desktop) -->
+          <div class="card" style="padding:14px;">
+            <div class="section-h" style="margin:0 0 10px;">✉️ Message</div>
+
+            <!-- Expéditeur & Nom affiché -->
+            <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; margin-bottom:10px;">
+              <div>
+                <label class="fld">Expéditeur (De)</label>
+                <input type="email" id="sender-email" class="search-input" list="sender-suggestions" placeholder="inscription@alj-escalade.fr" style="width:100%;" ${isAdmin ? "" : "disabled"}>
+                <datalist id="sender-suggestions">
+                  <option value="inscription@alj-escalade.fr">
+                  <option value="contact@alj-escalade.fr">
+                  <option value="competitions@alj-escalade.fr">
+                  <option value="admin@alj-escalade.fr">
+                </datalist>
+              </div>
+              <div>
+                <label class="fld">Nom d'affichage</label>
+                <input type="text" id="sender-name" class="search-input" placeholder="Amicale Laïque Jonage - Inscriptions" style="width:100%;" ${isAdmin ? "" : "disabled"}>
+              </div>
+            </div>
+
+            <!-- Objet -->
+            <div style="margin-bottom:10px;">
+              <label class="fld">Objet de l'e-mail *</label>
+              <input type="text" id="subject-input" class="search-input" placeholder="Sujet de votre message…" style="width:100%;" ${isAdmin ? "" : "disabled"}>
+            </div>
+
+            <!-- Corps & Variables -->
+            <div style="margin-bottom:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label class="fld" style="margin:0;">Corps du message *</label>
+                <button type="button" class="btn btn-muted btn-mini" id="btn-toggle-vars" style="font-size:11px;">{ } Variables disponibles</button>
+              </div>
+
+              <!-- Palette déroulante de variables -->
+              <div id="vars-panel" style="display:none; background:#F8FAFC; border:1px solid #CBD5E1; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+                <div style="font-size:11px; color:#64748B; margin-bottom:6px;">Cliquez sur une variable pour l'insérer dans le texte :</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <button type="button" class="tag-btn" data-var="{first_name}">{first_name}</button>
+                  <button type="button" class="tag-btn" data-var="{last_name}">{last_name}</button>
+                  <button type="button" class="tag-btn" data-var="{tarif}">{tarif}</button>
+                  <button type="button" class="tag-btn" data-var="{season}">{season}</button>
+                  <button type="button" class="tag-btn" data-var="{amount}">{amount}</button>
+                  <button type="button" class="tag-btn" data-var="{num_licence}">{num_licence}</button>
+                  <button type="button" class="tag-btn" data-var="{nom_competition}">{nom_competition}</button>
+                  <button type="button" class="tag-btn" data-var="{date_competition}">{date_competition}</button>
+                  <button type="button" class="tag-btn" data-var="{montant_competition}">{montant_competition}</button>
+                </div>
+              </div>
+
+              <!-- Barre d'outils de formatage -->
+              <div style="display:flex; gap:6px; margin-bottom:6px;">
+                <button type="button" class="fmt-btn" data-wrap="b" title="Gras">B</button>
+                <button type="button" class="fmt-btn" data-wrap="i" title="Italique" style="font-style:italic;">I</button>
+                <button type="button" class="fmt-btn" data-wrap="u" title="Souligné" style="text-decoration:underline;">U</button>
+                <button type="button" class="fmt-btn" id="btn-wrap-link" title="Insérer un lien web">🔗 Lien</button>
+              </div>
+
+              <textarea id="body-input" class="fld-input" rows="11" placeholder="Saisissez le corps du message…" style="width:100%; font-family:inherit; font-size:13px; line-height:1.5;" ${isAdmin ? "" : "disabled"}></textarea>
+            </div>
+
+            <!-- Signature officielle -->
+            <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12.5px; color:#334155; cursor:pointer;">
+              <input type="checkbox" id="signature-checkbox" checked style="width:auto; margin:0; accent-color:var(--blue);">
+              <span>Ajouter la signature officielle ALJ Escalade (logos Facebook & Instagram)</span>
+            </label>
+          </div>
+
+          <!-- Carte 3 : Invitation WhatsApp (calquée sur le desktop) -->
+          <div class="card" style="padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div class="section-h" style="margin:0;">📱 Texte d'invitation WhatsApp</div>
+              ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-save-whatsapp">💾 Enregistrer WhatsApp</button>` : ""}
+            </div>
+            <div style="font-size:11.5px; color:#64748B; margin-bottom:6px;">
+              Modèle d'invitation envoyé pour rejoindre le groupe WhatsApp du créneau ou de la compétition :
+            </div>
+            <textarea id="whatsapp-input" class="fld-input" rows="3" placeholder="Saisissez le texte WhatsApp…" style="width:100%; font-size:12px;" ${isAdmin ? "" : "disabled"}></textarea>
+          </div>
+
+        </div>
+
+        <!-- Colonne droite : Aperçu en direct (Live Preview) -->
+        <div style="display:flex; flex-direction:column; gap:8px; position:sticky; top:12px;">
+          <div class="section-h" style="margin:4px 0 0;">👁 Aperçu en direct de l'e-mail reçu</div>
+          <div class="email-preview-box">
+            <div class="email-preview-header">
+              <div><b>De :</b> <span id="pv-from">—</span></div>
+              <div><b>À :</b> <span id="pv-to">Alex MARTIN &lt;alex.martin@example.com&gt;</span></div>
+              <div><b>Objet :</b> <span id="pv-subject" style="color:var(--blue); font-weight:700;">—</span></div>
+            </div>
+
+            <div class="preview-body-content" id="pv-body"></div>
+
+            <div class="preview-signature" id="pv-signature">
+              <div style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+                <div style="font-size:24px;">🧗</div>
+                <div>
+                  <b style="color:#1E3A8A; font-size:13px;">Amicale Laïque de Jonage — Section Escalade</b><br>
+                  <span style="font-size:11px; color:#64748B;">Mairie de Jonage · 69330 Jonage</span><br>
+                  <span style="font-size:11px; color:#3B82F6;">Suivez-nous sur Instagram & Facebook</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modale de création d'un nouveau modèle -->
+      <div id="new-template-modal" class="modal-overlay" style="display:none">
+        <div class="modal-content card" style="max-width:440px;">
+          <div class="modal-header">
+            <div class="m-name" style="font-size:15px;">➕ Nouveau modèle d'e-mail</div>
+            <button class="icon-btn" id="new-modal-close" style="color:#64748B; background:none; font-size:20px; border:none; cursor:pointer;">✕</button>
+          </div>
+          <div style="margin:10px 0 16px;">
+            <label class="fld">Nom du nouveau modèle *</label>
+            <input type="text" id="new-template-name" class="search-input" placeholder="Ex: Rappel stage vacances…" style="width:100%;">
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-muted" id="new-modal-cancel">Annuler</button>
+            <button class="btn btn-primary" id="new-modal-confirm">Créer le modèle</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="toast"></div>
+    `;
+
+    function toast(msg, ms = 4000) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    // Données d'exemple pour l'aperçu en direct
+    const DEMO_CONTEXT = {
+      first_name: "Alex",
+      last_name: "MARTIN",
+      Prénom: "Alex",
+      Nom: "MARTIN",
+      tarif: "Cours Ados 2 (Mercredi 17h30)",
+      season: "2026-2027",
+      amount: "195.00 €",
+      num_licence: "847291",
+      nom_competition: "Championnat Régional Bloc",
+      date_competition: "15/11/2026",
+      montant_competition: "15.00 €"
+    };
+
+    let templates = [];
+    let currentTemplate = null;
+
+    // Éléments du formulaire
+    const tplSelect = document.getElementById("template-select");
+    const senderEmailInput = document.getElementById("sender-email");
+    const senderNameInput = document.getElementById("sender-name");
+    const subjectInput = document.getElementById("subject-input");
+    const bodyInput = document.getElementById("body-input");
+    const sigCheckbox = document.getElementById("signature-checkbox");
+    const whatsappInput = document.getElementById("whatsapp-input");
+
+    // Éléments de l'aperçu
+    const pvFrom = document.getElementById("pv-from");
+    const pvSubject = document.getElementById("pv-subject");
+    const pvBody = document.getElementById("pv-body");
+    const pvSig = document.getElementById("pv-signature");
+
+    function updatePreview() {
+      const sName = senderNameInput.value.trim() || "Amicale Laïque Jonage - Inscriptions";
+      const sEmail = senderEmailInput.value.trim() || "inscription@alj-escalade.fr";
+      pvFrom.textContent = `${sName} <${sEmail}>`;
+
+      const render = (text) => {
+        let res = String(text || "");
+        for (const [k, v] of Object.entries(DEMO_CONTEXT)) {
+          res = res.replace(new RegExp(`\\{${k}\\}`, "gi"), v);
+        }
+        return res;
+      };
+
+      pvSubject.textContent = render(subjectInput.value) || "(Sans objet)";
+      pvBody.textContent = render(bodyInput.value) || "(Message vide)";
+      pvSig.style.display = sigCheckbox.checked ? "block" : "none";
+    }
+
+    // Détection des frappes pour actualisation instantanée de l'aperçu
+    senderEmailInput.addEventListener("input", updatePreview);
+    senderNameInput.addEventListener("input", updatePreview);
+    subjectInput.addEventListener("input", updatePreview);
+    bodyInput.addEventListener("input", updatePreview);
+    sigCheckbox.addEventListener("change", updatePreview);
+
+    function selectTemplateByName(name) {
+      if (!name) return;
+      const t = templates.find(item => item.name === name) || templates[0];
+      if (!t) return;
+      currentTemplate = t;
+      tplSelect.value = t.name;
+
+      subjectInput.value = t.subject || "";
+      bodyInput.value = t.body || "";
+      senderEmailInput.value = t.sender_email || "inscription@alj-escalade.fr";
+      senderNameInput.value = t.sender_name || "Amicale Laïque Jonage - Inscriptions";
+      updatePreview();
+    }
+
+    async function loadTemplates(selectName = null) {
+      try {
+        const res = await apiFetch("/api/email-templates");
+        if (res.ok) {
+          const data = await res.json();
+          templates = data.templates || [];
+          tplSelect.innerHTML = templates.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
+
+          if (templates.length > 0) {
+            const target = selectName || (templates.find(t => t.name.toLowerCase().includes("echeance")) || templates[0]).name;
+            selectTemplateByName(target);
+          }
+        }
+      } catch (err) {
+        console.error("Erreur chargement des templates :", err);
+        toast("❌ Erreur de chargement des modèles : " + err.message);
+      }
+    }
+
+    async function loadWhatsappTemplate() {
+      try {
+        const res = await apiFetch("/api/whatsapp-template");
+        if (res.ok) {
+          const data = await res.json();
+          whatsappInput.value = data.template || "";
+        }
+      } catch (err) {
+        console.warn("Impossible de charger le texte WhatsApp :", err);
+      }
+    }
+
+    tplSelect.addEventListener("change", () => {
+      selectTemplateByName(tplSelect.value);
+    });
+
+    // Insertion de variables
+    const varsPanel = document.getElementById("vars-panel");
+    document.getElementById("btn-toggle-vars").addEventListener("click", () => {
+      varsPanel.style.display = varsPanel.style.display === "none" ? "block" : "none";
+    });
+
+    document.querySelectorAll(".tag-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tag = btn.dataset.var;
+        insertTextAtCursor(bodyInput, tag);
+        updatePreview();
+      });
+    });
+
+    // Formatage HTML simple
+    document.querySelectorAll(".fmt-btn[data-wrap]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tag = btn.dataset.wrap;
+        wrapSelection(bodyInput, `<${tag}>`, `</${tag}>`);
+        updatePreview();
+      });
+    });
+
+    document.getElementById("btn-wrap-link")?.addEventListener("click", () => {
+      const url = prompt("Entrez l'URL du lien (ex: https://www.alj-escalade.fr) :", "https://");
+      if (url && url.trim() && url !== "https://") {
+        wrapSelection(bodyInput, `<a href="${url.trim()}">`, `</a>`);
+        updatePreview();
+      }
+    });
+
+    function insertTextAtCursor(textarea, text) {
+      const start = textarea.selectionStart || 0;
+      const end = textarea.selectionEnd || 0;
+      textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = start + text.length;
+      textarea.focus();
+    }
+
+    function wrapSelection(textarea, openTag, closeTag) {
+      const start = textarea.selectionStart || 0;
+      const end = textarea.selectionEnd || 0;
+      const selected = textarea.value.substring(start, end) || "texte";
+      textarea.value = textarea.value.substring(0, start) + openTag + selected + closeTag + textarea.value.substring(end);
+      textarea.selectionStart = start + openTag.length;
+      textarea.selectionEnd = start + openTag.length + selected.length;
+      textarea.focus();
+    }
+
+    // Enregistrement du modèle actif
+    const btnSave = document.getElementById("btn-save-tpl");
+    if (btnSave) {
+      btnSave.addEventListener("click", async () => {
+        const name = tplSelect.value.trim();
+        if (!name) {
+          toast("⚠️ Veuillez sélectionner un modèle d'e-mail.");
+          return;
+        }
+
+        const subj = subjectInput.value.trim();
+        const body = bodyInput.value.trim();
+        const sEmail = senderEmailInput.value.trim();
+        const sName = senderNameInput.value.trim();
+
+        if (!subj || !body) {
+          toast("⚠️ Le sujet et le corps du message sont obligatoires.");
+          return;
+        }
+        if (!sEmail || !sEmail.includes("@")) {
+          toast("⚠️ L'adresse d'expédition doit être une adresse e-mail valide.");
+          return;
+        }
+
+        btnSave.disabled = true;
+        btnSave.textContent = "⏳ Enregistrement…";
+
+        try {
+          const res = await apiFetch("/api/email-templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: name,
+              subject: subj,
+              body: body,
+              sender_email: sEmail,
+              sender_name: sName
+            })
+          });
+
+          if (res.ok) {
+            toast(`💾 Modèle « ${name} » enregistré avec succès !`);
+            await loadTemplates(name);
+          } else {
+            const err = await res.json().catch(() => ({}));
+            toast("❌ Erreur d'enregistrement : " + (err.message || res.statusText), 8000);
+          }
+        } catch (e) {
+          toast("❌ Erreur de communication réseau : " + e.message, 8000);
+        } finally {
+          btnSave.disabled = false;
+          btnSave.textContent = "💾 Enregistrer";
+        }
+      });
+    }
+
+    // Création d'un nouveau modèle
+    const modalNew = document.getElementById("new-template-modal");
+    const inputNewName = document.getElementById("new-template-name");
+    const openNewModal = () => {
+      inputNewName.value = "";
+      modalNew.style.display = "flex";
+      inputNewName.focus();
+    };
+    const closeNewModal = () => {
+      modalNew.style.display = "none";
+    };
+
+    document.getElementById("btn-new-tpl")?.addEventListener("click", openNewModal);
+    document.getElementById("new-modal-close")?.addEventListener("click", closeNewModal);
+    document.getElementById("new-modal-cancel")?.addEventListener("click", closeNewModal);
+    modalNew?.addEventListener("click", e => { if (e.target.id === "new-template-modal") closeNewModal(); });
+
+    document.getElementById("new-modal-confirm")?.addEventListener("click", async () => {
+      const name = inputNewName.value.trim();
+      if (!name) {
+        toast("⚠️ Veuillez renseigner le nom du modèle.");
+        return;
+      }
+      if (templates.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+        toast(`⚠️ Un modèle nommé « ${name} » existe déjà.`);
+        return;
+      }
+
+      const defaultSubj = "Sujet du courriel";
+      const defaultBody = "Bonjour {first_name},\n\nSaisissez votre texte ici.\n\nSportivement,\nL'équipe ALJ Escalade";
+      const sEmail = senderEmailInput.value.trim() || "inscription@alj-escalade.fr";
+      const sName = senderNameInput.value.trim() || "Amicale Laïque Jonage - Inscriptions";
+
+      try {
+        const res = await apiFetch("/api/email-templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name,
+            subject: defaultSubj,
+            body: defaultBody,
+            sender_email: sEmail,
+            sender_name: sName
+          })
+        });
+
+        if (res.ok) {
+          closeNewModal();
+          toast(`➕ Nouveau modèle « ${name} » créé avec succès !`);
+          await loadTemplates(name);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast("❌ Erreur : " + (err.message || res.statusText), 8000);
+        }
+      } catch (e) {
+        toast("❌ Erreur réseau : " + e.message, 8000);
+      }
+    });
+
+    // Suppression d'un modèle
+    document.getElementById("btn-del-tpl")?.addEventListener("click", async () => {
+      const name = tplSelect.value.trim();
+      if (!name) return;
+
+      if (!confirm(`Êtes-vous sûr de vouloir supprimer définitivement le modèle d'e-mail « ${name} » ?`)) {
+        return;
+      }
+
+      try {
+        const res = await apiFetch(`/api/email-templates/${encodeURIComponent(name)}`, {
+          method: "DELETE"
+        });
+
+        if (res.ok) {
+          toast(`🗑️ Modèle « ${name} » supprimé.`);
+          await loadTemplates();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast("❌ Erreur lors de la suppression : " + (err.message || res.statusText), 8000);
+        }
+      } catch (e) {
+        toast("❌ Erreur réseau : " + e.message, 8000);
+      }
+    });
+
+    // Enregistrement du texte WhatsApp
+    const btnSaveWa = document.getElementById("btn-save-whatsapp");
+    if (btnSaveWa) {
+      btnSaveWa.addEventListener("click", async () => {
+        const text = whatsappInput.value.trim();
+        if (!text) {
+          toast("⚠️ Le texte WhatsApp ne peut pas être vide.");
+          return;
+        }
+
+        btnSaveWa.disabled = true;
+        btnSaveWa.textContent = "⏳ Enregistrement…";
+
+        try {
+          const res = await apiFetch("/api/whatsapp-template", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ template: text })
+          });
+
+          if (res.ok) {
+            toast("💾 Texte WhatsApp enregistré avec succès !");
+          } else {
+            const err = await res.json().catch(() => ({}));
+            toast("❌ Erreur : " + (err.message || res.statusText), 8000);
+          }
+        } catch (e) {
+          toast("❌ Erreur réseau : " + e.message, 8000);
+        } finally {
+          btnSaveWa.disabled = false;
+          btnSaveWa.textContent = "💾 Enregistrer WhatsApp";
+        }
+      });
+    }
+
+    // Chargement initial
+    loadTemplates();
+    loadWhatsappTemplate();
+  }
+});
+</script>
+</body>
+</html>

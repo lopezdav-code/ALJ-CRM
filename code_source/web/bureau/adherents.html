@@ -83,6 +83,7 @@ startBureau({
                 <tr>
                   <th data-sort="last_name">Nom <span class="sort-ico">▲</span></th>
                   <th data-sort="first_name">Prénom <span class="sort-ico"></span></th>
+                  <th data-sort="order_date">Date d'inscription <span class="sort-ico"></span></th>
                   <th data-sort="categorie">Catégorie <span class="sort-ico"></span></th>
                   <th data-sort="tarif_name">Tarif <span class="sort-ico"></span></th>
                   <th data-sort="status_norm">Statut <span class="sort-ico"></span></th>
@@ -93,7 +94,7 @@ startBureau({
                 </tr>
               </thead>
               <tbody id="members-tbody">
-                <tr><td colspan="9" style="text-align:center; padding:30px;" class="muted">Chargement en cours…</td></tr>
+                <tr><td colspan="10" style="text-align:center; padding:30px;" class="muted">Chargement en cours…</td></tr>
               </tbody>
             </table>
           </div>
@@ -155,9 +156,9 @@ startBureau({
 
       <!-- Modale d'attestation de paiement PDF (Administrateurs uniquement) -->
       <div id="attestation-modal" class="modal-overlay" style="display:none">
-        <div class="modal-content card" style="max-width:760px;">
+        <div class="modal-content card" style="max-width:920px;">
           <div class="modal-header">
-            <div class="m-name" style="font-size:16px;">📄 Attestation de paiement</div>
+            <div class="m-name" style="font-size:16px;">📄 Attestation de paiement & E-mail</div>
             <button class="icon-btn" id="att-modal-close" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px; border:none; cursor:pointer;">✕</button>
           </div>
 
@@ -176,18 +177,124 @@ startBureau({
             <div id="att-ineligible-warn" style="display:none; color:var(--red); font-weight:700; font-size:12px; margin-top:8px;"></div>
           </div>
 
-          <div class="section-h" style="margin:4px 0 8px;">👁 Aperçu du document PDF</div>
-          <div id="att-preview-container" style="background:#E2E8F0; border-radius:8px; min-height:360px; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; margin-bottom:12px;">
-            <div id="att-preview-loading" class="muted" style="padding:20px; text-align:center;">
-              ⏳ Génération du PDF en mémoire…
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:16px; margin-bottom:12px;">
+            <!-- Colonne 1 : Paramètres de l'e-mail d'accompagnement -->
+            <div>
+              <div class="section-h" style="margin:0 0 6px;">✉️ E-mail d'accompagnement</div>
+
+              <label class="fld" style="margin-top:4px;">Modèle d'e-mail</label>
+              <select id="att-template-select" class="select-input" style="width:100%; margin-bottom:8px;"></select>
+
+              <label class="fld">Destinataire (payeur ou adhérent) *</label>
+              <input type="email" id="att-to-email" class="search-input" placeholder="destinataire@example.com" style="width:100%; margin-bottom:8px;">
+
+              <label class="fld">Sujet de l'e-mail *</label>
+              <input type="text" id="att-email-subject" class="search-input" placeholder="Sujet de l'e-mail…" style="width:100%; margin-bottom:8px;">
+
+              <label class="fld">Message d'accompagnement *</label>
+              <textarea id="att-email-body" class="fld-input" rows="8" placeholder="Bonjour {first_name}, …" style="width:100%; margin-bottom:8px; font-size:12.5px;"></textarea>
+
+              <label style="display:flex; align-items:center; gap:6px; margin:4px 0 8px; font-size:12px; color:#334155; cursor:pointer;">
+                <input type="checkbox" id="att-email-signature" checked style="width:auto; margin:0; accent-color:var(--blue);">
+                <span>Ajouter la signature officielle ALJ Escalade (logos réseaux sociaux)</span>
+              </label>
             </div>
-            <iframe id="att-pdf-frame" style="width:100%; height:460px; border:none; display:none;" title="Aperçu attestation"></iframe>
+
+            <!-- Colonne 2 : Aperçu du document PDF avec signature & tampon -->
+            <div style="display:flex; flex-direction:column;">
+              <div class="section-h" style="margin:0 0 6px;">👁 Aperçu du document PDF (avec signature & tampon)</div>
+              <div id="att-preview-container" style="background:#E2E8F0; border-radius:8px; min-height:360px; flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative;">
+                <div id="att-preview-loading" class="muted" style="padding:20px; text-align:center;">
+                  ⏳ Génération du PDF en mémoire…
+                </div>
+                <iframe id="att-pdf-frame" style="width:100%; height:100%; min-height:420px; border:none; display:none;" title="Aperçu attestation"></iframe>
+              </div>
+            </div>
           </div>
 
           <div class="btn-row" style="margin-top:10px;">
             <button class="btn btn-muted" id="att-cancel-btn">Fermer</button>
             <button class="btn btn-muted" id="att-download-btn" disabled>📥 Télécharger le PDF</button>
             <button class="btn btn-primary" id="att-send-btn" disabled>🚀 Envoyer par e-mail</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modale de modification de fiche adhérent (Administrateurs uniquement) -->
+      <div id="member-edit-modal" class="modal-overlay" style="display:none">
+        <div class="modal-content card" style="max-width:680px; max-height:92vh; display:flex; flex-direction:column;">
+          <div class="modal-header">
+            <div class="m-name" style="font-size:16px;">✏️ Modifier la fiche adhérent</div>
+            <button class="icon-btn" id="edit-modal-close" style="color:#64748B; background:none; font-size:20px; min-width:32px; height:32px; border:none; cursor:pointer;">✕</button>
+          </div>
+
+          <div style="overflow-y:auto; padding-right:4px; flex:1;">
+            <!-- Rappel adhérent -->
+            <div class="card" style="background:#F8FAFC; border:1px solid #E2E8F0; margin-bottom:12px; padding:10px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <b id="edit-member-name" style="font-size:15px; color:#1E293B;">—</b>
+                  <div id="edit-member-sub" style="font-size:12px; color:var(--muted); margin-top:2px;">—</div>
+                </div>
+                <div id="edit-member-badge"></div>
+              </div>
+            </div>
+
+            <!-- Section 1 : Badges & Autonomie FFME -->
+            <div class="section-h" style="margin:4px 0 6px;">🧗 Badges & Autonomie FFME</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
+              <div>
+                <label class="fld">🔴 Badge rouge diff</label>
+                <select id="edit-badge-rouge" class="select-input" style="width:100%;">
+                  <option value="Non">Non</option>
+                  <option value="Oui">Oui</option>
+                </select>
+              </div>
+              <div>
+                <label class="fld">🟩 Autonomie Bloc</label>
+                <select id="edit-autonomie-bloc" class="select-input" style="width:100%;">
+                  <option value="Non">Non</option>
+                  <option value="Oui">Oui</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Section 2 : Créneau & Groupe (Tarif HelloAsso) — Même design que le PC -->
+            <div class="section-h" style="margin:8px 0 6px;">📅 Créneau & Groupe (Tarif HelloAsso)</div>
+            <div style="background:#F8FAFC; border:1px solid #CBD5E1; border-radius:6px; padding:10px 12px; margin-bottom:12px;">
+              <div style="font-size:12px; color:#1E293B; margin-bottom:4px;">
+                Tarif actuel : <b id="edit-current-tarif" style="color:var(--blue);">—</b>
+              </div>
+              <div style="font-size:11.5px; color:#64748B; margin-bottom:8px;">
+                Sélectionnez le nouveau groupe (tarif) pour la saison active :
+              </div>
+              <!-- Zone défilante à boutons radio, calquée sur TarifEditDialog du PC -->
+              <div id="edit-tarifs-container" style="max-height:180px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:6px; padding:6px; background:#FFFFFF; display:flex; flex-direction:column; gap:4px;">
+                <div class="muted" style="padding:10px; text-align:center; font-size:11.5px;">Chargement des tarifs disponibles…</div>
+              </div>
+            </div>
+
+            <!-- Section 3 : Coordonnées & Téléphone -->
+            <div class="section-h" style="margin:8px 0 6px;">📞 Coordonnées</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:8px;">
+              <div>
+                <label class="fld">✉️ E-mail principal</label>
+                <input type="email" id="edit-email-primary" class="search-input" placeholder="nom@example.com" style="width:100%;">
+              </div>
+              <div>
+                <label class="fld">✉️ E-mail secondaire</label>
+                <input type="email" id="edit-email-secondary" class="search-input" placeholder="deuxieme@example.com" style="width:100%;">
+              </div>
+            </div>
+            <div style="margin-bottom:8px;">
+              <label class="fld">📞 Téléphone</label>
+              <input type="tel" id="edit-phone" class="search-input" placeholder="06 12 34 56 78" style="width:100%;">
+            </div>
+          </div>
+
+          <div class="btn-row" style="margin-top:12px; border-top:1px solid #E2E8F0; padding-top:10px;">
+            <button class="btn btn-muted" id="edit-cancel-btn">Annuler</button>
+            <button class="btn btn-primary" id="edit-save-btn">💾 Enregistrer les modifications</button>
           </div>
         </div>
       </div>
@@ -229,6 +336,38 @@ startBureau({
     let currentAttestationBlobUrl = null;
     let currentAttestationPdfBlob = null;
 
+    // Modèle par défaut pour l'attestation (conforme au client desktop)
+    const DEFAULT_ATTESTATION_TEMPLATE = {
+      name: "Attestation échéance",
+      subject: "Attestation de paiement et d'échéance - Amicale Laïque de Jonage",
+      body: "Bonjour {first_name},\n\nNous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage.\n\nSportivement,\nL'équipe ALJ Escalade",
+      sender_email: "inscription@alj-escalade.fr",
+      sender_name: "Amicale Laïque Jonage - Inscriptions"
+    };
+
+    function getAttestationTemplatesList() {
+      const list = [...emailTemplates];
+      const hasEcheance = list.some(t => normKey(t.name).includes("echeance"));
+      if (!hasEcheance) {
+        list.unshift(DEFAULT_ATTESTATION_TEMPLATE);
+      }
+      return list;
+    }
+
+    function populateAttestationTemplateSelect() {
+      const sel = document.getElementById("att-template-select");
+      if (!sel) return;
+      const currentVal = sel.value;
+      const list = getAttestationTemplatesList();
+      sel.innerHTML = list.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
+      if (currentVal && list.some(t => t.name === currentVal)) {
+        sel.value = currentVal;
+      } else {
+        const defaultTmpl = list.find(t => normKey(t.name).includes("echeance")) || list[0];
+        if (defaultTmpl) sel.value = defaultTmpl.name;
+      }
+    }
+
     async function loadEmailTemplates() {
       try {
         const res = await apiFetch("/api/email-templates");
@@ -240,6 +379,7 @@ startBureau({
             sel.innerHTML = '<option value="">-- E-mail libre / personnalisé --</option>' +
               emailTemplates.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
           }
+          populateAttestationTemplateSelect();
         }
       } catch (e) {
         console.warn("Impossible de charger les modèles d'e-mails :", e);
@@ -404,8 +544,45 @@ startBureau({
     });
 
     // ==========================================
-    // Modale d'attestation de paiement PDF
+    // Modale d'attestation de paiement PDF & E-mail
     // ==========================================
+    function updateAttestationEmailFields() {
+      if (!activeAttestationMember) return;
+      const m = activeAttestationMember;
+      const sel = document.getElementById("att-template-select");
+      const selectedName = sel ? sel.value : "";
+      const list = getAttestationTemplatesList();
+      const tmpl = list.find(t => t.name === selectedName) || list[0] || DEFAULT_ATTESTATION_TEMPLATE;
+
+      const ctx = {
+        first_name: m.first_name || "",
+        last_name: m.last_name || "",
+        num_licence: m.licence_ffme || "",
+        tarif: m.tarif_name || "",
+        amount: m.amount != null ? `${m.amount} €` : "",
+        season: m.season_name || currentSeason
+      };
+
+      const render = (tpl) => {
+        return String(tpl || "")
+          .replace(/\{first_name\}/gi, ctx.first_name)
+          .replace(/\{last_name\}/gi, ctx.last_name)
+          .replace(/\{Prénom\}/gi, ctx.first_name)
+          .replace(/\{Nom\}/gi, ctx.last_name)
+          .replace(/\{num_licence\}/gi, ctx.num_licence)
+          .replace(/\{tarif\}/gi, ctx.tarif)
+          .replace(/\{amount\}/gi, ctx.amount)
+          .replace(/\{montant\}/gi, ctx.amount)
+          .replace(/\{season\}/gi, ctx.season)
+          .replace(/\{saison\}/gi, ctx.season);
+      };
+
+      const subjInput = document.getElementById("att-email-subject");
+      const bodyInput = document.getElementById("att-email-body");
+      if (subjInput) subjInput.value = render(tmpl.subject || "");
+      if (bodyInput) bodyInput.value = render(tmpl.body || "");
+    }
+
     async function openAttestationModal(member) {
       if (!member) return;
       activeAttestationMember = member;
@@ -418,10 +595,23 @@ startBureau({
 
       document.getElementById("att-dest-name").textContent = `${member.first_name} ${member.last_name}`;
       document.getElementById("att-dest-payer").textContent = member.payer ? `Payeur : ${member.payer}` : "Payeur : Adhérent";
-      const email = (member.email_primary || "").trim();
-      document.getElementById("att-dest-email").textContent = email ? `✉️ ${email}` : "Aucune adresse e-mail";
+      
+      const payerEmail = (member.payer_email || "").trim();
+      const userEmail = (member.email_primary || "").trim();
+      const defaultDest = payerEmail || userEmail;
+
+      const sentSuffix = member.email_sent_date ? ` · ✉️ Déjà envoyée le ${fmtDay(member.email_sent_date) || member.email_sent_date}` : "";
+      document.getElementById("att-dest-email").textContent = defaultDest ? `✉️ ${defaultDest}${sentSuffix}` : "Aucune adresse e-mail";
       document.getElementById("att-dest-amount").textContent = `${member.amount != null ? member.amount : "0"} €`;
       document.getElementById("att-dest-badge").innerHTML = renderStatusBadge(member.status_norm);
+
+      // Pré-remplir l'e-mail de destination
+      const toEmailInput = document.getElementById("att-to-email");
+      if (toEmailInput) toEmailInput.value = defaultDest;
+
+      // Initialiser le sélecteur de modèle avec 'Attestation échéance' par défaut
+      populateAttestationTemplateSelect();
+      updateAttestationEmailFields();
 
       const warnEl = document.getElementById("att-ineligible-warn");
       const downloadBtn = document.getElementById("att-download-btn");
@@ -453,7 +643,7 @@ startBureau({
       sendBtn.disabled = true;
       document.getElementById("attestation-modal").style.display = "flex";
 
-      // Appel à l'API pour générer le PDF de prévisualisation
+      // Appel à l'API pour générer le PDF de prévisualisation (avec tampon & signature)
       try {
         const res = await apiFetch("/api/attestations/preview", {
           method: "POST",
@@ -469,7 +659,7 @@ startBureau({
           frameEl.style.display = "block";
           loadingEl.style.display = "none";
           downloadBtn.disabled = false;
-          sendBtn.disabled = !(email && email.includes("@"));
+          sendBtn.disabled = !(defaultDest && defaultDest.includes("@"));
         } else {
           const errData = await res.json().catch(() => ({}));
           loadingEl.textContent = "❌ Erreur de génération : " + (errData.message || res.statusText);
@@ -488,6 +678,17 @@ startBureau({
         currentAttestationPdfBlob = null;
       }
       activeAttestationMember = null;
+    }
+
+    document.getElementById("att-template-select").addEventListener("change", updateAttestationEmailFields);
+
+    const attToEmailEl = document.getElementById("att-to-email");
+    if (attToEmailEl) {
+      attToEmailEl.addEventListener("input", () => {
+        const em = attToEmailEl.value.trim();
+        const sendBtn = document.getElementById("att-send-btn");
+        if (sendBtn) sendBtn.disabled = !(em && em.includes("@") && currentAttestationPdfBlob);
+      });
     }
 
     document.getElementById("att-modal-close").addEventListener("click", closeAttestationModal);
@@ -512,13 +713,20 @@ startBureau({
     document.getElementById("att-send-btn").addEventListener("click", async () => {
       if (!activeAttestationMember) return;
       const m = activeAttestationMember;
-      const email = (m.email_primary || "").trim();
-      if (!email || !email.includes("@")) {
-        toast("⚠️ Cet adhérent n'a pas d'adresse e-mail valide.");
+      const toEmail = (document.getElementById("att-to-email").value || "").trim();
+      if (!toEmail || !toEmail.includes("@")) {
+        toast("⚠️ Veuillez renseigner une adresse e-mail de destination valide.");
         return;
       }
 
-      if (!confirm(`Envoyer l'attestation de paiement PDF à ${m.first_name} ${m.last_name} <${email}> ?`)) {
+      const subj = (document.getElementById("att-email-subject").value || "").trim();
+      const body = (document.getElementById("att-email-body").value || "").trim();
+      if (!subj || !body) {
+        toast("⚠️ Le sujet et le corps de l'e-mail ne peuvent pas être vides.");
+        return;
+      }
+
+      if (!confirm(`Envoyer l'attestation de paiement PDF à ${toEmail} ?`)) {
         return;
       }
 
@@ -527,15 +735,27 @@ startBureau({
       sendBtn.textContent = "⏳ Envoi en cours…";
 
       try {
+        const payload = {
+          member: m,
+          season: currentSeason,
+          to_email: toEmail,
+          template_name: document.getElementById("att-template-select").value,
+          subject: subj,
+          body: body,
+          add_signature: document.getElementById("att-email-signature").checked
+        };
+
         const res = await apiFetch("/api/attestations/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ member: m, season: currentSeason })
+          body: JSON.stringify(payload)
         });
 
         if (res.ok) {
           const data = await res.json();
-          toast(`✅ Attestation envoyée avec succès à ${m.first_name} ${m.last_name} (${email}) !`);
+          m.email_sent_date = data.email_sent_date || new Date().toLocaleDateString("fr-FR");
+          renderDetailPanel(m);
+          toast(`✅ Attestation envoyée avec succès à ${toEmail} !`);
           closeAttestationModal();
         } else {
           const data = await res.json().catch(() => ({}));
@@ -547,6 +767,217 @@ startBureau({
       } finally {
         sendBtn.disabled = false;
         sendBtn.textContent = "🚀 Envoyer par e-mail";
+      }
+    });
+
+    // ==========================================
+    // Modale d'édition de fiche adhérent
+    // ==========================================
+    let activeEditMember = null;
+
+    function getSeasonTarifsList() {
+      const tarifsSet = new Set();
+      const tarifDetails = {}; // tarif -> { groupe, details }
+
+      for (const c of rawMembersData.creneaux || []) {
+        const groupe = c.groupe || "";
+        const details = [c.jour, c.horaires].filter(Boolean).join(" ");
+        for (const t of c.tarifs || []) {
+          const tClean = String(t).trim();
+          if (tClean) {
+            tarifsSet.add(tClean);
+            if (!tarifDetails[tClean]) tarifDetails[tClean] = { groupe, details };
+          }
+        }
+      }
+
+      for (const m of rawMembersData.members || []) {
+        if ((m.season_name || "") === currentSeason && m.tarif_name) {
+          const tClean = String(m.tarif_name).trim();
+          if (tClean) {
+            tarifsSet.add(tClean);
+            if (!tarifDetails[tClean] && m.creneau_groupe) {
+              tarifDetails[tClean] = {
+                groupe: m.creneau_groupe,
+                details: m.creneau_details || ""
+              };
+            }
+          }
+        }
+      }
+
+      const list = Array.from(tarifsSet).sort((a, b) => a.localeCompare(b, "fr"));
+      return { list, tarifDetails };
+    }
+
+    function openEditMemberModal(member) {
+      if (!member) return;
+      activeEditMember = member;
+
+      document.getElementById("edit-member-name").textContent = `${member.first_name} ${member.last_name}`;
+      document.getElementById("edit-member-sub").textContent = `${member.tarif_name || "Sans tarif"} · Saison ${member.season_name || currentSeason}`;
+      document.getElementById("edit-member-badge").innerHTML = renderStatusBadge(member.status_norm);
+
+      // Pré-remplir les champs
+      const br = String(member.badge_rouge || "").trim().toLowerCase();
+      document.getElementById("edit-badge-rouge").value = (br === "oui" || br === "x") ? "Oui" : "Non";
+
+      const ab = String(member.autonomie_bloc || "").trim().toLowerCase();
+      document.getElementById("edit-autonomie-bloc").value = (ab === "oui" || ab === "x") ? "Oui" : "Non";
+
+      document.getElementById("edit-email-primary").value = member.email_primary || "";
+      document.getElementById("edit-email-secondary").value = member.email_secondary || "";
+      document.getElementById("edit-phone").value = member.phone || "";
+      document.getElementById("edit-current-tarif").textContent = member.tarif_name || "Aucun";
+
+      // Construction de la liste des tarifs (même design radio épuré que le PC TarifEditDialog)
+      const container = document.getElementById("edit-tarifs-container");
+      const { list, tarifDetails } = getSeasonTarifsList();
+
+      if (!list.length) {
+        container.innerHTML = `<div class="muted" style="padding:10px; text-align:center; font-size:11.5px;">Aucun tarif disponible pour la saison ${esc(currentSeason)}.</div>`;
+      } else {
+        const curTarifNorm = normKey(member.tarif_name || "");
+        container.innerHTML = list.map((t) => {
+          const isSelected = normKey(t) === curTarifNorm;
+          const info = tarifDetails[t];
+          const subInfo = info ? [info.groupe, info.details].filter(Boolean).join(" · ") : "";
+          return `
+            <label class="opt" style="display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; border:1px solid ${isSelected ? "var(--blue)" : "#E2E8F0"}; background:${isSelected ? "#EFF6FF" : "#FFFFFF"}; cursor:pointer; font-size:12px; margin:0; transition:all .15s ease;">
+              <input type="radio" name="edit-tarif-radio" value="${esc(t)}" ${isSelected ? "checked" : ""} style="accent-color:var(--blue); margin:0; width:auto;">
+              <div style="flex:1;">
+                <div style="font-weight:${isSelected ? "700" : "500"}; color:#1E293B;">${esc(t)}</div>
+                ${subInfo ? `<div style="font-size:11px; color:#64748B; margin-top:1px;">${esc(subInfo)}</div>` : ""}
+              </div>
+            </label>
+          `;
+        }).join("");
+
+        container.querySelectorAll('label').forEach(lbl => {
+          lbl.addEventListener("click", () => {
+            const rb = lbl.querySelector('input[type="radio"]');
+            if (rb) {
+              rb.checked = true;
+              container.querySelectorAll('label').forEach(l => {
+                const checked = l.querySelector('input[type="radio"]')?.checked;
+                l.style.borderColor = checked ? "var(--blue)" : "#E2E8F0";
+                l.style.background = checked ? "#EFF6FF" : "#FFFFFF";
+              });
+            }
+          });
+        });
+      }
+
+      document.getElementById("member-edit-modal").style.display = "flex";
+    }
+
+    function closeEditMemberModal() {
+      document.getElementById("member-edit-modal").style.display = "none";
+      activeEditMember = null;
+    }
+
+    document.getElementById("edit-modal-close").addEventListener("click", closeEditMemberModal);
+    document.getElementById("edit-cancel-btn").addEventListener("click", closeEditMemberModal);
+    document.getElementById("member-edit-modal").addEventListener("click", e => {
+      if (e.target.id === "member-edit-modal") closeEditMemberModal();
+    });
+
+    document.getElementById("edit-save-btn").addEventListener("click", async () => {
+      if (!activeEditMember) return;
+      const m = activeEditMember;
+
+      const newBadgeRouge = document.getElementById("edit-badge-rouge").value;
+      const newAutonomieBloc = document.getElementById("edit-autonomie-bloc").value;
+      const newEmailPrimary = document.getElementById("edit-email-primary").value.trim();
+      const newEmailSecondary = document.getElementById("edit-email-secondary").value.trim();
+      const newPhone = document.getElementById("edit-phone").value.trim();
+      const selectedRadio = document.querySelector('input[name="edit-tarif-radio"]:checked');
+      const newTarif = selectedRadio ? selectedRadio.value.trim() : (m.tarif_name || "");
+
+      const origBadgeRouge = (String(m.badge_rouge || "").toLowerCase() === "oui" || String(m.badge_rouge || "").toLowerCase() === "x") ? "Oui" : "Non";
+      const origAutonomieBloc = (String(m.autonomie_bloc || "").toLowerCase() === "oui" || String(m.autonomie_bloc || "").toLowerCase() === "x") ? "Oui" : "Non";
+
+      const fields = {};
+      const changesDesc = [];
+
+      if (newBadgeRouge !== origBadgeRouge) {
+        fields.badge_rouge = newBadgeRouge;
+        changesDesc.push(`Badge rouge : ${origBadgeRouge} ➔ ${newBadgeRouge}`);
+      }
+      if (newAutonomieBloc !== origAutonomieBloc) {
+        fields.autonomie_bloc = newAutonomieBloc;
+        changesDesc.push(`Autonomie bloc : ${origAutonomieBloc} ➔ ${newAutonomieBloc}`);
+      }
+      if (newEmailPrimary !== (m.email_primary || "")) {
+        fields.email_primary = newEmailPrimary;
+        changesDesc.push(`E-mail principal : ${m.email_primary || "vide"} ➔ ${newEmailPrimary || "vide"}`);
+      }
+      if (newEmailSecondary !== (m.email_secondary || "")) {
+        fields.email_secondary = newEmailSecondary;
+        changesDesc.push(`E-mail secondaire : ${m.email_secondary || "vide"} ➔ ${newEmailSecondary || "vide"}`);
+      }
+      if (newPhone !== (m.phone || "")) {
+        fields.phone = newPhone;
+        changesDesc.push(`Téléphone : ${m.phone || "vide"} ➔ ${newPhone || "vide"}`);
+      }
+      if (newTarif && newTarif !== (m.tarif_name || "")) {
+        fields.tarif_name = newTarif;
+        changesDesc.push(`Créneau / Tarif : ${m.tarif_name || "vide"} ➔ ${newTarif}`);
+      }
+
+      if (Object.keys(fields).length === 0) {
+        toast("ℹ️ Aucune modification détectée.");
+        closeEditMemberModal();
+        return;
+      }
+
+      if (!confirm(`Valider les modifications pour ${m.first_name} ${m.last_name} ?\n\n• ` + changesDesc.join("\n• "))) {
+        return;
+      }
+
+      const saveBtn = document.getElementById("edit-save-btn");
+      saveBtn.disabled = true;
+      saveBtn.textContent = "⏳ Enregistrement…";
+
+      try {
+        const res = await apiFetch("/api/members/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: m.user_id,
+            purchase_id: m.purchase_id,
+            order_ref: m.order_ref,
+            fields: fields
+          })
+        });
+
+        if (res.ok) {
+          // Mise à jour réactive immédiate de l'objet local
+          Object.assign(m, fields);
+
+          if (fields.tarif_name) {
+            const { tarifDetails } = getSeasonTarifsList();
+            const info = tarifDetails[fields.tarif_name];
+            if (info) {
+              m.creneau_groupe = info.groupe || "";
+              m.creneau_details = info.details || "";
+            }
+          }
+
+          renderDetailPanel(m);
+          refreshDisplay();
+          closeEditMemberModal();
+          toast(`✅ Fiche de ${m.first_name} ${m.last_name} mise à jour avec succès !`);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          toast("❌ Échec de la mise à jour : " + (errData.message || res.statusText), 9000);
+        }
+      } catch (err) {
+        console.error("Erreur mise à jour adhérent :", err);
+        toast("❌ Erreur réseau lors de la mise à jour : " + err.message, 9000);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "💾 Enregistrer les modifications";
       }
     });
 
@@ -592,6 +1023,7 @@ startBureau({
       }
       addRow("🧾", "Commande HelloAsso", [fmtDay(member.order_date), member.order_ref].filter(Boolean).join(" · "));
       addRow("💶", "Montant réglé", member.amount != null && member.amount !== "" ? `${member.amount} €` : "");
+      addRow("📧", "Attestation envoyée", member.email_sent_date ? (fmtDay(member.email_sent_date) || member.email_sent_date) : "");
       addRow("🧗", "Créneau", member.creneau_groupe ? `${member.creneau_groupe}${member.creneau_details ? ` (${member.creneau_details})` : ""}` : "");
 
       const tel = telHref(member.phone);
@@ -610,6 +1042,7 @@ startBureau({
           ${isAdmin ? `
             <button class="btn btn-primary btn-mini" id="btn-action-email" title="Envoyer un e-mail personnalisé à cet adhérent">✉️ E-mail</button>
             <button class="btn btn-muted btn-mini" id="btn-action-attestation" title="Générer l'attestation PDF et l'envoyer">📄 Attestation</button>
+            <button class="btn btn-muted btn-mini" id="btn-action-edit" title="Modifier le créneau, les badges et coordonnées de cet adhérent">✏️ Modifier</button>
           ` : `
             <span class="muted" style="font-size:11.5px; font-style:italic;">👁️ Mode consultation coach (actions réservées aux administrateurs)</span>
           `}
@@ -631,6 +1064,9 @@ startBureau({
         });
         document.getElementById("btn-action-attestation")?.addEventListener("click", () => {
           openAttestationModal(member);
+        });
+        document.getElementById("btn-action-edit")?.addEventListener("click", () => {
+          openEditMemberModal(member);
         });
       }
     }
@@ -723,7 +1159,7 @@ startBureau({
       // Rendu du tableau
       const tbody = document.getElementById("members-tbody");
       if (!displayedMembers.length) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px;" class="muted">Aucun adhérent ne correspond aux filtres actifs.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px;" class="muted">Aucun adhérent ne correspond aux filtres actifs.</td></tr>`;
       } else {
         tbody.innerHTML = displayedMembers.map(m => {
           const isSelected = String(m.user_id) === String(selectedUserId);
@@ -731,6 +1167,7 @@ startBureau({
             <tr data-id="${esc(m.user_id)}"${isSelected ? ' class="selected"' : ""}>
               <td class="cell-name">${esc(m.last_name)}</td>
               <td>${esc(m.first_name)}</td>
+              <td class="cell-sub" style="white-space:nowrap;">${esc(fmtDay(m.order_date) || "—")}</td>
               <td class="cell-sub">${esc(m.categorie || "—")}</td>
               <td class="cell-sub">${esc(m.tarif_name || "—")}</td>
               <td>${renderStatusBadge(m.status_norm)}</td>
@@ -787,7 +1224,7 @@ startBureau({
           sortAsc = !sortAsc;
         } else {
           sortKey = k;
-          sortAsc = true;
+          sortAsc = (k === "order_date" || k === "amount") ? false : true;
         }
         refreshDisplay();
       });

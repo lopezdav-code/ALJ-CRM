@@ -102,9 +102,16 @@ class TestBureauFiles(unittest.TestCase):
     def test_adherents_page_elements(self):
         """La page adherents.html contient le tableau, les filtres et le panneau de détail."""
         html = _read(os.path.join(BUREAU, "adherents.html"))
+        members_js = _read(os.path.join(SHARED, "alj-members.js"))
+        filters_js = _read(os.path.join(SHARED, "alj-filters.js"))
         for elem in ("members-table", "members-tbody", "detail-pane", "search-input",
                       "season-select", "export-csv-btn", "status-chips", "filter-box"):
             self.assertIn(f'id="{elem}"', html)
+        self.assertIn("Attestation envoyée", html)
+        self.assertIn("email_sent_date", members_js)
+        self.assertIn('data-sort="order_date"', html)
+        self.assertIn("Date d'inscription", html)
+        self.assertIn("order_date", filters_js)
 
     def test_adherents_email_modal_and_api_wiring(self):
         """L'Étape 2 intègre la modale d'e-mail et le câblage aux endpoints d'e-mail."""
@@ -116,16 +123,18 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/api/send-email"', html)
 
     def test_adherents_attestation_modal_and_api_wiring(self):
-        """L'Étape 3 intègre la modale d'attestation et le câblage aux endpoints PDF."""
+        """L'Étape 3 intègre la modale d'attestation, le choix du template d'e-mail et le câblage aux endpoints PDF."""
         html = _read(os.path.join(BUREAU, "adherents.html"))
         for elem in ("attestation-modal", "att-download-btn", "att-send-btn", "att-pdf-frame",
-                      "att-preview-loading", "att-ineligible-warn"):
+                      "att-preview-loading", "att-ineligible-warn", "att-template-select",
+                      "att-to-email", "att-email-subject", "att-email-body", "att-email-signature"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn('apiFetch("/api/attestations/preview"', html)
         self.assertIn('apiFetch("/api/attestations/send"', html)
+        self.assertIn("Attestation échéance", html)
 
     def test_build_attestation_pure_function_rules(self):
-        """build_attestation respecte les règles de montant, d'annulation et de payeur."""
+        """build_attestation respecte les règles de montant, d'annulation, de signature et de payeur."""
         from domain.attestation import build_attestation, get_safe_pdf_filename, render_attestation_pdf
 
         # 1. Validation montant manquant ou nul
@@ -147,12 +156,15 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("14 juillet 2026", html)
         self.assertIn("2026-2027", html)
 
-        # 4. Rendu PDF valide
+        # 4. Signature & tampon garantis en base64 dans le HTML
+        self.assertIn("data:image/jpeg;base64,", html)
+
+        # 5. Rendu PDF valide
         pdf_bytes = render_attestation_pdf(html)
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertGreater(len(pdf_bytes), 300)
 
-        # 5. Nom de fichier sécurisé
+        # 6. Nom de fichier sécurisé
         fn = get_safe_pdf_filename(m["last_name"], m["first_name"], "CMD-99")
         self.assertEqual(fn, "Attestation_MARTIN_Alex_CMD-99.pdf")
 
@@ -162,8 +174,166 @@ class TestBureauFiles(unittest.TestCase):
         self.assertEqual(required_role("POST", "/api/attestations/preview"), "admin")
         self.assertEqual(required_role("POST", "/api/attestations/send"), "admin")
 
+    def test_send_attestation_records_email_sent_date(self):
+        """send_attestation_api enregistre la date d'envoi dans SQLite et utilise le modèle par défaut."""
+        import tempfile
+        import shutil
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import send_attestation_api
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_attestation.db")
+        orig_db_path = SqliteRepository.get_db_path()
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+            conn = SqliteRepository.get_connection()
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO seasons (id, name, is_active) VALUES (1, '2026-2027', 1)")
+            c.execute("""
+                INSERT INTO users (id, last_name, first_name, last_name_key, first_name_key, email_primary, birth_date)
+                VALUES (10, 'DUPONT', 'Jean', 'dupont', 'jean', 'jean.dupont@example.com', '1990-01-01')
+            """)
+            c.execute("""
+                INSERT INTO orders (id, season_id, order_ref, order_date, payer_first_name, payer_last_name, payer_email)
+                VALUES (20, 1, 'CMD-TEST-ATT', '2026-09-15', 'Jean', 'Dupont', 'jean.dupont@example.com')
+            """)
+            c.execute("""
+                INSERT INTO purchases (id, order_id, user_id, tarif_name, amount, status)
+                VALUES (30, 20, 10, 'Adulte', 180.0, 'Payé')
+            """)
+            conn.commit()
+            conn.close()
+
+            payload = {
+                "member": {
+                    "user_id": 10,
+                    "purchase_id": 30,
+                    "first_name": "Jean",
+                    "last_name": "DUPONT",
+                    "email_primary": "jean.dupont@example.com",
+                    "order_ref": "CMD-TEST-ATT",
+                    "amount": 180.0,
+                    "status": "Payé"
+                },
+                "season": "2026-2027"
+            }
+
+            with patch("infrastructure.email_repository.EmailRepository.send_email", return_value=True) as mock_send:
+                res = send_attestation_api(payload)
+
+            self.assertEqual(res.get("status"), "success")
+            self.assertTrue(res.get("email_sent_date"))
+
+            # Vérifier les paramètres de l'envoi d'e-mail (conforme desktop)
+            mock_send.assert_called_once()
+            _, kwargs = mock_send.call_args
+            self.assertEqual(kwargs.get("from_email"), "inscription@alj-escalade.fr")
+            self.assertEqual(kwargs.get("from_name"), "Amicale Laïque Jonage - Inscriptions")
+            self.assertIn("Attestation de paiement", kwargs.get("subject", ""))
+            self.assertIsNotNone(kwargs.get("html_body"))
+            self.assertIn("Amicale Laïque", kwargs.get("html_body", ""))
+
+            # Vérifier que la date est enregistrée en base SQLite
+            conn = SqliteRepository.get_connection()
+            row = conn.execute("SELECT email_sent_date FROM purchases WHERE id = 30").fetchone()
+            conn.close()
+            self.assertIsNotNone(row["email_sent_date"])
+            self.assertEqual(row["email_sent_date"], res["email_sent_date"])
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_member_edit_ui_elements(self):
+        """La page adherents.html contient le bouton Modifier et la modale d'édition complète."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        for elem in ("btn-action-edit", "member-edit-modal", "edit-modal-close", "edit-cancel-btn",
+                      "edit-save-btn", "edit-badge-rouge", "edit-autonomie-bloc",
+                      "edit-tarifs-container", "edit-email-primary", "edit-email-secondary", "edit-phone"):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/api/members/update"', html)
+
+    def test_member_update_requires_admin_role(self):
+        """L'endpoint /api/members/update exige le rôle admin."""
+        from infrastructure.api_auth import required_role
+        self.assertEqual(required_role("POST", "/api/members/update"), "admin")
+
+    def test_member_update_endpoint_and_sqlite_persistence(self):
+        """update_member_api persiste les badges, emails, téléphone et créneau dans SQLite."""
+        import tempfile
+        import shutil
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import update_member_api
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_member_edit.db")
+        orig_db_path = SqliteRepository.get_db_path()
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+            conn = SqliteRepository.get_connection()
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO seasons (id, name, is_active) VALUES (1, '2026-2027', 1)")
+            c.execute("""
+                INSERT INTO users (id, last_name, first_name, last_name_key, first_name_key, email_primary, email_secondary, phone, badge_rouge, autonomie_bloc)
+                VALUES (50, 'BERNARD', 'Luc', 'bernard', 'luc', 'luc@old.fr', '', '0600000000', 'Non', 'Non')
+            """)
+            c.execute("""
+                INSERT INTO orders (id, season_id, order_ref)
+                VALUES (60, 1, 'CMD-BERNARD-1')
+            """)
+            c.execute("""
+                INSERT INTO purchases (id, order_id, user_id, tarif_name, amount, status)
+                VALUES (70, 60, 50, 'Séance autonome', 130.0, 'Payé')
+            """)
+            conn.commit()
+            conn.close()
+
+            payload = {
+                "user_id": 50,
+                "purchase_id": 70,
+                "order_ref": "CMD-BERNARD-1",
+                "fields": {
+                    "badge_rouge": "Oui",
+                    "autonomie_bloc": "Oui",
+                    "email_primary": "luc.bernard@nouveau.fr",
+                    "email_secondary": "parent.luc@example.com",
+                    "phone": "06 99 88 77 66",
+                    "tarif_name": "Cours Ados 1 (Lundi)"
+                }
+            }
+
+            res = update_member_api(payload)
+            self.assertEqual(res.get("status"), "success")
+
+            # Vérification dans la table users
+            conn = SqliteRepository.get_connection()
+            u = conn.execute("SELECT * FROM users WHERE id = 50").fetchone()
+            self.assertEqual(u["badge_rouge"], "Oui")
+            self.assertEqual(u["autonomie_bloc"], "Oui")
+            self.assertEqual(u["email_primary"], "luc.bernard@nouveau.fr")
+            self.assertEqual(u["email_secondary"], "parent.luc@example.com")
+            self.assertEqual(u["phone"], "06 99 88 77 66")
+
+            # Vérification dans la table purchases (créneau)
+            p = conn.execute("SELECT * FROM purchases WHERE id = 70").fetchone()
+            self.assertEqual(p["tarif_name"], "Cours Ados 1 (Lundi)")
+            self.assertEqual(p["is_modified"], "Oui")
+            conn.close()
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_season_tarifs_endpoint(self):
+        """GET /api/season-tarifs retourne les tarifs disponibles de la saison active."""
+        from server import get_season_tarifs_api
+        res = get_season_tarifs_api("2026-2027")
+        self.assertEqual(res.get("status"), "success")
+        self.assertIn("tarifs", res)
+        self.assertIsInstance(res["tarifs"], list)
+
     def test_outils_page_tabs_and_iframes_wiring(self):
-        """La page outils.html intègre la carte et le TCD via onglets et iframes apiFetch."""
+        """La page outils.html contient les onglets Carte et TCD."""
         html = _read(os.path.join(BUREAU, "outils.html"))
         for elem in ("tab-btn-map", "tab-btn-pivot", "pane-map", "pane-pivot",
                       "iframe-map", "iframe-pivot", "pivot-season-select", "tools-refresh-btn"):
@@ -171,6 +341,100 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/map")', html)
         self.assertIn('apiFetch(url)', html)
         self.assertIn('frame.srcdoc = html;', html)
+
+    def test_communications_page_ui_and_wiring(self):
+        """La page communications.html reprend le design desktop et contient tous les contrôles."""
+        html = _read(os.path.join(BUREAU, "communications.html"))
+        shell = _read(os.path.join(SHARED, "alj-shell.js"))
+        index = _read(os.path.join(BUREAU, "index.html"))
+
+        # Vérification du menu et du lien
+        self.assertIn('/bureau/communications', shell)
+        self.assertIn('/bureau/communications', index)
+
+        # Contrôles de la page
+        for elem in ("template-select", "btn-save-tpl", "btn-new-tpl", "btn-del-tpl",
+                      "sender-email", "sender-name", "subject-input", "body-input",
+                      "signature-checkbox", "whatsapp-input", "pv-from", "pv-subject", "pv-body"):
+            self.assertIn(f'id="{elem}"', html)
+
+        self.assertIn('apiFetch("/api/email-templates"', html)
+        self.assertIn('apiFetch("/api/whatsapp-template"', html)
+
+    def test_email_template_crud_endpoints_and_sqlite(self):
+        """Les endpoints POST et DELETE /api/email-templates modifient correctement SQLite."""
+        import tempfile
+        import shutil
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import save_email_template_api, delete_email_template_api, get_email_templates
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_tpl.db")
+        orig_db_path = SqliteRepository.get_db_path()
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+
+            # 1. Création d'un nouveau modèle
+            payload = {
+                "name": "Test Nouveau Modèle",
+                "subject": "Sujet de test personnalisé",
+                "body": "Bonjour {first_name}, corps de test.",
+                "sender_email": "test@alj-escalade.fr",
+                "sender_name": "ALJ Test"
+            }
+            res_save = save_email_template_api(payload)
+            self.assertEqual(res_save.get("status"), "success")
+
+            # 2. Vérification dans la liste
+            res_list = get_email_templates()
+            self.assertEqual(res_list.get("status"), "success")
+            names = [t["name"] for t in res_list.get("templates", [])]
+            self.assertIn("Test Nouveau Modèle", names)
+
+            # 3. Suppression du modèle
+            res_del = delete_email_template_api("Test Nouveau Modèle")
+            self.assertEqual(res_del.get("status"), "success")
+
+            # 4. Vérification que le modèle a disparu
+            res_list2 = get_email_templates()
+            names2 = [t["name"] for t in res_list2.get("templates", [])]
+            self.assertNotIn("Test Nouveau Modèle", names2)
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_whatsapp_template_endpoints(self):
+        """GET et POST /api/whatsapp-template enregistrent et lisent le texte WhatsApp."""
+        import tempfile
+        import shutil
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import get_whatsapp_template_api, save_whatsapp_template_api
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_wa.db")
+        orig_db_path = SqliteRepository.get_db_path()
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+
+            res_save = save_whatsapp_template_api({"template": "Rejoignez le groupe WhatsApp du club : https://chat.whatsapp.com/xxx"})
+            self.assertEqual(res_save.get("status"), "success")
+
+            res_get = get_whatsapp_template_api()
+            self.assertEqual(res_get.get("status"), "success")
+            self.assertIn("chat.whatsapp.com", res_get.get("template", ""))
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_email_template_write_requires_admin_role(self):
+        """Les modifications de templates d'emails exigent le rôle admin."""
+        from infrastructure.api_auth import required_role
+        self.assertEqual(required_role("POST", "/api/email-templates"), "admin")
+        self.assertEqual(required_role("DELETE", "/api/email-templates/Test"), "admin")
+        self.assertEqual(required_role("POST", "/api/whatsapp-template"), "admin")
+        self.assertEqual(required_role("GET", "/api/email-templates"), "coach")
 
     def test_apply_template_variables_adherents_extension(self):
         """Les variables {tarif} et {season} sont correctement résolues pour les adhérents."""
@@ -243,7 +507,7 @@ class TestBureauAccess(unittest.TestCase):
         self.env.stop()
 
     def test_portal_public_api_protected(self):
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/outils",
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/outils",
                      "/static-web/alj.css", "/static-web/alj-shell.js"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
         self.assertEqual(self.client.get("/bureau/inconnue").status_code, 404)
@@ -257,7 +521,7 @@ class TestBureauAccess(unittest.TestCase):
 
     def test_required_role_for_portal(self):
         r = api_auth.required_role
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/static-web/alj-core.js"):
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/static-web/alj-core.js"):
             self.assertIsNone(r("GET", path), path)
         self.assertEqual(r("GET", "/api/email-status"), "coach")
 

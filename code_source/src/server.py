@@ -898,7 +898,12 @@ _annuaire_page_path = os.path.join(_web_dir, "index.html")
 # Portail « bureau » (ordinateur) : pages publiques, les données restent protégées
 # (lecture Firestore avec le compte Google, appels API avec jeton).
 _bureau_dir = os.path.join(_web_dir, "bureau")
-_BUREAU_PAGES = {"": "index.html", "adherents": "adherents.html", "outils": "outils.html"}
+_BUREAU_PAGES = {
+    "": "index.html",
+    "adherents": "adherents.html",
+    "communications": "communications.html",
+    "outils": "outils.html"
+}
 
 
 def _bureau_file(page: str):
@@ -1053,6 +1058,91 @@ def get_email_templates():
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/email-templates")
+def save_email_template_api(data: Dict[str, Any] = Body(...)):
+    """Crée ou met à jour un modèle d'e-mail dans la BDD SQLite (synchronisé avec Firestore)."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        name = str(data.get("name") or "").strip()
+        subject = str(data.get("subject") or "").strip()
+        body = str(data.get("body") or "").strip()
+        sender_email = str(data.get("sender_email") or "").strip()
+        sender_name = str(data.get("sender_name") or "").strip()
+
+        if not name:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Le nom du modèle est obligatoire."})
+        if not subject:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Le sujet du modèle est obligatoire."})
+
+        ok = SqliteRepository.save_email_template(
+            name=name,
+            subject=subject,
+            body=body,
+            sender_email=sender_email,
+            sender_name=sender_name
+        )
+        if not ok:
+            return JSONResponse(status_code=500, content={"status": "error", "message": f"Impossible d'enregistrer le modèle '{name}'."})
+
+        return {
+            "status": "success",
+            "message": f"Modèle d'e-mail '{name}' enregistré avec succès.",
+            "template": {
+                "name": name,
+                "subject": subject,
+                "body": body,
+                "sender_email": sender_email,
+                "sender_name": sender_name
+            }
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@app.delete("/api/email-templates/{template_name}")
+def delete_email_template_api(template_name: str):
+    """Supprime un modèle d'e-mail par son nom."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        import urllib.parse
+        clean_name = urllib.parse.unquote(template_name).strip()
+        if not clean_name:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Nom de modèle invalide."})
+
+        ok = SqliteRepository.delete_email_template(clean_name)
+        if not ok:
+            return JSONResponse(status_code=404, content={"status": "error", "message": f"Modèle '{clean_name}' introuvable ou déjà supprimé."})
+
+        return {"status": "success", "message": f"Modèle '{clean_name}' supprimé avec succès."}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@app.get("/api/whatsapp-template")
+def get_whatsapp_template_api():
+    """Retourne le texte d'invitation WhatsApp mémorisé."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        text = SqliteRepository.get_whatsapp_template()
+        return {"status": "success", "template": text or ""}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@app.post("/api/whatsapp-template")
+def save_whatsapp_template_api(data: Dict[str, Any] = Body(...)):
+    """Enregistre le texte d'invitation WhatsApp."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        text = str(data.get("template") or "").strip()
+        ok = SqliteRepository.save_whatsapp_template(text)
+        if not ok:
+            return JSONResponse(status_code=500, content={"status": "error", "message": "Impossible d'enregistrer le texte WhatsApp."})
+        return {"status": "success", "message": "Texte WhatsApp enregistré avec succès.", "template": text}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @app.post("/api/preview-email")
 def preview_email(data: Dict[str, Any] = Body(...)):
     """Génère un aperçu fidèle d'un e-mail personnalisé pour un destinataire et une compétition."""
@@ -1205,51 +1295,113 @@ def send_attestation_api(data: Dict[str, Any] = Body(...)):
         order_ref = member.get("order_ref")
         filename_pdf = get_safe_pdf_filename(last_name, first_name, order_ref)
 
-        raw_subject = data.get("subject") or "Attestation de paiement de cotisation - ALJ Escalade"
-        raw_body = data.get("body") or (
+        template_name = (data.get("template_name") or "Attestation échéance").strip()
+        from infrastructure.email_dispatch_service import EmailDispatchService
+        tmpl = EmailDispatchService.get_template_by_name(template_name)
+
+        raw_subject = data.get("subject") or (tmpl.get("subject") if tmpl else None) or "Attestation de paiement et d'échéance - Amicale Laïque de Jonage"
+        raw_body = data.get("body") or (tmpl.get("body") if tmpl else None) or (
             "Bonjour {first_name},\n\n"
-            "Veuillez trouver ci-joint votre attestation de paiement de cotisation pour la saison {season}.\n\n"
-            "Bien cordialement,\n"
-            "L'équipe ALJ Escalade\n"
-            "contact@alj-escalade.fr"
+            "Nous avons le plaisir de vous transmettre en pièce jointe l'attestation de paiement pour votre adhésion ou celle de votre enfant à la section escalade de l'Amicale Laïque de Jonage.\n\n"
+            "Sportivement,\n"
+            "L'équipe ALJ Escalade"
         )
         subject = apply_template_variables(raw_subject, member)
         body = apply_template_variables(raw_body, member)
 
-        sender_email = data.get("sender_email")
-        sender_name = data.get("sender_name") or "ALJ Escalade"
+        sender_email = data.get("sender_email") or (tmpl.get("sender_email") if tmpl else None) or "inscription@alj-escalade.fr"
+        sender_name = data.get("sender_name") or (tmpl.get("sender_name") if tmpl else None) or "Amicale Laïque Jonage - Inscriptions"
+
+        add_signature = data.get("add_signature", True)
+        from email_html import build_email_html, build_signature_plain, get_inline_images
+        html_body = build_email_html(body, add_signature=add_signature, image_src_mode="cid") if add_signature else None
+        plain_body = body + ("\n\n" + build_signature_plain() if add_signature else "")
+        inline_images = get_inline_images() if add_signature else []
 
         ok = EmailRepository.send_email(
             to_email=to_email,
             subject=subject,
-            body=body,
+            body=plain_body,
+            html_body=html_body,
             attachment_bytes=pdf_bytes,
             attachment_filename=filename_pdf,
+            inline_images=inline_images,
             from_email=sender_email,
             from_name=sender_name
         )
         if not ok:
             return JSONResponse(status_code=500, content={"status": "error", "message": "Échec d'envoi de l'e-mail."})
 
-        # Mise à jour de la date d'envoi dans Firestore si applicable
+        # Enregistrement de la date d'envoi de l'attestation dans SQLite
+        # (CloudDatabase.after_write synchronisera automatiquement la modification vers Firestore)
         now_str = datetime.datetime.now().strftime("%d/%m/%Y")
         try:
-            from infrastructure.firestore_client import FirestoreClient
-            fs_db = FirestoreClient.get_db()
+            from infrastructure.sqlite_repository import SqliteRepository
             pid = member.get("purchase_id")
-            if fs_db and pid:
-                fs_db.collection("crm_purchases").doc(str(pid)).set({
-                    "email_sent_date": now_str,
-                    "_modified_at": datetime.datetime.now()
-                }, merge=True)
-        except Exception:
-            pass
+            SqliteRepository.update_email_sent_date(
+                order_ref=str(order_ref or "").strip(),
+                last_name=str(last_name or "").strip(),
+                first_name=str(first_name or "").strip(),
+                date_str=now_str,
+                purchase_id=int(pid) if pid is not None else None
+            )
+        except Exception as db_err:
+            print(f"⚠️ [ATTESTATION] Erreur enregistrement date d'envoi dans SQLite : {db_err}")
 
         return {
             "status": "success",
             "message": f"Attestation envoyée avec succès à {to_email}.",
             "email_sent_date": now_str,
             "filename": filename_pdf
+        }
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+@app.get("/api/season-tarifs")
+def get_season_tarifs_api(season: Optional[str] = None):
+    """Retourne la liste des tarifs HelloAsso (groupes disponibles) d'une saison pour l'édition de créneau."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        from domain.constants import get_active_season
+        target_season = season or get_active_season()
+        tarifs = SqliteRepository.get_season_tarifs(target_season)
+        return {"status": "success", "season": target_season, "tarifs": tarifs}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@app.post("/api/members/update")
+def update_member_api(data: Dict[str, Any] = Body(...)):
+    """Met à jour les informations d'un adhérent (badge rouge, autonomie bloc, créneau/tarif, e-mails, téléphone)."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        user_id = data.get("user_id")
+        purchase_id = data.get("purchase_id")
+        order_ref = data.get("order_ref")
+        fields = data.get("fields") or {}
+
+        if not user_id and not purchase_id and not order_ref:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "Identifiant d'adhérent manquant (user_id, purchase_id ou order_ref)."}
+            )
+
+        success, err = SqliteRepository.update_member_fields(
+            user_id=int(user_id) if user_id is not None else None,
+            fields=fields,
+            purchase_id=int(purchase_id) if purchase_id is not None else None,
+            order_ref=str(order_ref).strip() if order_ref else None
+        )
+
+        if not success:
+            return JSONResponse(status_code=400, content={"status": "error", "message": err})
+
+        return {
+            "status": "success",
+            "message": "Fiche adhérent mise à jour avec succès.",
+            "user_id": user_id,
+            "fields": fields
         }
     except Exception as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})

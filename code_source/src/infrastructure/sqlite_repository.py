@@ -767,12 +767,23 @@ class SqliteRepository:
             conn.close()
 
     @classmethod
-    def update_email_sent_date(cls, order_ref: str, last_name: str, first_name: str, date_str: str) -> bool:
+    def update_email_sent_date(cls, order_ref: str, last_name: str, first_name: str, date_str: str, purchase_id: Optional[int] = None) -> bool:
         """Phase 5 - Met a jour la date d'envoi d'e-mail sur les achats v2 de la commande."""
         cls.setup_database()
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
+            if purchase_id:
+                cursor.execute("""
+                    UPDATE purchases
+                    SET email_sent_date = ?
+                    WHERE id = ?
+                """, (date_str, int(purchase_id)))
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    print(f"[SQLITE] Date d'envoi d'e-mail enregistree pour l'achat #{purchase_id} : {date_str}")
+                    return True
+
             cursor.execute("""
                 UPDATE purchases
                 SET email_sent_date = ?
@@ -781,26 +792,118 @@ class SqliteRepository:
                       SELECT id FROM users
                       WHERE UPPER(TRIM(last_name)) = ? AND LOWER(TRIM(first_name)) = ?
                   )
-            """, (date_str, order_ref.strip(),
+            """, (date_str, str(order_ref or "").strip(),
                   str(last_name or "").strip().upper(), str(first_name or "").strip().lower()))
             rows_affected = cursor.rowcount
-            if rows_affected == 0:
+            if rows_affected == 0 and order_ref:
                 cursor.execute("""
                     UPDATE purchases
                     SET email_sent_date = ?
                     WHERE order_id IN (SELECT id FROM orders WHERE order_ref = ?)
-                """, (date_str, order_ref.strip()))
+                """, (date_str, str(order_ref).strip()))
                 rows_affected = cursor.rowcount
             conn.commit()
             if rows_affected > 0:
                 print(f"[SQLITE] Date d'envoi d'e-mail enregistree pour la commande {order_ref} : {date_str}")
                 return True
-            print(f"[SQLITE] Aucun achat trouve pour la commande {order_ref}")
+            print(f"[SQLITE] Aucun achat trouve pour la commande {order_ref} (achat #{purchase_id})")
             return False
         except Exception as e:
             print(f"[SQLITE] Erreur lors de la mise a jour de la date d'envoi d'e-mail : {e}")
             conn.rollback()
             return False
+        finally:
+            conn.close()
+
+    @classmethod
+    def update_member_fields(
+        cls,
+        user_id: Optional[int] = None,
+        fields: Optional[dict] = None,
+        purchase_id: Optional[int] = None,
+        order_ref: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Met à jour de manière ciblée les informations d'un adhérent :
+        - Table users : badge_rouge, autonomie_bloc, email_primary, email_secondary, phone.
+        - Table purchases : tarif_name.
+        Retourne (succès: bool, message: str).
+        """
+        if not fields:
+            return False, "Aucun champ à mettre à jour."
+
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+
+            # Résolution de user_id si absent
+            resolved_uid = user_id
+            if resolved_uid is None and purchase_id:
+                row = cursor.execute("SELECT user_id FROM purchases WHERE id = ?", (int(purchase_id),)).fetchone()
+                if row:
+                    resolved_uid = row["user_id"]
+
+            if resolved_uid is None and order_ref:
+                row = cursor.execute("""
+                    SELECT p.user_id FROM purchases p
+                    JOIN orders o ON o.id = p.order_id
+                    WHERE o.order_ref = ?
+                    LIMIT 1
+                """, (str(order_ref).strip(),)).fetchone()
+                if row:
+                    resolved_uid = row["user_id"]
+
+            # 1. Mise à jour de la table users
+            user_updates = {}
+            if "badge_rouge" in fields:
+                user_updates["badge_rouge"] = str(fields["badge_rouge"] or "Non").strip()
+            if "autonomie_bloc" in fields:
+                user_updates["autonomie_bloc"] = str(fields["autonomie_bloc"] or "Non").strip()
+            if "email_primary" in fields:
+                user_updates["email_primary"] = str(fields["email_primary"] or "").strip()
+            if "email_secondary" in fields:
+                user_updates["email_secondary"] = str(fields["email_secondary"] or "").strip()
+            if "phone" in fields:
+                user_updates["phone"] = str(fields["phone"] or "").strip()
+
+            if user_updates and resolved_uid is not None:
+                sets = [f'"{col}" = ?' for col in user_updates.keys()]
+                sets.append('updated_at = ?')
+                params = list(user_updates.values()) + [now_iso, int(resolved_uid)]
+                cursor.execute(f'UPDATE users SET {", ".join(sets)} WHERE id = ?', params)
+
+            # 2. Mise à jour de la table purchases (créneau / tarif)
+            if "tarif_name" in fields:
+                new_tarif = str(fields["tarif_name"] or "").strip()
+                if new_tarif:
+                    if purchase_id:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET tarif_name = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE id = ?
+                        """, (new_tarif, now_iso, int(purchase_id)))
+                    elif order_ref and resolved_uid:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET tarif_name = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE user_id = ? AND order_id IN (SELECT id FROM orders WHERE order_ref = ?)
+                        """, (new_tarif, now_iso, int(resolved_uid), str(order_ref).strip()))
+                    elif resolved_uid:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET tarif_name = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE user_id = ?
+                        """, (new_tarif, now_iso, int(resolved_uid)))
+
+            conn.commit()
+            print(f"[SQLITE] Adhérent #{resolved_uid} mis à jour avec succès : {list(fields.keys())}")
+            return True, ""
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de la mise à jour de l'adhérent : {e}")
+            conn.rollback()
+            return False, str(e)
         finally:
             conn.close()
     @classmethod

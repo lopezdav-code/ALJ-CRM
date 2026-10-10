@@ -121,6 +121,12 @@ def required_role(method: str, path: str) -> Optional[str]:
         return "admin"  # firestore.rules : planning modifiable par les admins
     if path.startswith("/api/attestations"):
         return "admin"  # attestations réservées aux administrateurs
+    if path.startswith("/api/members") and method not in ("GET", "HEAD"):
+        return "admin"  # modification des fiches réservée aux administrateurs
+    if path.startswith("/api/email-templates") and method not in ("GET", "HEAD"):
+        return "admin"  # modification des templates d'emails réservée aux administrateurs
+    if path.startswith("/api/whatsapp-template") and method not in ("GET", "HEAD"):
+        return "admin"  # modification du template WhatsApp réservée aux administrateurs
     return "coach"
 
 

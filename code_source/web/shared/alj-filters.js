@@ -167,11 +167,33 @@ export function sortMembers(list, sortKey, sortAsc = true) {
     let va = a[sortKey] != null ? a[sortKey] : "";
     let vb = b[sortKey] != null ? b[sortKey] : "";
 
-    // Traitement spécifique selon le type
+    // Traitement spécifique selon le type numérique
     if (sortKey === "amount" || sortKey === "age") {
       const na = va === "" || va == null ? -1 : Number(va);
       const nb = vb === "" || vb == null ? -1 : Number(vb);
       return sortAsc ? na - nb : nb - na;
+    }
+
+    // Traitement spécifique des dates (order_date, birth_date)
+    if (sortKey === "order_date" || sortKey === "birth_date") {
+      const parseDate = (d) => {
+        if (!d) return 0;
+        const s = String(d).trim();
+        const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+          const t = Date.parse(s.length > 10 ? s : `${s}T00:00:00`);
+          return isNaN(t) ? new Date(isoMatch[1], isoMatch[2] - 1, isoMatch[3]).getTime() : t;
+        }
+        const frMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (frMatch) {
+          return new Date(frMatch[3], frMatch[2] - 1, frMatch[1]).getTime();
+        }
+        const t = Date.parse(s);
+        return isNaN(t) ? 0 : t;
+      };
+      const da = parseDate(va);
+      const db = parseDate(vb);
+      return sortAsc ? da - db : db - da;
     }
 
     const res = coll.compare(String(va), String(vb));

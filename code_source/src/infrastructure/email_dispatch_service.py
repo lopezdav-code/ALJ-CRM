@@ -31,10 +31,11 @@ class EmailDispatchService:
 
     @classmethod
     def get_template_by_name(cls, name: str) -> Optional[Dict[str, Any]]:
-        """Recherche un modèle d'e-mail par son nom (insensible à la casse)."""
-        name_clean = str(name or "").strip().lower()
+        """Recherche un modèle d'e-mail par son nom (insensible à la casse et aux accents)."""
+        from domain.utils import normalize_name
+        name_clean = normalize_name(name)
         for t in cls.list_templates():
-            if str(t.get("name") or "").strip().lower() == name_clean:
+            if normalize_name(t.get("name") or "") == name_clean:
                 return t
         return None
 
