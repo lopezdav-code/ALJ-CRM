@@ -902,6 +902,7 @@ _BUREAU_PAGES = {
     "": "index.html",
     "adherents": "adherents.html",
     "communications": "communications.html",
+    "competitions": "competitions.html",
     "outils": "outils.html"
 }
 

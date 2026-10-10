@@ -361,6 +361,29 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/api/email-templates"', html)
         self.assertIn('apiFetch("/api/whatsapp-template"', html)
 
+    def test_competitions_desktop_page_ui_and_wiring(self):
+        """La page bureau/competitions.html est adaptée aux grands écrans d'ordinateur tout en préservant le mobile."""
+        html = _read(os.path.join(BUREAU, "competitions.html"))
+        shell = _read(os.path.join(SHARED, "alj-shell.js"))
+        index = _read(os.path.join(BUREAU, "index.html"))
+
+        # Vérification des liens du menu et de l'accueil
+        self.assertIn('/bureau/competitions', shell)
+        self.assertIn('/bureau/competitions', index)
+
+        # La vue mobile existe toujours séparément et n'est pas altérée
+        mobile_html = _read(get_competitions_page().path)
+        self.assertIn('id="page-comps"', mobile_html)
+        self.assertIn('id="page-participants"', mobile_html)
+
+        # Éléments grand écran de la page bureau
+        for elem in ("comps-list-container", "comp-workspace", "comp-search-input",
+                      "comp-form-modal", "comp-email-modal", "btn-add-comp"):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn("comp-layout", html)
+        self.assertIn('apiFetch("/api/helloasso/sync"', html)
+        self.assertIn('apiFetch("/api/send-email"', html)
+
     def test_email_template_crud_endpoints_and_sqlite(self):
         """Les endpoints POST et DELETE /api/email-templates modifient correctement SQLite."""
         import tempfile
@@ -507,7 +530,7 @@ class TestBureauAccess(unittest.TestCase):
         self.env.stop()
 
     def test_portal_public_api_protected(self):
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/outils",
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/outils",
                      "/static-web/alj.css", "/static-web/alj-shell.js"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
         self.assertEqual(self.client.get("/bureau/inconnue").status_code, 404)
@@ -521,7 +544,7 @@ class TestBureauAccess(unittest.TestCase):
 
     def test_required_role_for_portal(self):
         r = api_auth.required_role
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/static-web/alj-core.js"):
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/static-web/alj-core.js"):
             self.assertIsNone(r("GET", path), path)
         self.assertEqual(r("GET", "/api/email-status"), "coach")
 

@@ -10,8 +10,8 @@ const NAV = [
   { id: "accueil", label: "🏠 Accueil", href: "/bureau/" },
   { id: "adherents", label: "👥 Adhérents", href: "/bureau/adherents" },
   { id: "communications", label: "✉️ Communications", href: "/bureau/communications" },
-  { id: "outils", label: "🛠️ Outils", href: "/bureau/outils" },
-  { id: "competitions", label: "🏆 Compétitions", href: "/competitions?vue=pwa" }
+  { id: "competitions", label: "🏆 Compétitions", href: "/bureau/competitions" },
+  { id: "outils", label: "🛠️ Outils", href: "/bureau/outils" }
 ];
 const ROLE_LABEL = {
   admin: "🛡️ Administrateur", coach: "🏃 Coach", lecture: "👁️ Lecture seule", aucun: "⛔ Non autorisé"
