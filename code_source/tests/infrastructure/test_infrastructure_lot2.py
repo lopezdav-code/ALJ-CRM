@@ -123,7 +123,7 @@ class TestInfrastructureLot2(unittest.TestCase):
             try:
                 with open(env_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                new_lines = [l for l in lines if not l.startswith(f"{test_key}=")]
+                new_lines = [line for line in lines if not line.startswith(f"{test_key}=")]
                 with open(env_path, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
             except Exception:
@@ -423,7 +423,7 @@ class TestInfrastructureLot2(unittest.TestCase):
 
     def test_gmail_contacts_virtual_groups(self):
         """Vérifie le filtrage correct des adhérents pour les groupes virtuels Adhérent et Compétition."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from presentation.workers import SyncGmailContactsWorker
         SqliteRepository.setup_database()
         

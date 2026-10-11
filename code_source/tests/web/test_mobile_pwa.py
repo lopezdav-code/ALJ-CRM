@@ -12,7 +12,6 @@ _src_dir = os.path.join(os.path.dirname(_tests_dir), "src")
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-import re
 
 from server import get_manifest, get_sw, get_competitions_page, get_web_version, get_annuaire_page
 

@@ -39,7 +39,7 @@ class TestPresentationLot5(unittest.TestCase):
     @unittest.skipIf(not PYSIDE6_AVAILABLE, "PySide6 n'est pas disponible pour tester les workers asynchrones")
     def test_documents_page_auto_open_and_folder_btn(self):
         """Vérifie que DocumentsPage permet d'ouvrir le dossier et d'ouvrir automatiquement une attestation unique."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from PySide6.QtWidgets import QApplication
         from presentation.pages.documents import DocumentsPage
         from domain.models import Member

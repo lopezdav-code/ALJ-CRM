@@ -5,16 +5,15 @@ Tests unitaires pour le service d'expédition d'e-mails et les endpoints FastAPI
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 _tests_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _src_dir = os.path.join(os.path.dirname(_tests_dir), "src")
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-import asyncio
 from infrastructure.email_dispatch_service import EmailDispatchService
-from server import get_email_templates, preview_email, send_email_api, get_email_status
+from server import get_email_templates, preview_email, get_email_status
 
 
 class TestEmailDispatchService(unittest.TestCase):

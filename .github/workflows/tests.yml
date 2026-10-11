@@ -35,7 +35,7 @@ jobs:
 
     - name: Lint (ruff)
       working-directory: code_source
-      run: python -m ruff check src
+      run: python -m ruff check src tests
 
     - name: Type check (mypy)
       working-directory: code_source

@@ -19,12 +19,12 @@ NEW_CREDS = ("new-client-id", "new-secret", "NEW_VALID_TOKEN")
 
 def _write_env(path, creds):
     with open(path, "w", encoding="utf-8") as f:
-        f.write(f"# Commentaire à ignorer\n")
+        f.write("# Commentaire à ignorer\n")
         f.write(f"GMAIL_CLIENT_ID={creds[0]}\n")
         f.write(f"GMAIL_CLIENT_SECRET={creds[1]}\n")
         f.write(f"GMAIL_REFRESH_TOKEN={creds[2]}\n")
-        f.write(f"GMAIL_USER_EMAIL=test@alj-escalade.fr\n")
-        f.write(f"AUTRE_CLE=valeur\n")
+        f.write("GMAIL_USER_EMAIL=test@alj-escalade.fr\n")
+        f.write("AUTRE_CLE=valeur\n")
 
 
 def _fake_response(status_code, payload):
@@ -53,7 +53,7 @@ class TestDriveTokenRepair(unittest.TestCase):
 
     def test_candidates_store_first_then_env(self):
         with mock.patch.object(SecretStore, "get_secret", side_effect=lambda k: dict(
-                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS)).get(k, "")):
+                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS, strict=True)).get(k, "")):
             candidates = GoogleDriveClient._iter_credential_candidates(env_paths=[self.env_path])
         self.assertEqual(candidates[0], OLD_CREDS)
         self.assertIn(NEW_CREDS, candidates)
@@ -62,7 +62,7 @@ class TestDriveTokenRepair(unittest.TestCase):
     def test_valid_stored_token_no_repair(self):
         """Le token du SecretStore fonctionne : aucun appel de réparation, un seul appel HTTP."""
         with mock.patch.object(SecretStore, "get_secret", side_effect=lambda k: dict(
-                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), NEW_CREDS)).get(k, "")), \
+                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), NEW_CREDS, strict=True)).get(k, "")), \
              mock.patch.object(SecretStore, "set_secret") as mock_set, \
              mock.patch("infrastructure.google_drive_client.requests.post",
                         return_value=_fake_response(200, {"access_token": "TOKEN_OK"})) as mock_post:
@@ -80,7 +80,7 @@ class TestDriveTokenRepair(unittest.TestCase):
             _fake_response(200, {"access_token": "TOKEN_NEW"}),
         ]
         with mock.patch.object(SecretStore, "get_secret", side_effect=lambda k: dict(
-                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS)).get(k, "")), \
+                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS, strict=True)).get(k, "")), \
              mock.patch.object(SecretStore, "set_secret") as mock_set, \
              mock.patch("infrastructure.google_drive_client.requests.post", side_effect=responses) as mock_post:
             token = GoogleDriveClient.get_access_token(env_paths=[self.env_path])
@@ -97,7 +97,7 @@ class TestDriveTokenRepair(unittest.TestCase):
             _fake_response(400, {"error": "invalid_grant"}),
         ]
         with mock.patch.object(SecretStore, "get_secret", side_effect=lambda k: dict(
-                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS)).get(k, "")), \
+                zip(("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"), OLD_CREDS, strict=True)).get(k, "")), \
              mock.patch("infrastructure.google_drive_client.requests.post", side_effect=responses):
             with self.assertRaises(Exception) as ctx:
                 GoogleDriveClient.get_access_token(env_paths=[self.env_path])

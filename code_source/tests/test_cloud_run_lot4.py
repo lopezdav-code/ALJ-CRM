@@ -5,7 +5,6 @@ Tests unitaires pour le Lot 4 : Déploiement Cloud Run, Dockerfile, et routes de
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
 
 _tests_dir = os.path.dirname(os.path.abspath(__file__))
 _code_root = os.path.dirname(_tests_dir)

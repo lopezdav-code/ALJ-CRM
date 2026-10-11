@@ -5,7 +5,6 @@ Tests unitaires pour le module de synchronisation Google Cloud Firestore (firest
 import os
 import sys
 import unittest
-import datetime
 from unittest.mock import patch, MagicMock
 
 _tests_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,8 +13,6 @@ if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 from infrastructure.firestore_sync import (
-    python_to_firestore_value,
-    firestore_to_python_value,
     dict_to_firestore_fields,
     firestore_fields_to_dict,
     prepare_firestore_data,

@@ -8,7 +8,7 @@ _src_dir = os.path.join(os.path.dirname(_test_dir), "src") if os.path.basename(_
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from domain.models import Member, InsuranceOptions
+from domain.models import Member
 from domain.validators import validate_amount, validate_email
 from domain.constants import get_active_season, get_drive_temp_filename
 from attestation_generator import get_safe_filename

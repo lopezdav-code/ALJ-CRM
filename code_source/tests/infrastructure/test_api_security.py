@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 
 import helloasso_api
 from infrastructure import api_auth
-from infrastructure.helloasso_webhook_service import HelloAssoWebhookService, WebhookRejected
+from infrastructure.helloasso_webhook_service import HelloAssoWebhookService
 from server import app
 
 PROJECT = api_auth.DEFAULT_PROJECT_ID

@@ -490,7 +490,6 @@ class TestBatchUpsertCommitBody(unittest.TestCase):
     pas une URL complète (HTTP 400 « lacks projects » vu en production)."""
 
     def test_commit_uses_relative_document_name(self):
-        import json as _json
         with patch.object(fc.requests, "post") as mock_post, \
              patch.object(FirestoreClient, "get_access_token", return_value="fake-token"):
             resp = mock_post.return_value

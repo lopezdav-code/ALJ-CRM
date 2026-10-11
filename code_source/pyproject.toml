@@ -12,7 +12,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 140
 target-version = "py310"
-exclude = ["tests", "build", "dist"]
+exclude = ["build", "dist"]
 
 [tool.ruff.lint]
 # Démarrage progressif : erreurs d'exécution + imports/variables inutilisés.
