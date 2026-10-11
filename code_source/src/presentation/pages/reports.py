@@ -1,6 +1,5 @@
 import os
 import socket
-import sqlite3
 import webbrowser
 import threading
 import time
@@ -897,40 +896,21 @@ class ReportsPage(QWidget):
             box.exec()
             
             if box.clickedButton() == yes_btn:
-                # Écrire directement la correction en base de données SQLite de manière pérenne !
                 from infrastructure.sqlite_repository import SqliteRepository
-                
-                conn = sqlite3.connect(SqliteRepository.get_db_path())
-                cursor = conn.cursor()
-                
-                # Retrouver l'adhérent exact par son nom/prénom
+
+                # Match the member by first/last name
                 parts = orig_name.split(" ", 1)
                 first_name = parts[0].strip()
                 last_name = parts[1].strip() if len(parts) > 1 else ""
-                
-                # Mettre à jour les colonnes d'adresse
-                cursor.execute(
-                    "UPDATE users SET "
-                    "address = ?, zip_code = ?, city = ? "
-                    "WHERE UPPER(TRIM(first_name)) = UPPER(TRIM(?)) "
-                    "AND UPPER(TRIM(last_name)) = UPPER(TRIM(?))",
-                    (s_name, s_postcode, s_city, first_name, last_name)
-                )
-                
-                # Enregistrer également directement les coordonnées dans le geocache pour un affichage carte instantané !
+
+                # Also cache the coordinates so the map updates immediately
+                geocode = None
                 if len(coords) >= 2:
                     lon, lat = coords[0], coords[1]
-                    city_upper = s_city.strip().upper()
-                    full_address = f"{s_name.strip()}, {s_postcode.strip()}, {city_upper}, France"
-                    full_address = " ".join(full_address.split())
-                    
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO geocache (address, lat, lon) VALUES (?, ?, ?)",
-                        (full_address, lat, lon)
-                    )
-                
-                conn.commit()
-                conn.close()
+                    full_address = f"{s_name.strip()}, {s_postcode.strip()}, {s_city.strip().upper()}, France"
+                    geocode = (" ".join(full_address.split()), lat, lon)
+
+                SqliteRepository.correct_member_address(first_name, last_name, s_name, s_postcode, s_city, geocode)
                 
                 QMessageBox.information(self, "Adresse Corrigée", f"✅ L'adresse de {orig_name} a été corrigée et enregistrée en BDD avec succès !")
                 

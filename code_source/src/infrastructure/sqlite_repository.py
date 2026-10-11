@@ -716,6 +716,96 @@ class SqliteRepository:
             conn.close()
 
     @classmethod
+    def get_all_tarifs(cls) -> list:
+        """Sorted distinct HelloAsso tarif names across every season."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT DISTINCT tarif_name FROM purchases
+                WHERE tarif_name IS NOT NULL AND tarif_name != ''
+                ORDER BY tarif_name ASC
+            """).fetchall()
+            return [r["tarif_name"].strip() for r in rows]
+        finally:
+            conn.close()
+
+    @classmethod
+    def list_contact_emails(cls) -> set:
+        """Every member and payer address in the database (lower-cased)."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            emails = set()
+            for sql in ("SELECT email_primary, email_secondary FROM users", "SELECT payer_email FROM orders"):
+                for row in conn.execute(sql).fetchall():
+                    emails.update(str(v).strip().lower() for v in tuple(row) if v)
+            emails.discard("")
+            return emails
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_users_by_ids(cls, ids: List[int]) -> Dict[int, dict]:
+        """Contact details of the given users, keyed by id (unknown ids are omitted)."""
+        ids = list(dict.fromkeys(ids or []))
+        if not ids:
+            return {}
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                "SELECT id, first_name, last_name, email_primary, email_secondary, phone, licence_ffme "
+                f"FROM users WHERE id IN ({placeholders})",
+                ids,
+            ).fetchall()
+            return {row["id"]: dict(row) for row in rows}
+        finally:
+            conn.close()
+
+    @classmethod
+    def correct_member_address(cls, first_name: str, last_name: str, address: str, zip_code: str,
+                               city: str, geocode: Optional[Tuple[str, float, float]] = None):
+        """Overwrite a member's address (matched by name) and optionally cache its
+        (full_address, lat, lon) geocode, in a single transaction."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            conn.execute(
+                "UPDATE users SET address = ?, zip_code = ?, city = ? "
+                "WHERE UPPER(TRIM(first_name)) = UPPER(TRIM(?)) "
+                "AND UPPER(TRIM(last_name)) = UPPER(TRIM(?))",
+                (address, zip_code, city, first_name, last_name),
+            )
+            if geocode:
+                conn.execute("""
+                    INSERT INTO geocache (address, lat, lon) VALUES (?, ?, ?)
+                    ON CONFLICT(address) DO UPDATE SET lat = excluded.lat, lon = excluded.lon
+                """, geocode)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @classmethod
+    def check_readable(cls) -> Optional[str]:
+        """None when the database file exists and can be queried, else the reason."""
+        if not os.path.exists(cls._db_path):
+            return "database file not found"
+        try:
+            conn = sqlite3.connect(cls._db_path)
+            try:
+                conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            finally:
+                conn.close()
+            return None
+        except Exception as e:
+            return str(e)
+
+    @classmethod
     def update_member_tarif(cls, order_ref: str, last_name: str, first_name: str, new_tarif: str):
         """Change le tarif (groupe) d'un adhérent : met à jour purchases.tarif_name.
 

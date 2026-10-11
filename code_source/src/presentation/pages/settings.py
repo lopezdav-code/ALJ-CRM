@@ -504,23 +504,17 @@ class SettingsPage(QWidget):
     def check_local_files_status(self):
         """Vérifie la disponibilité et la lisibilité de la base SQLite locale."""
         import os
-        import sqlite3
         from infrastructure.sqlite_repository import SqliteRepository
 
-        db_path = SqliteRepository.get_db_path()
         db_status = "🔴 Introuvable"
         db_color = "#EF4444"
-        if os.path.exists(db_path):
-            try:
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                cursor.close()
-                conn.close()
+        if os.path.exists(SqliteRepository.get_db_path()):
+            error = SqliteRepository.check_readable()
+            if error is None:
                 db_status = "🟢 Disponible et lisible"
                 db_color = "#10B981"
-            except Exception as e:
-                db_status = f"⚠️ Corrompu ou illisible ({str(e)[:30]})"
+            else:
+                db_status = f"⚠️ Corrompu ou illisible ({error[:30]})"
                 db_color = "#F59E0B"
 
         self.db_status_lbl.setText(f"📁 database.db : {db_status}")

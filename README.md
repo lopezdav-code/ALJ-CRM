@@ -78,6 +78,7 @@ Depuis `code_source/` (Google Cloud Shell ou poste avec le Google Cloud SDK) :
 ./deploy_cloud_run.sh --test              # version de test : 0 % du trafic, URL dédiée
 ./deploy_cloud_run.sh --rollback          # retour à la révision précédant celle en ligne
 ./deploy_cloud_run.sh --rollback <REV>    # retour à une révision précise
+./deploy_cloud_run.sh --cleanup           # supprime l'URL de test (la révision est conservée)
 ```
 
 Chaque déploiement crée une **révision** Cloud Run immuable ; le script affiche la révision en ligne,
@@ -90,6 +91,9 @@ demande confirmation, puis donne l'URL de l'application à la fin.
 2. Vérifier sur cette URL : `/health`, connexion, pages modifiées.
 3. Promouvoir sans reconstruire avec la commande `gcloud run services update-traffic … --to-tags test=100`
    affichée par le script (ou relancer un déploiement de production).
+4. `./deploy_cloud_run.sh --cleanup` une fois les tests terminés : l'URL de test, branchée sur les
+   données de production, cesse de répondre. Une révision sans trafic ne coûte rien (0 instance au
+   repos) ; seules les images Docker s'accumulent dans Artifact Registry (`cloud-run-source-deploy`).
 
 ### Revenir en arrière
 
@@ -103,8 +107,14 @@ affichée. Le prochain déploiement en production renvoie le trafic sur la nouve
 - La version de test utilise **les données Firestore et les secrets de production** : toute action
   (envoi d'e-mails, modification d'adhérents) y est réelle.
 - Un rollback ne restaure que le code, jamais les données.
-- Si la connexion échoue sur l'URL de test, ajouter son domaine dans Firebase Authentication >
-  Settings > Authorized domains.
+- Connexion sur l'URL de test (`Erreur 400 : redirect_uri_mismatch`) : la connexion Google passe par
+  le client OAuth `796572126711-npcue84…` (voir `web/competitions.html`). Une seule fois, dans la console
+  Google Cloud > API et services > Identifiants > ce client OAuth, ajouter :
+  - **Origines JavaScript autorisées** : `https://test---alj-escalade-api-….run.app`
+  - **URI de redirection autorisés** : `https://test---alj-escalade-api-….run.app/competitions`
+
+  L'URL de test ne change pas d'un déploiement `--test` à l'autre. La prise en compte peut prendre
+  quelques minutes.
 - Les webhooks HelloAsso arrivent toujours sur l'URL principale, donc sur la révision de production.
 - `firestore.rules` n'est **pas** déployé par ce script (`firebase deploy --only firestore:rules`) :
   les règles s'appliquent immédiatement à toute la production. Historique et retour arrière dans la
