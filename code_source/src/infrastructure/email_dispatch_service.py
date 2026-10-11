@@ -40,12 +40,7 @@ class EmailDispatchService:
     @classmethod
     def known_member_emails(cls) -> set:
         """Every member and payer address known to the club database (lower-cased)."""
-        SqliteRepository.setup_database()
-        conn = SqliteRepository.get_connection()
-        emails = set()
-        for sql in ("SELECT email_primary, email_secondary FROM users", "SELECT payer_email FROM orders"):
-            for row in conn.execute(sql).fetchall():
-                emails.update(str(v).strip().lower() for v in tuple(row) if v)
+        emails = SqliteRepository.list_contact_emails()
         try:
             emails.update(str(a.get("email") or "").strip().lower() for a in CompetitionRepository.list_adherents())
         except Exception as e:
@@ -124,11 +119,7 @@ class EmailDispatchService:
         # 1. Traitement par identifiants
         if recipient_ids:
             # Charger les profils depuis la base adhérents
-            all_users = {
-                u["id"]: u for u in SqliteRepository.get_connection().execute(
-                    "SELECT id, first_name, last_name, email_primary, email_secondary, phone, licence_ffme FROM users"
-                ).fetchall()
-            }
+            all_users = SqliteRepository.get_users_by_ids(recipient_ids)
             # Charger les profils depuis la base compétitions en secours
             comp_adh = {a["id"]: a for a in CompetitionRepository.list_adherents()}
 

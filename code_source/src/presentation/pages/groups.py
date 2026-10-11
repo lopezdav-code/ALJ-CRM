@@ -31,12 +31,7 @@ class GroupsPage(QWidget):
         """Récupère tous les tarifs HelloAsso uniques présents dans la table d'adhérents de la BDD SQLite."""
         try:
             from infrastructure.sqlite_repository import SqliteRepository
-            conn = SqliteRepository.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT tarif_name FROM purchases WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
-            rows = cursor.fetchall()
-            self.all_helloasso_tarifs = [row["tarif_name"].strip() for row in rows]
-            conn.close()
+            self.all_helloasso_tarifs = SqliteRepository.get_all_tarifs()
         except Exception as e:
             print(f"⚠️ [MAPPING_TARIF] Impossible de précharger les tarifs : {e}")
             self.all_helloasso_tarifs = []
@@ -749,12 +744,7 @@ class GroupEditDialog(QDialog):
         """Récupère l'intégralité des tarifs HelloAsso existants dans la BDD."""
         try:
             from infrastructure.sqlite_repository import SqliteRepository
-            conn = SqliteRepository.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT tarif_name FROM purchases WHERE tarif_name IS NOT NULL AND tarif_name != '' ORDER BY tarif_name ASC")
-            rows = cursor.fetchall()
-            self.all_helloasso_tarifs = [row["tarif_name"].strip() for row in rows]
-            conn.close()
+            self.all_helloasso_tarifs = SqliteRepository.get_all_tarifs()
         except Exception as e:
             print(f"⚠️ [MAPPING_TARIF] Impossible de charger les tarifs : {e}")
             self.all_helloasso_tarifs = []
