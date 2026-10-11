@@ -33,7 +33,9 @@ from domain.competition_models import (
     PAIEMENT_NON_INVITE,
     PAIEMENT_ANNULE_PERDU,
     PAIEMENT_ANNULE_REPORTE,
+    PAIEMENT_PAYE,
     PAIEMENT_STATUTS_ANNULES,
+    STATUT_CLOSE,
     statut_paiement_apres_bascule,
 )
 from domain.constants import get_active_season
@@ -56,6 +58,18 @@ _ADHERENTS_CACHE_TTL = 30.0
 # ré-application de la modification) quand un autre poste, la page web ou le
 # webhook HelloAsso a modifié l'épreuve entre la lecture et l'écriture.
 _MAX_WRITE_ATTEMPTS = 5
+
+# Firestore metadata added to every document read by FirestoreClient (not part of the data).
+_META_KEYS = ("_doc_id", "_update_time")
+
+
+class ParticipantAlreadyPaid(Exception):
+    """Unselecting a participant who already paid requires the coach's cancellation
+    decision (money lost or carried over), not a plain toggle."""
+
+
+class ItemAlreadyLinked(Exception):
+    """A HelloAsso item linked to a competition and a member cannot be ignored."""
 
 
 class CompetitionFirestoreRepository:
@@ -455,8 +469,44 @@ class CompetitionFirestoreRepository:
         return cls._comp_from_doc(doc) if doc else None
 
     @classmethod
-    def save_competition(cls, comp: Competition) -> int:
-        """Insère ou met à jour une épreuve ; retourne son identifiant."""
+    def _clean_doc(cls, doc: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in doc.items() if k not in _META_KEYS}
+
+    @classmethod
+    def list_competition_docs(cls) -> List[Dict[str, Any]]:
+        """Competition documents as stored (participants and counters included), most
+        recent first: the shape the web pages use."""
+        docs = [cls._clean_doc(d) for d in cls._list_comp_docs()]
+        docs.sort(key=lambda d: (str(d.get("date_competition") or ""), int(d.get("id") or 0)),
+                  reverse=True)
+        return docs
+
+    @classmethod
+    def get_competition_doc(cls, competition_id: int) -> Optional[Dict[str, Any]]:
+        doc = cls._load_comp_doc(competition_id)
+        return cls._clean_doc(doc) if doc else None
+
+    @classmethod
+    def archive_past_competitions(cls, today_iso: str) -> List[int]:
+        """Closes every competition that ended before `today_iso` (YYYY-MM-DD); competitions
+        without a date are never past. Returns the ids archived."""
+        archived = []
+        for doc in cls._list_comp_docs():
+            end = str(doc.get("date_fin") or doc.get("date_competition") or "")
+            if doc.get("id") is None or not end or end >= today_iso:
+                continue
+            if (doc.get("statut") or "") == STATUT_CLOSE:
+                continue
+            if cls.set_competition_status(doc["id"], STATUT_CLOSE):
+                archived.append(doc["id"])
+        return archived
+
+    @classmethod
+    def save_competition(cls, comp: Competition, extra: Optional[Dict[str, Any]] = None) -> int:
+        """Insère ou met à jour une épreuve ; retourne son identifiant.
+
+        `extra`: fields outside the domain model, stored as given (pass-through fields
+        of the bureau page, see docs/plan_api_only_front.md appendix B)."""
         existing = cls._load_comp_doc(comp.id) if comp.id else None
         if comp.id is None:
             comp.id = cls._new_id()
@@ -464,6 +514,7 @@ class CompetitionFirestoreRepository:
         coach_names = [coaches[cid] for cid in (comp.coach1_id, comp.coach2_id, comp.coach3_id)
                        if cid is not None and cid in coaches]
         doc = cls._build_comp_doc(existing, comp, coach_names)
+        doc.update(extra or {})
         if existing and (existing.get("_doc_id") or str(comp.id)) == str(comp.id):
             # Épreuve existante : mise à jour partielle des seules informations de
             # l'épreuve. Le tableau des participants et ses compteurs ne sont pas
@@ -611,10 +662,17 @@ class CompetitionFirestoreRepository:
         return cls._mutate_participants(competition_id, mutate) is not None
 
     @classmethod
-    def set_selection(cls, competition_id: int, adherent_id: int, selectionne: bool) -> bool:
+    def set_selection(cls, competition_id: int, adherent_id: int, selectionne: bool,
+                      refuse_unselect_paid: bool = False) -> bool:
+        """`refuse_unselect_paid`: raise ParticipantAlreadyPaid instead of unselecting a
+        participant who paid (checked on the fresh document, so a payment recorded
+        meanwhile by the webhook is seen)."""
         def mutate(parts):
             for p in parts:
                 if p.get("adherent_id") == adherent_id:
+                    if (refuse_unselect_paid and not selectionne
+                            and (p.get("statut_paiement") or "") == PAIEMENT_PAYE):
+                        raise ParticipantAlreadyPaid(adherent_id)
                     p["selectionne"] = bool(selectionne)
                     nouveau = statut_paiement_apres_bascule(p.get("statut_paiement"), selectionne)
                     if nouveau:
@@ -626,6 +684,18 @@ class CompetitionFirestoreRepository:
             return parts
         cls._mutate_participants(competition_id, mutate)
         return True
+
+    @classmethod
+    def set_present(cls, competition_id: int, adherent_id: int, present: bool) -> bool:
+        """Attendance flag (pass-through field of the bureau page, appendix B of the plan)."""
+        def mutate(parts):
+            for p in parts:
+                if p.get("adherent_id") == adherent_id:
+                    p["present"] = bool(present)
+                    p["updated_at"] = cls._now_iso()
+                    return parts
+            return None
+        return cls._mutate_participants(competition_id, mutate) is not None
 
     @classmethod
     def set_payment_status(cls, competition_id: int, adherent_id: int, statut_paiement: str) -> bool:
@@ -896,6 +966,69 @@ class CompetitionFirestoreRepository:
             "link_updated_at": cls._now_iso(),
         })
         return True
+
+    @classmethod
+    def save_manual_link(cls, id_item: int, competition_id: Optional[int],
+                         adherent_id: Optional[int], commentaire: str = "") -> bool:
+        """Link chosen by a coach (one write). A partial choice (competition or member only)
+        is stored without a source; choosing both marks the link `manuel`, which the
+        automatic matching never overwrites. Also lifts an `ignore` flag."""
+        linked = competition_id is not None and adherent_id is not None
+        now = cls._now_iso()
+        FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), {
+            "competition_id": competition_id,
+            "adherent_id": adherent_id,
+            "source": "manuel" if linked else None,
+            "commentaire": str(commentaire or ""),
+            "ignore": False,
+            "link_updated_at": now,
+            "updated_at": now,
+        })
+        return True
+
+    @classmethod
+    def set_item_ignored(cls, id_item: int, ignore: bool, motif: str = "",
+                         commentaire: str = "", by: str = "") -> bool:
+        """Ignores (test, purchase unrelated to a competition…) or restores a HelloAsso item.
+
+        Written with a precondition on the version read: an item linked meanwhile (webhook,
+        another coach) raises ItemAlreadyLinked instead of being ignored. Returns False when
+        the item does not exist."""
+        for attempt in range(_MAX_WRITE_ATTEMPTS):
+            doc = FirestoreClient.get_document(cls.COLLECTION_ITEMS, str(id_item))
+            if doc is None:
+                return False
+            now = cls._now_iso()
+            if ignore:
+                if doc.get("competition_id") is not None and doc.get("adherent_id") is not None:
+                    raise ItemAlreadyLinked(id_item)
+                patch = {"ignore": True, "ignore_motif": str(motif or ""),
+                         "commentaire": str(commentaire or motif or ""),
+                         "ignored_at": now, "ignored_by": str(by or ""),
+                         "competition_id": None, "adherent_id": None, "source": None,
+                         "link_updated_at": now, "updated_at": now}
+            else:
+                patch = {"ignore": False, "ignore_motif": "", "ignored_at": None,
+                         "ignored_by": None, "commentaire": str(commentaire or ""),
+                         "updated_at": now}
+            try:
+                FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), patch,
+                                              expected_update_time=doc.get("_update_time"))
+                return True
+            except FirestoreConflictError:
+                if attempt == _MAX_WRITE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
+        return False
+
+    @classmethod
+    def list_item_docs(cls) -> List[Dict[str, Any]]:
+        """HelloAsso mirror documents as stored (links, comments and ignore flags included),
+        most recent first: the shape the web pages use."""
+        docs = [cls._clean_doc(d) for d in cls._items_map().values()]
+        docs.sort(key=lambda d: (str(d.get("date_item") or ""), int(d.get("id_item") or 0)),
+                  reverse=True)
+        return docs
 
     @classmethod
     def clear_item_link(cls, id_item: int) -> bool:

@@ -1118,6 +1118,16 @@ class TestBureauFiles(unittest.TestCase):
         for name in names:
             self.assertRegex(core, rf"export (function|const|async function) {name}\b", name)
 
+    def test_competitions_bureau_uses_api_only(self):
+        """The bureau competitions page reads and writes through the API, never Firestore directly."""
+        html = _read(os.path.join(BUREAU, "competitions.html"))
+        for firestore_call in (".collection(", "onSnapshot", "initFirebase"):
+            self.assertNotIn(firestore_call, html, firestore_call)
+        self.assertIn('<script src="/static-web/alj-sync.js"></script>', html)
+        for url in ("/api/competitions", "/api/coaches", "/api/competition-members",
+                    "/api/helloasso/items"):
+            self.assertIn(f'"{url}"', html, url)
+
     def test_bureau_imports_exist_in_core(self):
         """Every name imported from alj-core.js by the bureau pages and shared modules is exported."""
         core = _read(os.path.join(SHARED, "alj-core.js"))

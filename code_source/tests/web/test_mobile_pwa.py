@@ -66,6 +66,18 @@ class TestMobilePWA(unittest.TestCase):
         self.assertNotIn("sql-wasm", html)
         self.assertNotIn("drive.readonly", html)
 
+    def test_competitions_page_uses_api_only(self):
+        """Competition data is read and written through the API, never Firestore directly."""
+        with open(get_competitions_page().path, "r", encoding="utf-8") as f:
+            html = f.read()
+        for firestore_call in (".collection(", "onSnapshot", "runTransaction"):
+            self.assertNotIn(firestore_call, html, firestore_call)
+        self.assertIn('<script src="/static-web/alj-sync.js"></script>', html)
+        for url in ("/api/competitions", "/api/coaches", "/api/competition-members",
+                    "/api/helloasso/items"):
+            self.assertIn(f'"{url}"', html, url)
+        self.assertIn("ALJSync.snapshot.clearAll()", html)  # nothing left on the phone after logout
+
     def test_competitions_html_pwa_and_email_features(self):
         resp = get_competitions_page()
         self.assertEqual(resp.status_code, 200)
@@ -88,9 +100,8 @@ class TestMobilePWA(unittest.TestCase):
         # Vérifications Appel 1-clic téléphone
         self.assertIn('href="tel:', html)
 
-        # Vérifications Chargement Groupe Compétition (non sélectionné + non invité)
-        self.assertIn('parts.push(newParticipant(a.id, false, "non_invite"))', html)
-        self.assertIn('statut || (isSelected ? "en_attente" : "non_invite")', html)
+        # Loading the « Compétition » group goes through the API (rule tested in tests/api)
+        self.assertIn('compUrl(c.id, "/load-group")', html)
 
         # Vérifications Édition Compétition (navigation showPage, réinitialisation et retour)
         self.assertIn('showPage("comps");', html)

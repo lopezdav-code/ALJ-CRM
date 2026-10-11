@@ -35,9 +35,11 @@ class TestSqliteCacheScope(unittest.TestCase):
         with patch.dict(os.environ, env), \
                 patch.object(server.CloudDatabase, "is_enabled", return_value=True), \
                 patch.object(server.CloudDatabase, "ensure_fresh") as fresh, \
-                patch.object(server.CloudDatabase, "after_write") as after:
+                patch.object(server.CloudDatabase, "after_write") as after, \
+                patch("api.competitions.Repo.list_competition_docs", return_value=[]), \
+                patch("api.competitions.Repo.get_competition_doc", return_value=None):
             client.get("/api/competitions")
-            client.post("/api/competitions/1/participants", json={})
+            client.post("/api/competitions/1/participants", json={"adherent_id": 2})
             fresh.assert_not_called()
             after.assert_not_called()
             client.get("/api/route-inconnue")

@@ -8,7 +8,10 @@
      unchanged poll is a 304 without body. Responses are never put in the HTTP cache.
    - snapshot: last data kept in localStorage for read-only offline viewing, tied to the
      signed-in user; clearAll() on logout. Only for data the plan allows offline
-     (competitions and participants), never the member directory. */
+     (competitions and participants), never the member directory.
+   - request(fetchFn, method, url, body): JSON call for a write; rejects with an Error
+     carrying the server's message, its HTTP `status` and machine `code` (e.g.
+     "already_paid"). Without a `status`, the request never reached the server. */
 (function () {
   "use strict";
 
@@ -82,6 +85,26 @@
     return { refresh, stop };
   }
 
+  async function request(fetchFn, method, url, body) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetchFn(url, opts);
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* empty body */ }
+    if (!res.ok) {
+      // 422: rejected by the server's validation, one message per invalid field
+      const detail = data && Array.isArray(data.detail) ? data.detail.map(x => x.msg).join(" ; ") : "";
+      const err = new Error((data && data.message) || detail || ("HTTP " + res.status));
+      err.status = res.status;
+      err.code = data && data.code;
+      throw err;
+    }
+    return data;
+  }
+
   /* localStorage can be missing or throw (private window, blocked site data): every access
      is guarded and a failure only means "no offline copy". */
   function storage() {
@@ -120,5 +143,5 @@
     }
   });
 
-  window.ALJSync = Object.freeze({ poll, snapshot });
+  window.ALJSync = Object.freeze({ poll, request, snapshot });
 })();

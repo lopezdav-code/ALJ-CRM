@@ -30,7 +30,7 @@ The plan file is updated with any decisions taken during a review. Nothing is co
 | Phase | State | Notes |
 |---|---|---|
 | 0 | Done, awaiting review | Cold-start measurement still to do against production (needs a deploy). ETag responses use `Cache-Control: no-store`: the page keeps the last body and sends `If-None-Match` itself (`alj-sync.js`), so personal data never lands in the browser's HTTP cache. |
-| 1 | Not started | |
+| 1 | Done, awaiting review | See « Phase 1 — as built » below. |
 | 2 | Not started | |
 | 3 | Not started | |
 | 4 | Not started | Cleanup backlog, filled during reviews |
@@ -65,9 +65,9 @@ Roles: R = readonly+, C = coach+, A = admin. "Repo" means `CompetitionFirestoreR
 |---|---|---|---|---|
 | GET `/api/competitions` | R | — | `list_competitions()` + participants and counters, as today's docs (normalized ids, `docId` dropped). Pass-through fields included. Per-instance 5 s memory cache, invalidated on write. | `competitions` listener: `competitions.html:833`, `bureau/competitions.html:324` |
 | POST `/api/competitions` | C | `{nom, id_ffme, date_competition, date_fin, prix, statut, coach_ids[≤3], helloasso_ref?, lieu?, type?}` | `save_competition` (id = ms timestamp) | `competitions.html:1261` set, `bureau/competitions.html:912` add |
-| PUT `/api/competitions/{id}` | C | same | `save_competition` (partial update, participants untouched) | `competitions.html:1305` tx, `bureau/competitions.html:906` |
+| ~~PUT~~ **PATCH** `/api/competitions/{id}` | C | same fields, all optional | `save_competition` (partial update, participants untouched) | `competitions.html:1305` tx, `bureau/competitions.html:906` |
 | DELETE `/api/competitions/{id}` | C | — | `delete_competition` (+ legacy doc id) | `competitions.html:1340-1342`, `bureau/competitions.html:931` |
-| PUT `/api/competitions/{id}/status` | C | `{statut}` | `set_competition_status` | archive/unarchive `competitions.html:1050` |
+| ~~PUT `/api/competitions/{id}/status`~~ (dropped: PATCH `{statut}`) | C | `{statut}` | `save_competition` | archive/unarchive `competitions.html:1050` |
 | POST `/api/competitions/archive-past` | C | — | loop `set_competition_status("close")` over past competitions | `competitions.html:1063` |
 | POST `/api/competitions/{id}/participants` | C | `{adherent_id, selectionne}` | `add_participant`, or `set_selection` if already present | `addAdherent` 1606, bureau "+ Inscrire" 717-743 |
 | PATCH `/api/competitions/{id}/participants/{adherent_id}` | C | `{selectionne?, present?}` | `set_selection` (status via `statut_paiement_apres_bascule`). **409 `already_paid`** when unselecting a paid participant; the client then opens the cancel modal (today's logic at 1469/1479). `present` is stored as pass-through. | `toggleSelection` 1476, bureau Participe/Présent 630-640 |
@@ -84,6 +84,23 @@ Roles: R = readonly+, C = coach+, A = admin. "Repo" means `CompetitionFirestoreR
 | PUT `/api/helloasso/items/{id_item}/ignore` | C | `{ignore: bool, motif, commentaire}` (motif required to ignore) | **New repo method `set_item_ignored`**: `update_fields` with `expected_update_time`. **409** if the item became linked meanwhile (today's check at 2135). | `toggleIgnoreItem` 2121 |
 
 Existing routes reused unchanged: `/api/helloasso/sync`, `/api/send-email`, `/api/email-templates`, `/api/email-status`, `/api/preview-email`. The Balance/Bilan views stay computed client-side from GET `/api/competitions`; `get_bilan` exists if we later want it on the server.
+
+#### Phase 1 — as built (deviations and notes for review)
+
+- **PATCH instead of PUT for competitions.** A full replace would have wiped fields the page doesn't send (`helloasso_ref`, set from the desktop app). The status route is dropped: archive/unarchive is `PATCH {statut}`.
+- **Manual HelloAsso link also selects the member.** `PUT …/link` calls `add_participant(selectionne=True)` before `apply_helloasso_payment`, which doesn't select. This keeps today's « paid ⇒ participates » behaviour of the manual link.
+- **Shared write helper.** `ALJSync.request()` in `alj-sync.js` is used by both pages. It sends JSON and throws an `Error` with the server's message, `status` and `code`.
+- **Offline (mobile page).** Write controls are not disabled; writes are refused with a toast and the header shows « 📴 Hors ligne — données du … (lecture seule) ». The snapshot also holds the coaches list (names only, no personal data).
+- **Bureau page, paid participant.** Unticking « Participe » for someone who paid now asks for a comment and « report / perdu » (`prompt` + `confirm`, minimal UI), then calls the cancel route. Before, the bureau page silently overwrote the status.
+- **Bureau page field names fixed (A6).** It now reads the real fields (`nom/prenom/tarif/email`, mirror `montant/order_id/payer_*`, athlete from `raw_json`) and knows the statuses `annule_perdu/annule_reporte`. Admin-only controls are relaxed to coach (D5). It keeps no offline snapshot (desktop).
+- **Repository additions** (`competition_firestore_repository.py`):
+  - `ParticipantAlreadyPaid`, `ItemAlreadyLinked`;
+  - `set_selection(refuse_unselect_paid=)`, `set_present`;
+  - `save_manual_link`, `set_item_ignored` (precondition + retry);
+  - `archive_past_competitions`, `list_competition_docs`, `get_competition_doc`, `list_item_docs`;
+  - `save_competition(extra=)` for pass-through fields.
+- **Tests.** The Firestore fake moved to `tests/support/fake_firestore.py` (`conftest.py` puts `tests/` on `sys.path`, as importlib mode doesn't). New route tests are in `tests/api/test_api_competitions.py`. Static checks assert that both competition pages no longer call Firestore.
+- **Still loaded on these pages (removed in phase 3):** the Firestore SDK script and `enablePersistence`.
 
 ### Phase 2 — Member data (SQLite-backed)
 
@@ -198,7 +215,7 @@ Consequences:
   - At most 3 coaches per competition (the repo stores `coach1..3_id`; the PWA allowed more). The API returns 400 above 3; check existing data first.
 - **S11 — Planning-group tie-break.** JS picks the **first** planning row matching a tariff; Python (`_read_planning_groups`, repo:342) picks the **last**. Moving `/api/members` to Python must pick one. Recommendation: use the JS rule (first by id) everywhere, so member pages don't change. The `adherents` projection may then change for members whose tariff is in two groups.
 - **S12 — Dev environment.** `dev/dev.env` sets `ALJ_API_AUTH=off`, and emulator ID tokens can't pass `verify_firebase_token`, so roles can't be exercised end to end in dev. Role coverage relies on the `make_token` unit tests.
-- **S13 — CI only runs on release tags** (`build-executable.yml`). Regressions are caught late. Recommended follow-up: a PR workflow running pytest (out of scope).
+- **S13 — CI.** ~~Only runs on release tags.~~ Since #18, `tests.yml` runs pytest on push/PR (the presentation tests in separate processes).
 - **S14 — Email recipient checks** (`EmailDispatchService`) already read the Firestore `adherents` projection server-side. Unchanged.
 
 ## Verification
@@ -255,6 +272,8 @@ Consequences:
 | A22 | `CloudDatabase.ensure_fresh` (1024) | Freshness is checked outside the lock, so concurrent requests run redundant syncs; while Firestore is down, every request retries. | **Still present.** |
 | A23 | `web/bureau/competitions.html:334-340` | `adherents`/`helloasso_items` listeners have no error handler. | Moot (listeners removed). |
 | A24 | `web/competitions.html` | `snap.metadata.fromCache` is ignored: the status bar says "temps réel" even when showing cached data. | Moot (snapshot banner instead). |
+| A25 | repo `_new_id` (ms timestamp), PWA `Date.now()` | Two competitions or coaches created in the same millisecond get the same id; the second silently overwrites the first. Found while testing phase 1. | **Still present** (unlikely in practice). |
+| A26 | `FirestoreClient.update_fields` | Creates the document when it doesn't exist. A write racing a delete from another device (status change, link, comment) recreates a stub document with only the written fields. The routes check existence first, which narrows the window but doesn't close it. | **Still present.** |
 
 ## Appendix B — Fields to migrate later (D4)
 

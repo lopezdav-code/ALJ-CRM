@@ -102,6 +102,12 @@ class TestRoles(unittest.TestCase):
         for path in ("/api/competitions-pirate", "/api/members", "/api/helloasso/items",
                      "/api/email-templates"):
             self.assertEqual(r("GET", path), "coach", path)
+        for method, path in (("POST", "/api/competitions/archive-past"),
+                             ("POST", "/api/competitions/1/participants/2/cancel"),
+                             ("POST", "/api/competitions/1/load-group"),
+                             ("PUT", "/api/helloasso/items/5/link"),
+                             ("PUT", "/api/helloasso/items/5/ignore")):
+            self.assertEqual(r(method, path), "coach", path)
 
     def test_roles_for_claims(self):
         f = api_auth.roles_for_claims
@@ -208,9 +214,10 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
         self.assertEqual(self.client.post("/api/helloasso/sync").status_code, 401)
 
     def test_readonly_role_end_to_end(self):
-        """Readonly passes the auth check on competition reads (404: no route yet) and nowhere else."""
+        """Readonly can read competitions, and nothing else."""
         readonly = make_token(email="muah.did@gmail.com")
-        self.assertEqual(self.get("/api/competitions", readonly).status_code, 404)
+        with patch("api.competitions.Repo.list_competition_docs", return_value=[]):
+            self.assertEqual(self.get("/api/competitions", readonly).status_code, 200)
         self.assertEqual(self.get("/api/email-status", readonly).status_code, 403)
         r = self.client.post("/api/competitions", json={}, headers={"Authorization": f"Bearer {readonly}"})
         self.assertEqual(r.status_code, 403)
