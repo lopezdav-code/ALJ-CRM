@@ -2,7 +2,6 @@ import os
 import sys
 import unittest
 import datetime
-import shutil
 import docx
 
 # Ajustement du chemin pour importer les modules depuis 'src'
@@ -11,12 +10,11 @@ _src_dir = os.path.join(os.path.dirname(_test_dir), "src") if os.path.basename(_
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from paths import ROOT_DIR, CODE_ROOT
+from paths import CODE_ROOT
 from attestation_generator import (
     get_french_date,
     extract_season_from_filename,
-    get_safe_filename,
-    generate_all_attestations
+    get_safe_filename
 )
 
 class TestAttestationGenerator(unittest.TestCase):

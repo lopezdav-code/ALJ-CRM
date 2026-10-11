@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call: # Reused by the release workflow before packaging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r code_source/requirements.txt
+        pip install -r code_source/requirements-dev.txt
+
+    - name: Lint (ruff)
+      working-directory: code_source
+      run: python -m ruff check src tests
+
+    - name: Type check (mypy)
+      working-directory: code_source
+      run: python -m mypy
+
+    - name: Run Unit Tests (pytest)
+      working-directory: code_source
+      env:
+        QT_QPA_PLATFORM: offscreen
+      # Qt test files create PySide6 widgets: they run in separate processes to
+      # avoid native crashes caused by Qt state leaking from one test file to the
+      # next (0xC0000409 when running the full suite at once).
+      run: |
+        python -m pytest tests --ignore=tests/presentation/test_app_smoke.py --ignore=tests/presentation/test_communication_sender.py --ignore=tests/presentation/test_member_email_shortcut.py --ignore=tests/presentation/test_presentation_lot3.py --ignore=tests/presentation/test_presentation_lot4.py --ignore=tests/presentation/test_presentation_lot5.py --ignore=tests/presentation/test_tarif_update.py &&
+        python -m pytest tests/presentation/test_app_smoke.py tests/presentation/test_member_email_shortcut.py tests/presentation/test_tarif_update.py tests/presentation/test_presentation_lot3.py &&
+        python -m pytest tests/presentation/test_communication_sender.py &&
+        python -m pytest tests/presentation/test_presentation_lot4.py &&
+        python -m pytest tests/presentation/test_presentation_lot5.py

@@ -99,11 +99,11 @@ class TestFFMEGoldenMaster(unittest.TestCase):
                 surplus = lignes_g[n:] if len(lignes_g) > len(lignes_r) else lignes_r[n:]
                 msg.append(f"Les {n} premières lignes sont identiques ; "
                            f"{abs(len(lignes_g) - len(lignes_r))} ligne(s) {sens} :")
-                for l in surplus[:5]:
-                    msg.append(f"  {l[:130]}")
+                for line in surplus[:5]:
+                    msg.append(f"  {line[:130]}")
                 return "\n".join(msg)
 
-        for i, (a, b) in enumerate(zip(lignes_g, lignes_r)):
+        for i, (a, b) in enumerate(zip(lignes_g, lignes_r, strict=False)):
             if a != b:
                 msg.append(f"Première différence à la ligne {i + 1} :")
                 if i == 0:

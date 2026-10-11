@@ -66,7 +66,7 @@ ALJ-CRM/                         ← racine du dépôt
 │   │   ├── bureau/              ← portail ordinateur : index, adherents, communications, competitions, outils
 │   │   └── shared/              ← alj-firebase.js (init Firebase unique + émulateur dev), alj-core.js (login/apiFetch), alj-shell.js (menu), alj-members.js,
 │   │                              alj-filters.js, alj-vue.js (redirection bureau/mobile), alj.css
-│   ├── tests/                   ← 37 fichiers pytest/unittest (Qt + API + domaine)
+│   ├── tests/                   ← tests pytest/unittest, rangés comme le code testé : domain/, infrastructure/, presentation/ (Qt), launcher/, web/ ; modules racine de src/ à la racine
 │   ├── dev/                     ← mode dev local : émulateur Firebase (Docker), dev.env, run_server.sh, seed/ (données fictives)
 │   ├── docs/                    ← docs d'architecture/plan (partiellement obsolètes, voir §8)
 │   ├── doc/template/            ← modèles Word/Excel (non versionné en partie)
@@ -262,10 +262,10 @@ Clés principales : `HELLOASSO_CLIENT_ID/SECRET/ORG_SLUG`, `CAMPAIGN_SLUG`, `GMA
 **Tests** (depuis `code_source/`) :
 
 ```bash
-python -m pytest tests --ignore=tests/test_app_smoke.py ...   # voir .github/workflows pour la liste complète
-QT_QPA_PLATFORM=offscreen python -m pytest tests/test_presentation_lot4.py
+python -m pytest tests --ignore=tests/presentation ...   # voir .github/workflows pour la liste complète
+QT_QPA_PLATFORM=offscreen python -m pytest tests/presentation/test_presentation_lot4.py
 ```
-La CI lance les tests Qt **en processus séparés** (crashs natifs sinon) ; `ruff check src` et `mypy` (limité à `schema_v2.py` et `constants.py`) sont bloquants. Les tests de la couche web/API (`test_bureau_web`, `test_mobile_pwa`, `test_api_security`, `test_cloud_run_lot4`, `test_helloasso_webhook`) ne nécessitent pas Qt — ce sont les plus utiles pour la migration. `test_ffme_golden_master` nécessite un fichier de référence local non versionné.
+La CI lance les tests Qt **en processus séparés** (crashs natifs sinon) ; `ruff check src tests` et `mypy` (limité à `schema_v2.py` et `constants.py`) sont bloquants. Les tests de la couche web/API (`test_bureau_web`, `test_mobile_pwa`, `test_api_security`, `test_cloud_run_lot4`, `test_helloasso_webhook`) ne nécessitent pas Qt — ce sont les plus utiles pour la migration. `test_ffme_golden_master` nécessite un fichier de référence local non versionné.
 
 **Déploiement web** : `code_source/deploy_cloud_run.sh` (ou `.bat`) → `gcloud run deploy alj-escalade-api --source . --memory 1Gi --min-instances 0 --max-instances 2 --timeout 300 --allow-unauthenticated` (l'auth est applicative). Règles Firestore : `firebase deploy --only firestore:rules` (`firebase.json`). Guide : `docs/guide_deploiement_cloud_run_helloasso.md`.
 
