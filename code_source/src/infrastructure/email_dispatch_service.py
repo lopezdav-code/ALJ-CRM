@@ -27,7 +27,7 @@ class EmailDispatchService:
     CLUB_SENDER_DOMAIN = "alj-escalade.fr"
 
     @classmethod
-    def allowed_sender(cls, sender_email: Optional[str]) -> bool:
+    def is_allowed_sender(cls, sender_email: Optional[str]) -> bool:
         """An empty sender (default account) or a club / configured address."""
         from infrastructure.secret_store import SecretStore
         email = (sender_email or "").strip().lower()
@@ -60,13 +60,13 @@ class EmailDispatchService:
 
         Coaches may only write to known members / payers; nobody may send as a foreign
         address. Stops a compromised account from mailing anyone from the club's account."""
-        if not cls.allowed_sender(sender_email):
+        if not cls.is_allowed_sender(sender_email):
             return f"Adresse d'expédition non autorisée : {sender_email}"
         if is_admin or not recipients:
             return None
         known = cls.known_member_emails()
-        unknown = sorted({str(r.get("email") or "").strip() for r in recipients
-                          if str(r.get("email") or "").strip().lower() not in known} - {""})
+        unknown = sorted({str(recipient.get("email") or "").strip() for recipient in recipients
+                          if str(recipient.get("email") or "").strip().lower() not in known} - {""})
         if unknown:
             return f"Destinataire(s) inconnu(s) de la base adhérents : {', '.join(unknown[:5])}"
         return None

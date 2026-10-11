@@ -15,7 +15,7 @@ _src_dir = os.path.join(os.path.dirname(_tests_dir), "src")
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from domain.utils import apply_template_variables, header_safe  # noqa: E402
+from domain.utils import apply_template_variables, sanitize_email_header  # noqa: E402
 from infrastructure.email_dispatch_service import EmailDispatchService  # noqa: E402
 
 EVIL_NAME = '<a href="https://evil.example">Pay here</a>'
@@ -54,9 +54,9 @@ class TestPersonalisedHtml(unittest.TestCase):
 
 class TestHeaders(unittest.TestCase):
 
-    def test_header_safe(self):
-        self.assertEqual(header_safe("Hello\r\nBcc: evil@example.com"), "Hello Bcc: evil@example.com")
-        self.assertEqual(header_safe(None), "")
+    def test_sanitize_email_header(self):
+        self.assertEqual(sanitize_email_header("Hello\r\nBcc: evil@example.com"), "Hello Bcc: evil@example.com")
+        self.assertEqual(sanitize_email_header(None), "")
 
     def test_smtp_message_has_no_injected_header(self):
         from infrastructure.email_repository import EmailRepository

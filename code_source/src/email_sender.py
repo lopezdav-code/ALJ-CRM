@@ -47,10 +47,10 @@ def send_email_with_attachment(to_email, subject, body, attachment_path, smtp_co
     msg = MIMEMultipart()
     from_email = gmail_user if use_oauth2 else (smtp_config.get("SMTP_FROM_EMAIL", "").strip() or smtp_config.get("SMTP_USER", "").strip())
     msg['From'] = from_email
-    from domain.utils import header_safe
+    from domain.utils import sanitize_email_header
     # Header values may come from member data: line breaks would inject extra headers
-    msg['To'] = header_safe(to_email)
-    msg['Subject'] = header_safe(subject)
+    msg['To'] = sanitize_email_header(to_email)
+    msg['Subject'] = sanitize_email_header(subject)
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
     
     if attachment_path and os.path.exists(attachment_path):

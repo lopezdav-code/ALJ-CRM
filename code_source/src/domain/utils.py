@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 
 
-def header_safe(value: Any) -> str:
+def sanitize_email_header(value: Any) -> str:
     """E-mail header value without line breaks (header injection from member data)."""
     return " ".join(str(value or "").splitlines()).strip()
 

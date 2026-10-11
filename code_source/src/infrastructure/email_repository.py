@@ -10,7 +10,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from paths import DATA_ROOT
 from infrastructure.secret_store import SecretStore
-from domain.utils import header_safe
+from domain.utils import sanitize_email_header
 
 class EmailRepository:
     """
@@ -60,7 +60,7 @@ class EmailRepository:
         `attachment_bytes` et `attachment_filename` permettent de joindre un fichier généré en mémoire sans écriture disque.
         """
         # Recipient may come from member data: no line break in headers nor SMTP envelope
-        to_email = header_safe(to_email)
+        to_email = sanitize_email_header(to_email)
         # Récupérer les identifiants depuis le SecretStore
         gmail_user = SecretStore.get_secret("GMAIL_USER_EMAIL")
         gmail_client_id = SecretStore.get_secret("GMAIL_CLIENT_ID")
@@ -75,16 +75,16 @@ class EmailRepository:
         use_oauth2 = bool(gmail_user and gmail_client_id and gmail_refresh)
 
         # Adresse d'expédition : adresse choisie dans l'IHM si fournie, sinon le compte configuré
-        effective_from = header_safe(from_email) or (gmail_user if use_oauth2 else smtp_from)
+        effective_from = sanitize_email_header(from_email) or (gmail_user if use_oauth2 else smtp_from)
 
         # Construction du message MIME
         from email.utils import formataddr
         msg = MIMEMultipart()
         # Header values may come from member data: line breaks would inject extra headers
-        msg["Subject"] = header_safe(subject)
+        msg["Subject"] = sanitize_email_header(subject)
         msg["To"] = to_email
         # En-tête « De » : nom d'affichage lisible + adresse (format RFC 2822, accents encodés proprement)
-        sender_name = header_safe(from_name)
+        sender_name = sanitize_email_header(from_name)
         if sender_name:
             try:
                 msg["From"] = formataddr((sender_name, effective_from))
