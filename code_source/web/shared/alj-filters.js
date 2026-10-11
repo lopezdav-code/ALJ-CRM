@@ -1,8 +1,8 @@
 /* Logique de filtrage et d'arborescence des créneaux/tarifs des adhérents.
    Extrait et adapté de l'annuaire pour le portail bureau web (ordinateur). */
 
-import { normKey, fmtDay, normalizeStatus } from "/static-web/alj-members.js";
-import { csvSafe } from "/static-web/alj-core.js";
+import { normKey, normalizeStatus } from "/static-web/alj-members.js";
+import { csvSafe, fmtDay } from "/static-web/alj-core.js";
 
 export const FILTER_KEY = "alj_bureau_adherents_filters";
 

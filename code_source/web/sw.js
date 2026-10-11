@@ -48,11 +48,15 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Interception des requêtes : Network first pour les APIs, Cache first pour les assets
+// Request interception:
+// - same-origin pages and assets: network first, cache as offline fallback, so a
+//   deploy reaches clients without depending on a CACHE_NAME bump (a stale shared
+//   module missing a newly imported export breaks the whole page);
+// - cross-origin versioned assets (Firebase SDK): cache first, their content never changes.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Les requêtes d'API, OAuth ou POST vont directement sur le réseau
+  // 1. API, OAuth and non-GET requests go straight to the network
   if (
     event.request.method !== "GET" ||
     url.pathname === "/runtime-config.js" ||   // runtime configuration: never cached
@@ -64,24 +68,28 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 2. Stratégie Cache-First avec repli Réseau pour les ressources PWA
+  const putInCache = (networkResponse) => {
+    if (networkResponse && networkResponse.status === 200) {
+      const responseToCache = networkResponse.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+    }
+    return networkResponse;
+  };
+
+  // 2. Same origin: network first, cache fallback when offline
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      fetch(event.request)
+        .then(putInCache)
+        .catch(() =>
+          caches.match(event.request).then((cachedResponse) => cachedResponse || caches.match("/competitions"))
+        )
+    );
+    return;
+  }
+
+  // 3. Cross origin: cache first, network fallback
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      }).catch(() => {
-        // En cas de panne totale réseau
-        return caches.match("/competitions");
-      });
-    })
+    caches.match(event.request).then((cachedResponse) => cachedResponse || fetch(event.request).then(putInCache))
   );
 });

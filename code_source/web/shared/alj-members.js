@@ -33,11 +33,6 @@ export function normalizeStatus(s) {
   return STATUS_MAP[r.toLowerCase()] || r;
 }
 
-export function fmtDay(s) {
-  const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s || "");
-}
-
 export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
