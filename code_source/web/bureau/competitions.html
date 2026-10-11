@@ -14,6 +14,40 @@
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
 <style>
+/* Navigation principale des 4 parties */
+.main-tabs-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.main-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid #CBD5E1;
+  background: #F8FAFC;
+  color: #475569;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.main-tab-btn:hover {
+  background: #EFF6FF;
+  color: var(--blue);
+  border-color: #93C5FD;
+}
+.main-tab-btn.active {
+  background: var(--blue);
+  color: #FFFFFF;
+  border-color: var(--blue);
+  box-shadow: 0 2px 4px rgba(37,99,235,0.25);
+}
+
+/* Layout 2 colonnes Compétitions */
 .comp-layout {
   display: grid;
   grid-template-columns: 380px 1fr;
@@ -32,7 +66,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 170px);
   position: sticky;
   top: 12px;
 }
@@ -103,13 +137,13 @@
   margin-top: 2px;
 }
 
-.tab-nav {
+.sub-tab-nav {
   display: flex;
   gap: 4px;
   border-bottom: 2px solid #E2E8F0;
   margin-bottom: 14px;
 }
-.tab-btn {
+.sub-tab-btn {
   background: none;
   border: none;
   padding: 8px 14px;
@@ -121,10 +155,10 @@
   margin-bottom: -2px;
   transition: all .15s ease;
 }
-.tab-btn:hover {
+.sub-tab-btn:hover {
   color: #1E293B;
 }
-.tab-btn.active {
+.sub-tab-btn.active {
   color: var(--blue);
   border-bottom-color: var(--blue);
 }
@@ -171,6 +205,19 @@ const PAIEMENT_LABELS = {
   "non_invite": "Non invité"
 };
 
+function seasonOfDate(dStr) {
+  if (!dStr) return "2026-2027";
+  try {
+    const parts = dStr.split("-");
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const start = m >= 8 ? y : y - 1;
+    return `${start}-${start + 1}`;
+  } catch (e) {
+    return "2026-2027";
+  }
+}
+
 startBureau({
   page: "competitions",
   title: "Compétitions (Bureau Grand Écran)",
@@ -179,33 +226,258 @@ startBureau({
     const { db } = initFirebase();
 
     content.innerHTML = `
-      <div class="comp-layout">
-        <!-- Volet gauche : Liste des compétitions -->
-        <div class="comp-list-pane">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div class="section-h" style="margin:0;">🏆 Compétitions</div>
-            ${isAdmin ? `<button class="btn btn-primary btn-mini" id="btn-add-comp">➕ Nouvelle</button>` : ""}
+      <!-- Barre des 4 parties demandées -->
+      <div class="main-tabs-nav">
+        <button class="main-tab-btn active" id="btn-nav-comps" data-section="competitions">
+          🏆 1. Compétition
+        </button>
+        <button class="main-tab-btn" id="btn-nav-helloasso" data-section="helloasso">
+          🔄 2. Synchro HelloAsso
+        </button>
+        <button class="main-tab-btn" id="btn-nav-bilan" data-section="bilan">
+          📊 3. Bilan de saison
+        </button>
+        <button class="main-tab-btn" id="btn-nav-coachs" data-section="coachs">
+          🏃 4. Coachs
+        </button>
+      </div>
+
+      <!-- ============================================================== -->
+      <!-- PARTIE 1 : COMPÉTITIONS                                        -->
+      <!-- ============================================================== -->
+      <div id="section-competitions" class="main-section-pane">
+        <div class="comp-layout">
+          <!-- Volet gauche : Liste des compétitions -->
+          <div class="comp-list-pane">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="section-h" style="margin:0;">🏆 Épreuves</div>
+              ${isAdmin ? `<button class="btn btn-primary btn-mini" id="btn-add-comp">➕ Nouvelle</button>` : ""}
+            </div>
+
+            <div style="display:flex; gap:6px;">
+              <input type="search" id="comp-search-input" class="search-input" placeholder="Filtrer les épreuves…" style="flex:1;">
+            </div>
+
+            <div style="display:flex; gap:4px;">
+              <button class="chip active" data-filter="all" id="chip-filter-all">Toutes</button>
+              <button class="chip" data-filter="upcoming" id="chip-filter-upcoming">À venir</button>
+              <button class="chip" data-filter="past" id="chip-filter-past">Passées</button>
+            </div>
+
+            <div class="comp-scroll" id="comps-list-container">
+              <div class="muted" style="text-align:center; padding:20px;">Chargement des compétitions…</div>
+            </div>
           </div>
 
-          <div style="display:flex; gap:6px;">
-            <input type="search" id="comp-search-input" class="search-input" placeholder="Filtrer les épreuves…" style="flex:1;">
-          </div>
-
-          <div style="display:flex; gap:4px;">
-            <button class="chip active" data-filter="all" id="chip-filter-all">Toutes</button>
-            <button class="chip" data-filter="upcoming" id="chip-filter-upcoming">À venir</button>
-            <button class="chip" data-filter="past" id="chip-filter-past">Passées</button>
-          </div>
-
-          <div class="comp-scroll" id="comps-list-container">
-            <div class="muted" style="text-align:center; padding:20px;">Chargement des compétitions…</div>
+          <!-- Volet droit : Espace de travail de l'épreuve active -->
+          <div id="comp-workspace" style="display:flex; flex-direction:column; gap:14px;">
+            <div class="card" style="padding:40px; text-align:center;" class="muted">
+              Sélectionnez une compétition dans la colonne de gauche ou créez-en une nouvelle pour gérer les participants.
+            </div>
           </div>
         </div>
+      </div>
 
-        <!-- Volet droit : Espace de travail de l'épreuve active -->
-        <div id="comp-workspace" style="display:flex; flex-direction:column; gap:14px;">
-          <div class="card" style="padding:40px; text-align:center;" class="muted">
-            Sélectionnez une compétition dans la colonne de gauche ou créez-en une nouvelle pour gérer les participants et les paiements HelloAsso.
+      <!-- ============================================================== -->
+      <!-- PARTIE 2 : SYNCHRO HELLOASSO                                   -->
+      <!-- ============================================================== -->
+      <div id="section-helloasso" class="main-section-pane" style="display:none; flex-direction:column; gap:14px;">
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+            <div>
+              <h2 style="margin:0; font-size:17px; color:#1E293B;">🧾 Paiements HelloAsso & Rapprochement</h2>
+              <p class="muted" style="margin:4px 0 0; font-size:12.5px;">Articles réglés sur la campagne HelloAsso et état de rattachement aux épreuves et compétiteurs.</p>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-mini" id="btn-sync-ha-global">🔄 Lancer la synchronisation HelloAsso</button>
+              <button class="btn btn-muted btn-mini" id="btn-attach-pending">🔗 Rattacher les paiements en attente (<span id="ha-pending-count">0</span>)</button>
+            </div>
+          </div>
+
+          <div class="kpi-row" style="margin-bottom:14px;">
+            <div class="kpi-card">
+              <div class="kpi-val" id="ha-kpi-total">0</div>
+              <div class="kpi-lbl">Total paiements</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="ha-kpi-linked" style="color:#16A34A;">0</div>
+              <div class="kpi-lbl">Rattachés</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="ha-kpi-pending" style="color:#D97706;">0</div>
+              <div class="kpi-lbl">En attente de rattachement</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="ha-kpi-amount" style="color:#2563EB;">0 €</div>
+              <div class="kpi-lbl">Montant total collecté</div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+            <div style="display:flex; gap:8px; flex:1; max-width:480px;">
+              <input type="search" id="ha-search-input" class="search-input" placeholder="Rechercher par payeur, athlète ou commande…" style="width:100%;">
+            </div>
+            <div class="filter-chips">
+              <button class="filter-chip active" id="ha-filter-all">Tous</button>
+              <button class="filter-chip" id="ha-filter-pending">⏳ En attente uniquement</button>
+              <button class="filter-chip" id="ha-filter-linked">✅ Rattachés</button>
+            </div>
+          </div>
+
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Commande</th>
+                  <th>Payeur</th>
+                  <th>Athlète / Licence saisie</th>
+                  <th>Épreuve détectée</th>
+                  <th>Montant</th>
+                  <th>Compétition rattachée</th>
+                  <th>Athlète ALJ</th>
+                  <th>Source</th>
+                  <th style="text-align:center;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="ha-table-tbody">
+                <tr><td colspan="10" style="text-align:center; padding:30px;" class="muted">Chargement des paiements HelloAsso…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================== -->
+      <!-- PARTIE 3 : BILAN DE SAISON                                     -->
+      <!-- ============================================================== -->
+      <div id="section-bilan" class="main-section-pane" style="display:none; flex-direction:column; gap:14px;">
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+            <div>
+              <h2 style="margin:0; font-size:17px; color:#1E293B;">📊 Bilan Financier de la Saison</h2>
+              <p class="muted" style="margin:4px 0 0; font-size:12.5px;">Bilan des inscriptions et balance des paiements pour chaque adhérent du club.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <label class="fld" style="margin:0;">Saison :</label>
+              <select id="bilan-season-select" class="select-input" style="padding:5px 10px; font-weight:700;"></select>
+              <button class="btn btn-muted btn-mini" id="btn-export-bilan-csv">📥 Exporter le bilan CSV</button>
+            </div>
+          </div>
+
+          <div class="kpi-row" style="margin-bottom:16px;">
+            <div class="kpi-card">
+              <div class="kpi-val" id="bilan-kpi-due">0 €</div>
+              <div class="kpi-lbl">Total dû (inscriptions)</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="bilan-kpi-paid" style="color:#16A34A;">0 €</div>
+              <div class="kpi-lbl">Total réglé HelloAsso</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="bilan-kpi-balance" style="color:#DC2626;">0 €</div>
+              <div class="kpi-lbl">Reste total à percevoir</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-val" id="bilan-kpi-athletes" style="color:#7C3AED;">0</div>
+              <div class="kpi-lbl">Compétiteurs engagés</div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:10px;">
+            <input type="search" id="bilan-search-input" class="search-input" placeholder="Filtrer les athlètes…" style="max-width:320px;">
+          </div>
+
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Athlète</th>
+                  <th>Licence FFME</th>
+                  <th>Catégorie / Groupe</th>
+                  <th style="text-align:center;">Épreuves disputées</th>
+                  <th style="text-align:right;">Total Dû</th>
+                  <th style="text-align:right;">Total Payé</th>
+                  <th style="text-align:right;">Solde</th>
+                  <th>Détail des épreuves</th>
+                </tr>
+              </thead>
+              <tbody id="bilan-table-tbody">
+                <tr><td colspan="8" style="text-align:center; padding:30px;" class="muted">Calcul du bilan de saison en cours…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================== -->
+      <!-- PARTIE 4 : COACHS                                              -->
+      <!-- ============================================================== -->
+      <div id="section-coachs" class="main-section-pane" style="display:none;">
+        <div class="comp-layout">
+          <!-- Volet gauche : Liste des coachs -->
+          <div class="comp-list-pane">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="section-h" style="margin:0;">🏃 Coachs du club</div>
+            </div>
+
+            ${isAdmin ? `
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <input type="text" id="coach-new-name" class="search-input" placeholder="Nom du coach…" style="flex:1;">
+                <button class="btn btn-primary btn-mini" id="btn-save-coach">+ Ajouter</button>
+              </div>
+            ` : ""}
+
+            <div class="comp-scroll" id="coachs-list-container" style="margin-top:4px;">
+              <div class="muted" style="text-align:center; padding:20px;">Chargement des coachs…</div>
+            </div>
+          </div>
+
+          <!-- Volet droit : Épreuves associées au coach sélectionné -->
+          <div id="coach-workspace" style="display:flex; flex-direction:column; gap:14px;">
+            <div class="card" style="padding:40px; text-align:center;" class="muted">
+              Sélectionnez un coach dans la colonne de gauche pour afficher les compétitions qu'il encadre.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================== -->
+      <!-- MODALES                                                        -->
+      <!-- ============================================================== -->
+      <!-- Modale de Rattachement Manuel HelloAsso -->
+      <div id="ha-attach-modal" class="modal-overlay" style="display:none">
+        <div class="modal-content card" style="max-width:560px;">
+          <div class="modal-header">
+            <div class="m-name" style="font-size:16px;">🔗 Rattacher un paiement HelloAsso</div>
+            <button class="icon-btn" id="ha-attach-modal-close" style="color:#64748B; background:none; font-size:20px; border:none; cursor:pointer;">✕</button>
+          </div>
+          <div style="margin-top:10px; display:flex; flex-direction:column; gap:12px;">
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px 12px; font-size:12.5px;">
+              <div><b>Payeur :</b> <span id="attach-payer-desc">—</span></div>
+              <div style="margin-top:2px;"><b>Athlète / Licence saisie :</b> <span id="attach-raw-desc">—</span></div>
+              <div style="margin-top:2px;"><b>Montant :</b> <span id="attach-amount-desc" style="color:#16A34A; font-weight:700;">0 €</span> · <b>Commande :</b> <span id="attach-order-desc">—</span></div>
+            </div>
+
+            <div>
+              <label class="fld">1. Compétition concernée *</label>
+              <select id="attach-comp-select" class="select-input" style="width:100%;"></select>
+            </div>
+
+            <div>
+              <label class="fld">2. Adhérent / Athlète ALJ concerné *</label>
+              <select id="attach-adh-select" class="select-input" style="width:100%;"></select>
+            </div>
+
+            <div>
+              <label class="fld">Commentaire interne (optionnel)</label>
+              <input type="text" id="attach-comment-input" class="search-input" placeholder="Ex: Paiement validé manuellement" style="width:100%;">
+            </div>
+
+            <div class="btn-row" style="margin-top:8px;">
+              <button type="button" class="btn btn-muted" id="ha-attach-cancel">Annuler</button>
+              <button type="button" class="btn btn-primary" id="ha-attach-submit">✅ Enregistrer le rattachement</button>
+            </div>
           </div>
         </div>
       </div>
@@ -309,13 +581,17 @@ startBureau({
       t._h = setTimeout(() => t.classList.remove("show"), ms);
     }
 
-    // État local des compétitions
+    // État global
+    let currentMainSection = "competitions";
     let allComps = [];
     let allAdherents = [];
     let allHelloassoItems = [];
+    let allCoaches = [];
     let activeCompId = null;
+    let activeCoachId = null;
     let compFilterStatus = "all";
-    let activeTab = "participants";
+    let activeSubTab = "participants";
+    let haFilterStatus = "all";
     let emailTemplates = [];
 
     // ==========================================
@@ -326,6 +602,8 @@ startBureau({
       allComps.sort((a, b) => String(b.date_competition || "").localeCompare(String(a.date_competition || "")));
       renderCompsList();
       if (activeCompId) renderActiveCompWorkspace();
+      if (currentMainSection === "bilan") renderBilanView();
+      if (currentMainSection === "coachs") renderCoachsView();
     }, err => {
       console.error("Erreur compétitions Firestore :", err);
       toast("❌ Erreur de chargement des compétitions : " + err.message);
@@ -333,17 +611,57 @@ startBureau({
 
     db.collection("adherents").onSnapshot(snap => {
       allAdherents = snap.docs.map(d => d.data());
+      if (currentMainSection === "bilan") renderBilanView();
     });
 
     db.collection("helloasso_items").onSnapshot(snap => {
       allHelloassoItems = snap.docs.map(d => Object.assign({ docId: d.id }, d.data()));
+      allHelloassoItems.sort((a, b) => String(b.order?.date || "").localeCompare(String(a.order?.date || "")));
+      renderHelloAssoView();
+    });
+
+    db.collection("coaches").onSnapshot(snap => {
+      allCoaches = snap.docs.map(d => Object.assign({ docId: d.id }, d.data()));
+      allCoaches.sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || "")));
+      renderCoachsView();
     });
 
     // ==========================================
-    // Rendu de la liste gauche
+    // Gestion de la navigation entre les 4 parties
+    // ==========================================
+    function switchMainSection(section) {
+      currentMainSection = section;
+      document.querySelectorAll(".main-tab-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.section === section);
+      });
+
+      $("section-competitions").style.display = section === "competitions" ? "block" : "none";
+      $("section-helloasso").style.display = section === "helloasso" ? "flex" : "none";
+      $("section-bilan").style.display = section === "bilan" ? "flex" : "none";
+      $("section-coachs").style.display = section === "coachs" ? "block" : "none";
+
+      if (section === "competitions") {
+        renderCompsList();
+        if (activeCompId) renderActiveCompWorkspace();
+      } else if (section === "helloasso") {
+        renderHelloAssoView();
+      } else if (section === "bilan") {
+        renderBilanView();
+      } else if (section === "coachs") {
+        renderCoachsView();
+      }
+    }
+
+    document.querySelectorAll(".main-tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => switchMainSection(btn.dataset.section));
+    });
+
+    // ==========================================
+    // PARTIE 1 : LISTE & ESPACE COMPÉTITION
     // ==========================================
     function renderCompsList() {
       const container = $("comps-list-container");
+      if (!container) return;
       const search = ($("comp-search-input")?.value || "").toLowerCase().trim();
       const today = new Date().toISOString().slice(0, 10);
 
@@ -403,7 +721,6 @@ startBureau({
       });
     }
 
-    // Écouteurs de filtres de liste
     $("comp-search-input")?.addEventListener("input", renderCompsList);
     document.querySelectorAll("[data-filter]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -414,9 +731,6 @@ startBureau({
       });
     });
 
-    // ==========================================
-    // Rendu du volet droit (Espace de travail)
-    // ==========================================
     function getActiveComp() {
       return allComps.find(c => String(c.id || c.docId) === String(activeCompId));
     }
@@ -424,6 +738,7 @@ startBureau({
     function renderActiveCompWorkspace() {
       const comp = getActiveComp();
       const workspace = $("comp-workspace");
+      if (!workspace) return;
       if (!comp) {
         workspace.innerHTML = `
           <div class="card" style="padding:40px; text-align:center;" class="muted">
@@ -441,7 +756,6 @@ startBureau({
       const prix = Number(comp.prix || 0);
 
       workspace.innerHTML = `
-        <!-- Carte En-tête de la compétition -->
         <div class="card" style="padding:16px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
             <div>
@@ -454,18 +768,15 @@ startBureau({
               </div>
             </div>
 
-            <!-- Barre d'actions épreuve -->
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-edit-comp">✏️ Modifier</button>` : ""}
               <button class="btn btn-primary btn-mini" id="btn-email-comp">✉️ Campagne e-mail</button>
-              <button class="btn btn-muted btn-mini" id="btn-sync-ha">🔄 Synchro HelloAsso</button>
               <button class="btn btn-muted btn-mini" id="btn-export-comp-csv">📥 Export CSV</button>
               ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-del-comp" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>` : ""}
             </div>
           </div>
         </div>
 
-        <!-- KPIs clés -->
         <div class="kpi-row">
           <div class="kpi-card">
             <div class="kpi-val">${nbInscrits}</div>
@@ -485,56 +796,41 @@ startBureau({
           </div>
         </div>
 
-        <!-- Onglets de travail -->
         <div class="card" style="padding:14px;">
-          <div class="tab-nav">
-            <button class="tab-btn${activeTab === "participants" ? " active" : ""}" data-tab="participants">👥 Athlètes (${parts.length})</button>
-            <button class="tab-btn${activeTab === "add_adh" ? " active" : ""}" data-tab="add_adh">➕ Inscrire un adhérent</button>
-            <button class="tab-btn${activeTab === "helloasso" ? " active" : ""}" data-tab="helloasso">🧾 Rapprochement HelloAsso</button>
-            <button class="tab-btn${activeTab === "bilan" ? " active" : ""}" data-tab="bilan">💰 Bilan financier</button>
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn${activeSubTab === "participants" ? " active" : ""}" data-subtab="participants">👥 Athlètes inscrits (${parts.length})</button>
+            <button class="sub-tab-btn${activeSubTab === "add_adh" ? " active" : ""}" data-subtab="add_adh">➕ Inscrire un adhérent</button>
           </div>
 
-          <div id="tab-content-pane"></div>
+          <div id="sub-tab-pane"></div>
         </div>
       `;
 
-      // Câblage des onglets
-      workspace.querySelectorAll(".tab-btn[data-tab]").forEach(btn => {
+      workspace.querySelectorAll(".sub-tab-btn[data-subtab]").forEach(btn => {
         btn.addEventListener("click", () => {
-          activeTab = btn.dataset.tab;
+          activeSubTab = btn.dataset.subtab;
           renderActiveCompWorkspace();
         });
       });
 
-      // Actions en-tête
       $("btn-edit-comp")?.addEventListener("click", () => openEditCompModal(comp));
       $("btn-del-comp")?.addEventListener("click", () => deleteActiveComp(comp));
-      $("btn-sync-ha")?.addEventListener("click", syncHelloAsso);
       $("btn-email-comp")?.addEventListener("click", () => openEmailCampaignModal(comp));
       $("btn-export-comp-csv")?.addEventListener("click", () => exportCompCsv(comp));
 
-      // Rendu du sous-onglet sélectionné
       renderSubTabContent(comp);
     }
 
     function renderSubTabContent(comp) {
-      const pane = $("tab-content-pane");
+      const pane = $("sub-tab-pane");
       if (!pane) return;
-
-      if (activeTab === "participants") {
+      if (activeSubTab === "participants") {
         renderParticipantsTab(comp, pane);
-      } else if (activeTab === "add_adh") {
+      } else {
         renderAddAdherentTab(comp, pane);
-      } else if (activeTab === "helloasso") {
-        renderHelloAssoTab(comp, pane);
-      } else if (activeTab === "bilan") {
-        renderBilanTab(comp, pane);
       }
     }
 
-    // ==========================================
-    // Onglet : Liste des participants (Tableau Grand Écran)
-    // ==========================================
     function renderParticipantsTab(comp, pane) {
       const parts = comp.participants || [];
       pane.innerHTML = `
@@ -626,20 +922,17 @@ startBureau({
         const part = (comp.participants || []).find(p => String(p.adherent_id) === String(aid));
         if (!part) return;
 
-        // Bascule participation
         row.querySelector(".part-select-chk")?.addEventListener("change", async (e) => {
           part.selectionne = e.target.checked;
           if (part.selectionne && part.statut_paiement === "non_invite") part.statut_paiement = "en_attente";
           await saveCompParticipants(comp);
         });
 
-        // Pointage présence sur place
         row.querySelector(".part-present-chk")?.addEventListener("change", async (e) => {
           part.present = e.target.checked;
           await saveCompParticipants(comp);
         });
 
-        // Suppression de la compétition
         row.querySelector(".part-remove-btn")?.addEventListener("click", async () => {
           if (!confirm(`Retirer ${part.prenom} ${part.nom} de cette compétition ?`)) return;
           comp.participants = (comp.participants || []).filter(p => String(p.adherent_id) !== String(aid));
@@ -662,9 +955,6 @@ startBureau({
       }
     }
 
-    // ==========================================
-    // Onglet : Inscrire un adhérent (Recherche & Ajout)
-    // ==========================================
     function renderAddAdherentTab(comp, pane) {
       pane.innerHTML = `
         <div style="margin-bottom:12px;">
@@ -739,93 +1029,556 @@ startBureau({
             comp.participants.push(newPart);
             await saveCompParticipants(comp);
             toast(`✅ ${targetAdh.first_name} ${targetAdh.last_name} inscrit avec succès !`);
-            renderAddAdherentTab(comp, $("tab-content-pane"));
+            renderAddAdherentTab(comp, $("sub-tab-pane"));
           });
         });
       });
     }
 
     // ==========================================
-    // Onglet : Rapprochement HelloAsso
+    // PARTIE 2 : SYNCHRO HELLOASSO & RATTACHEMENT
     // ==========================================
-    function renderHelloAssoTab(comp, pane) {
-      const items = allHelloassoItems.filter(item => 
-        String(item.linked_competition_id) === String(comp.id || comp.docId) ||
-        String(item.name || "").toLowerCase().includes(String(comp.nom || "").toLowerCase())
-      );
+    function renderHelloAssoView() {
+      const tbody = $("ha-table-tbody");
+      if (!tbody) return;
 
-      pane.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <div class="section-h" style="margin:0;">Articles HelloAsso rattachés (${items.length})</div>
-          <button class="btn btn-muted btn-mini" id="btn-sync-ha-tab">🔄 Relancer la réconciliation</button>
+      const q = ($("ha-search-input")?.value || "").toLowerCase().trim();
+      let items = allHelloassoItems;
+
+      let nbLinked = 0;
+      let nbPending = 0;
+      let totalAmount = 0;
+
+      items.forEach(it => {
+        const montant = Number(it.amount || it.montant || 0) / (it.amount ? 100 : 1);
+        totalAmount += isNaN(montant) ? 0 : montant;
+        const isLinked = Boolean(it.competition_id && it.adherent_id);
+        if (isLinked) nbLinked++;
+        else nbPending++;
+      });
+
+      $("ha-kpi-total").textContent = items.length;
+      $("ha-kpi-linked").textContent = nbLinked;
+      $("ha-kpi-pending").textContent = nbPending;
+      $("ha-pending-count").textContent = nbPending;
+      $("ha-kpi-amount").textContent = totalAmount.toFixed(2) + " €";
+
+      if (haFilterStatus === "pending") {
+        items = items.filter(it => !it.competition_id || !it.adherent_id);
+      } else if (haFilterStatus === "linked") {
+        items = items.filter(it => it.competition_id && it.adherent_id);
+      }
+
+      if (q) {
+        items = items.filter(it => {
+          const payer = `${it.order?.payer?.name || ''} ${it.order?.payer?.email || ''}`.toLowerCase();
+          const custom = (it.customFields || []).map(f => f.answer || '').join(' ').toLowerCase();
+          const order = String(it.order?.id || '').toLowerCase();
+          return payer.includes(q) || custom.includes(q) || order.includes(q);
+        });
+      }
+
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px;" class="muted">Aucun paiement HelloAsso trouvé.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map(it => {
+        const montantNum = Number(it.amount || it.montant || 0) / (it.amount ? 100 : 1);
+        const montantStr = !isNaN(montantNum) ? montantNum.toFixed(2) + " €" : "0 €";
+
+        // Détection compétition rattachée
+        const targetComp = allComps.find(c => String(c.id || c.docId) === String(it.competition_id));
+        const compLabel = targetComp ? targetComp.nom : (it.competition_id ? `ID #${it.competition_id}` : "—");
+
+        // Détection adhérent rattaché
+        const targetAdh = allAdherents.find(a => String(a.id || a.user_id) === String(it.adherent_id));
+        const adhLabel = targetAdh ? `${targetAdh.last_name.toUpperCase()} ${targetAdh.first_name}` : (it.adherent_id ? `Adhérent #${it.adherent_id}` : "—");
+
+        const isLinked = Boolean(it.competition_id && it.adherent_id);
+        const customAthlete = it.customFields?.[0]?.answer || it.name || "—";
+        const customLicence = it.customFields?.[1]?.answer || "—";
+
+        return `
+          <tr data-item-id="${esc(it.id || it.docId || it.id_item)}">
+            <td class="cell-sub">${esc(fmtDay(it.order?.date || it.date_item) || "—")}</td>
+            <td class="cell-sub"><b>${esc(it.order?.id || it.order_ref || "—")}</b></td>
+            <td>
+              <div style="font-weight:600; color:#1E293B;">${esc(it.order?.payer?.name || it.payer || "—")}</div>
+              <div class="muted" style="font-size:11px;">${esc(it.order?.payer?.email || "")}</div>
+            </td>
+            <td>
+              <div class="cell-name">${esc(customAthlete)}</div>
+              <div class="muted" style="font-size:11px;">Licence: ${esc(customLicence)}</div>
+            </td>
+            <td class="cell-sub">${esc(it.competition_saisie || it.name || "—")}</td>
+            <td><b>${esc(montantStr)}</b></td>
+            <td>
+              ${it.competition_id ? `
+                <span class="tag-badge" style="background:#EFF6FF; color:var(--blue); border:1px solid #BFDBFE;">🏆 ${esc(compLabel)}</span>
+              ` : `<span class="tag-badge" style="background:#FEF3C7; color:#D97706; border:1px solid #FDE68A;">⏳ Non rattaché</span>`}
+            </td>
+            <td>
+              ${it.adherent_id ? `
+                <span style="font-weight:600; color:#1E293B;">${esc(adhLabel)}</span>
+              ` : `<span class="muted" style="font-size:11px;">En attente</span>`}
+            </td>
+            <td>
+              <span class="tag-badge" style="background:${isLinked ? '#DCFCE7' : '#F1F5F9'}; color:${isLinked ? '#166534' : '#64748B'};">
+                ${esc(it.source || (isLinked ? 'auto' : 'attente'))}
+              </span>
+            </td>
+            <td style="text-align:center;">
+              <button class="btn btn-muted btn-mini btn-open-attach" data-item-id="${esc(it.id || it.docId || it.id_item)}">🔗 Rattacher</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      tbody.querySelectorAll(".btn-open-attach").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const itemId = btn.dataset.itemId;
+          const item = allHelloassoItems.find(it => String(it.id || it.docId || it.id_item) === String(itemId));
+          if (item) openAttachModal(item);
+        });
+      });
+    }
+
+    $("ha-search-input")?.addEventListener("input", renderHelloAssoView);
+
+    $("ha-filter-all")?.addEventListener("click", () => {
+      haFilterStatus = "all";
+      $("ha-filter-all").classList.add("active");
+      $("ha-filter-pending").classList.remove("active");
+      $("ha-filter-linked").classList.remove("active");
+      renderHelloAssoView();
+    });
+    $("ha-filter-pending")?.addEventListener("click", () => {
+      haFilterStatus = "pending";
+      $("ha-filter-pending").classList.add("active");
+      $("ha-filter-all").classList.remove("active");
+      $("ha-filter-linked").classList.remove("active");
+      renderHelloAssoView();
+    });
+    $("ha-filter-linked")?.addEventListener("click", () => {
+      haFilterStatus = "linked";
+      $("ha-filter-linked").classList.add("active");
+      $("ha-filter-all").classList.remove("active");
+      $("ha-filter-pending").classList.remove("active");
+      renderHelloAssoView();
+    });
+
+    $("btn-attach-pending")?.addEventListener("click", () => {
+      haFilterStatus = "pending";
+      $("ha-filter-pending")?.click();
+      toast("🔍 Liste filtrée sur les paiements en attente.");
+    });
+
+    $("btn-sync-ha-global")?.addEventListener("click", syncHelloAsso);
+
+    // ==========================================
+    // MODALE DE RATTACHEMENT MANUEL
+    // ==========================================
+    let currentAttachItem = null;
+
+    function openAttachModal(item) {
+      currentAttachItem = item;
+      const modal = $("ha-attach-modal");
+
+      const montantNum = Number(item.amount || item.montant || 0) / (item.amount ? 100 : 1);
+      $("attach-payer-desc").textContent = item.order?.payer?.name || item.payer || "Non renseigné";
+      $("attach-raw-desc").textContent = `${item.customFields?.[0]?.answer || item.name || "—"} (Licence: ${item.customFields?.[1]?.answer || "—"})`;
+      $("attach-amount-desc").textContent = !isNaN(montantNum) ? montantNum.toFixed(2) + " €" : "0 €";
+      $("attach-order-desc").textContent = item.order?.id || item.order_ref || "—";
+      $("attach-comment-input").value = item.commentaire || "";
+
+      // Sélecteur de compétitions
+      const compSelect = $("attach-comp-select");
+      compSelect.innerHTML = `<option value="">-- Choisir une compétition --</option>` +
+        allComps.map(c => `<option value="${esc(c.id || c.docId)}" ${String(c.id || c.docId) === String(item.competition_id) ? "selected" : ""}>${esc(c.nom)} (${esc(fmtDay(c.date_competition) || "")})</option>`).join("");
+
+      // Sélecteur d'adhérents
+      const adhSelect = $("attach-adh-select");
+      adhSelect.innerHTML = `<option value="">-- Choisir un adhérent du club --</option>` +
+        allAdherents.map(a => `<option value="${esc(a.id || a.user_id)}" ${String(a.id || a.user_id) === String(item.adherent_id) ? "selected" : ""}>${esc(String(a.last_name || "").toUpperCase())} ${esc(a.first_name || "")} (${esc(a.licence_ffme || "Sans licence")})</option>`).join("");
+
+      modal.style.display = "flex";
+    }
+
+    $("ha-attach-modal-close")?.addEventListener("click", () => $("ha-attach-modal").style.display = "none");
+    $("ha-attach-cancel")?.addEventListener("click", () => $("ha-attach-modal").style.display = "none");
+
+    $("ha-attach-submit")?.addEventListener("click", async () => {
+      if (!currentAttachItem) return;
+      const compId = $("attach-comp-select").value;
+      const adhId = $("attach-adh-select").value;
+      const comment = $("attach-comment-input").value.trim();
+
+      if (!compId || !adhId) {
+        toast("⚠️ Veuillez sélectionner une compétition et un adhérent.");
+        return;
+      }
+
+      const docId = String(currentAttachItem.id || currentAttachItem.docId || currentAttachItem.id_item);
+      const montantNum = Number(currentAttachItem.amount || currentAttachItem.montant || 0) / (currentAttachItem.amount ? 100 : 1);
+
+      try {
+        // 1. Mettre à jour l'item HelloAsso
+        await db.collection("helloasso_items").doc(docId).set({
+          competition_id: compId,
+          adherent_id: adhId,
+          source: "manuel",
+          commentaire: comment,
+          updated_at: new Date().toISOString()
+        }, { merge: true });
+
+        // 2. Répercuter sur la compétition choisie
+        const comp = allComps.find(c => String(c.id || c.docId) === String(compId));
+        if (comp) {
+          comp.participants = comp.participants || [];
+          let part = comp.participants.find(p => String(p.adherent_id) === String(adhId));
+          const targetAdh = allAdherents.find(a => String(a.id || a.user_id) === String(adhId)) || {};
+
+          if (part) {
+            part.selectionne = true;
+            part.statut_paiement = "paye";
+            part.montant_paye = montantNum;
+            part.commande_helloasso = currentAttachItem.order?.id || currentAttachItem.order_ref || "";
+          } else {
+            comp.participants.push({
+              adherent_id: adhId,
+              nom: targetAdh.last_name || "",
+              prenom: targetAdh.first_name || "",
+              num_licence: targetAdh.licence_ffme || "",
+              categorie: targetAdh.category || "",
+              tarif: targetAdh.tarif_name || "",
+              groupe: targetAdh.creneau_groupe || "",
+              phone: targetAdh.phone || "",
+              selectionne: true,
+              present: false,
+              statut_paiement: "paye",
+              montant_paye: montantNum,
+              commande_helloasso: currentAttachItem.order?.id || currentAttachItem.order_ref || "",
+              created_at: new Date().toISOString()
+            });
+          }
+          await saveCompParticipants(comp);
+        }
+
+        toast("✅ Rattachement enregistré et reporté sur le compétiteur !");
+        $("ha-attach-modal").style.display = "none";
+        renderHelloAssoView();
+      } catch (err) {
+        console.error("Erreur rattachement HelloAsso :", err);
+        toast("❌ Erreur : " + err.message, 8000);
+      }
+    });
+
+    // ==========================================
+    // PARTIE 3 : BILAN FINANCIER DE LA SAISON
+    // ==========================================
+    let currentBilanSeason = "2026-2027";
+
+    function updateBilanSeasonsList() {
+      const select = $("bilan-season-select");
+      if (!select) return;
+
+      const seasonsSet = new Set();
+      allComps.forEach(c => {
+        if (c.date_competition) seasonsSet.add(seasonOfDate(c.date_competition));
+      });
+      seasonsSet.add("2026-2027");
+
+      const sorted = Array.from(seasonsSet).sort().reverse();
+      select.innerHTML = sorted.map(s => `<option value="${esc(s)}" ${s === currentBilanSeason ? "selected" : ""}>${esc(s)}</option>`).join("");
+      select.onchange = (e) => {
+        currentBilanSeason = e.target.value;
+        renderBilanView();
+      };
+    }
+
+    function renderBilanView() {
+      updateBilanSeasonsList();
+      const tbody = $("bilan-table-tbody");
+      if (!tbody) return;
+
+      const search = ($("bilan-search-input")?.value || "").toLowerCase().trim();
+      const seasonComps = allComps.filter(c => seasonOfDate(c.date_competition) === currentBilanSeason);
+
+      // Calcul par adhérent
+      const athleteStats = {};
+
+      seasonComps.forEach(comp => {
+        const prix = Number(comp.prix || 0);
+        (comp.participants || []).forEach(p => {
+          if (!p.selectionne && p.statut_paiement !== "paye") return;
+          const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
+          if (!athleteStats[aid]) {
+            const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
+            athleteStats[aid] = {
+              id: aid,
+              nom: p.nom || adh.last_name || "",
+              prenom: p.prenom || adh.first_name || "",
+              licence: p.num_licence || adh.licence_ffme || "—",
+              categorie: p.categorie || adh.category || adh.tarif_name || "—",
+              nb_comps: 0,
+              total_du: 0,
+              total_paye: 0,
+              competitions: []
+            };
+          }
+
+          athleteStats[aid].nb_comps += 1;
+          athleteStats[aid].total_du += prix;
+          const paye = Number(p.montant_paye || (p.statut_paiement === "paye" ? prix : 0));
+          athleteStats[aid].total_paye += paye;
+          athleteStats[aid].competitions.push({
+            nom: comp.nom,
+            statut: p.statut_paiement,
+            montant: paye
+          });
+        });
+      });
+
+      let list = Object.values(athleteStats);
+      if (search) {
+        list = list.filter(a => `${a.nom} ${a.prenom}`.toLowerCase().includes(search) || a.licence.toLowerCase().includes(search));
+      }
+      list.sort((a, b) => a.nom.localeCompare(b.nom));
+
+      // KPIs globaux
+      const totalDue = list.reduce((acc, a) => acc + a.total_du, 0);
+      const totalPaid = list.reduce((acc, a) => acc + a.total_paye, 0);
+      const totalBalance = totalDue - totalPaid;
+
+      $("bilan-kpi-due").textContent = totalDue.toFixed(2) + " €";
+      $("bilan-kpi-paid").textContent = totalPaid.toFixed(2) + " €";
+      $("bilan-kpi-balance").textContent = totalBalance.toFixed(2) + " €";
+      $("bilan-kpi-athletes").textContent = list.length;
+
+      if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px;" class="muted">Aucune inscription en compétition enregistrée pour la saison ${esc(currentBilanSeason)}.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.map(a => {
+        const solde = a.total_du - a.total_paye;
+        const soldeBadge = solde <= 0
+          ? `<span class="tag-badge" style="background:#DCFCE7; color:#166534; font-weight:700;">✅ À jour (${solde === 0 ? '0 €' : `+${Math.abs(solde).toFixed(2)} €`})</span>`
+          : `<span class="tag-badge" style="background:#FEE2E2; color:#991B1B; font-weight:700;">⚠️ Reste ${solde.toFixed(2)} €</span>`;
+
+        const compBadges = a.competitions.map(c => {
+          const col = c.statut === "paye" ? "#16A34A" : "#D97706";
+          return `<span class="tag-badge" style="background:${col}15; color:${col}; border:1px solid ${col}44; margin-right:4px; font-size:10.5px;">${esc(c.nom)} : ${c.statut === "paye" ? "Payé" : "Attente"}</span>`;
+        }).join("");
+
+        return `
+          <tr>
+            <td class="cell-name">${esc(a.nom.toUpperCase())} ${esc(a.prenom)}</td>
+            <td class="cell-sub">${esc(a.licence)}</td>
+            <td class="cell-sub">${esc(a.categorie)}</td>
+            <td style="text-align:center;"><b>${a.nb_comps}</b></td>
+            <td style="text-align:right;">${a.total_du.toFixed(2)} €</td>
+            <td style="text-align:right; color:#16A34A; font-weight:700;">${a.total_paye.toFixed(2)} €</td>
+            <td style="text-align:right;">${soldeBadge}</td>
+            <td><div style="display:flex; flex-wrap:wrap; gap:3px;">${compBadges}</div></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    $("bilan-search-input")?.addEventListener("input", renderBilanView);
+
+    $("btn-export-bilan-csv")?.addEventListener("click", () => {
+      const seasonComps = allComps.filter(c => seasonOfDate(c.date_competition) === currentBilanSeason);
+      const athleteStats = {};
+
+      seasonComps.forEach(comp => {
+        const prix = Number(comp.prix || 0);
+        (comp.participants || []).forEach(p => {
+          if (!p.selectionne && p.statut_paiement !== "paye") return;
+          const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
+          if (!athleteStats[aid]) {
+            const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
+            athleteStats[aid] = {
+              nom: p.nom || adh.last_name || "",
+              prenom: p.prenom || adh.first_name || "",
+              licence: p.num_licence || adh.licence_ffme || "",
+              nb_comps: 0,
+              total_du: 0,
+              total_paye: 0
+            };
+          }
+          athleteStats[aid].nb_comps += 1;
+          athleteStats[aid].total_du += prix;
+          athleteStats[aid].total_paye += Number(p.montant_paye || (p.statut_paiement === "paye" ? prix : 0));
+        });
+      });
+
+      const rows = [
+        ["Nom", "Prénom", "N° Licence FFME", "Épreuves", "Total Dû (€)", "Total Payé (€)", "Solde Reste Dû (€)"]
+      ];
+
+      Object.values(athleteStats).sort((a,b) => a.nom.localeCompare(b.nom)).forEach(a => {
+        rows.push([
+          a.nom,
+          a.prenom,
+          a.licence,
+          a.nb_comps,
+          a.total_du.toFixed(2),
+          a.total_paye.toFixed(2),
+          (a.total_du - a.total_paye).toFixed(2)
+        ]);
+      });
+
+      const csvContent = "\uFEFF" + rows.map(r => r.map(cell => `"${String(csvSafe(String(cell))).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bilan_competitions_${currentBilanSeason}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    // ==========================================
+    // PARTIE 4 : COACHS & LEURS COMPÉTITIONS
+    // ==========================================
+    function renderCoachsView() {
+      const listContainer = $("coachs-list-container");
+      const workspace = $("coach-workspace");
+      if (!listContainer || !workspace) return;
+
+      if (!allCoaches.length) {
+        listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:20px;">Aucun coach configuré.</div>`;
+        workspace.innerHTML = `<div class="card" style="padding:40px; text-align:center;" class="muted">Aucun coach à afficher.</div>`;
+        return;
+      }
+
+      listContainer.innerHTML = allCoaches.map(co => {
+        const isSel = String(co.id || co.docId) === String(activeCoachId);
+        // Compétitions encadrées
+        const coachComps = allComps.filter(c => {
+          const ids = (c.coach_ids || []).map(String);
+          const names = (c.coaches || []).map(s => String(s).toLowerCase());
+          return ids.includes(String(co.id || co.docId)) || names.includes(String(co.nom || "").toLowerCase());
+        });
+
+        return `
+          <div class="comp-card${isSel ? " active" : ""}" data-coach-id="${esc(co.id || co.docId)}">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="comp-card-title">🏃 ${esc(co.nom || "Coach sans nom")}</div>
+              <span class="tag-badge" style="background:#EFF6FF; color:var(--blue);">${coachComps.length} épreuve${coachComps.length > 1 ? 's' : ''}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      listContainer.querySelectorAll(".comp-card[data-coach-id]").forEach(card => {
+        card.addEventListener("click", () => {
+          activeCoachId = card.dataset.coachId;
+          renderCoachsView();
+        });
+      });
+
+      // Rendu de l'espace de travail du coach sélectionné
+      const coach = allCoaches.find(co => String(co.id || co.docId) === String(activeCoachId)) || allCoaches[0];
+      if (coach && !activeCoachId) {
+        activeCoachId = coach.id || coach.docId;
+      }
+
+      if (!coach) {
+        workspace.innerHTML = `<div class="card" style="padding:40px; text-align:center;" class="muted">Sélectionnez un coach.</div>`;
+        return;
+      }
+
+      const assignedComps = allComps.filter(c => {
+        const ids = (c.coach_ids || []).map(String);
+        const names = (c.coaches || []).map(s => String(s).toLowerCase());
+        return ids.includes(String(coach.id || coach.docId)) || names.includes(String(coach.nom || "").toLowerCase());
+      });
+
+      workspace.innerHTML = `
+        <div class="card" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div style="font-size:18px; font-weight:800; color:#1E293B;">🏃 Coach : ${esc(coach.nom)}</div>
+              <p class="muted" style="margin:4px 0 0; font-size:12.5px;">Liste des épreuves suivies ou encadrées par cet entraîneur.</p>
+            </div>
+            ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-del-coach" style="color:var(--red); border-color:#FECACA;">🗑️ Retirer le coach</button>` : ""}
+          </div>
         </div>
 
-        <div class="data-table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Commande</th>
-                <th>Payeur</th>
-                <th>Athlète HelloAsso</th>
-                <th>Montant</th>
-                <th>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items.length ? items.map(item => `
-                <tr>
-                  <td class="cell-sub">${esc(fmtDay(item.order?.date) || "—")}</td>
-                  <td class="cell-sub"><b>${esc(item.order?.id || "—")}</b></td>
-                  <td>${esc(item.order?.payer?.name || item.order?.payer?.email || "—")}</td>
-                  <td class="cell-name">${esc(item.customFields?.[0]?.answer || item.name || "—")}</td>
-                  <td><b>${esc(item.amount ? (item.amount/100).toFixed(2) + " €" : "0 €")}</b></td>
-                  <td><span class="tag-badge" style="background:#16A34A22; color:#16A34A; border:1px solid #16A34A55;">Réglé</span></td>
-                </tr>
-              `).join("") : `<tr><td colspan="6" style="text-align:center; padding:30px;" class="muted">Aucun paiement HelloAsso synchronisé pour cette épreuve. Cliquez sur « Relancer la réconciliation ».</td></tr>`}
-            </tbody>
-          </table>
+        <div class="card" style="padding:16px;">
+          <h3 style="margin:0 0 12px; font-size:15px; color:#1E293B;">Épreuves encadrées (${assignedComps.length})</h3>
+          ${assignedComps.length ? `
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              ${assignedComps.map(c => {
+                const parts = c.participants || [];
+                const discColor = DISCIPLINE_COLORS[c.type] || "#2563EB";
+                return `
+                  <div class="card" style="margin:0; padding:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <b style="font-size:14px; color:#1E293B;">${esc(c.nom)}</b>
+                        <span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type || "Escalade")}</span>
+                      </div>
+                      <div class="muted" style="font-size:12px; margin-top:4px;">
+                        <span>📅 ${esc(fmtDay(c.date_competition) || "Non définie")}</span>
+                        ${c.lieu ? ` · <span>📍 ${esc(c.lieu)}</span>` : ""}
+                        · <span>👥 <b>${parts.filter(p => p.selectionne).length}</b> compétiteurs</span>
+                      </div>
+                    </div>
+                    <div>
+                      <button class="btn btn-muted btn-mini btn-goto-comp" data-cid="${esc(c.id || c.docId)}">🔍 Voir l'épreuve</button>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : `<div class="muted" style="text-align:center; padding:30px;">Aucune épreuve assignée à ce coach pour l'instant.</div>`}
         </div>
       `;
 
-      $("btn-sync-ha-tab")?.addEventListener("click", syncHelloAsso);
+      workspace.querySelectorAll(".btn-goto-comp").forEach(btn => {
+        btn.addEventListener("click", () => {
+          activeCompId = btn.dataset.cid;
+          switchMainSection("competitions");
+        });
+      });
+
+      $("btn-del-coach")?.addEventListener("click", async () => {
+        if (!confirm(`Supprimer le coach « ${coach.nom} » ?`)) return;
+        try {
+          await db.collection("coaches").doc(String(coach.id || coach.docId)).delete();
+          activeCoachId = null;
+          toast("🗑️ Coach supprimé.");
+        } catch (err) {
+          toast("❌ Erreur suppression : " + err.message);
+        }
+      });
     }
 
-    // ==========================================
-    // Onglet : Bilan financier
-    // ==========================================
-    function renderBilanTab(comp, pane) {
-      const parts = comp.participants || [];
-      const prix = Number(comp.prix || 0);
-      const nbInscrits = parts.filter(p => p.selectionne).length;
-      const nbPayes = parts.filter(p => p.statut_paiement === "paye").length;
-      const totalAttendu = nbInscrits * prix;
-      const totalEncaiss = nbPayes * prix;
-      const reste = totalAttendu - totalEncaiss;
-
-      pane.innerHTML = `
-        <div class="kpi-row" style="margin-bottom:16px;">
-          <div class="kpi-card">
-            <div class="kpi-val">${totalAttendu} €</div>
-            <div class="kpi-lbl">Total inscriptions attendues</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-val" style="color:#16A34A;">${totalEncaiss} €</div>
-            <div class="kpi-lbl">Total collecté HelloAsso</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-val" style="color:#DC2626;">${reste} €</div>
-            <div class="kpi-lbl">Reste à percevoir</div>
-          </div>
-        </div>
-
-        <div style="font-size:12.5px; color:#475569; line-height:1.6;">
-          • Tarif unitaire de l'épreuve : <b>${prix} €</b> par compétiteur.<br>
-          • Inscrits participants : <b>${nbInscrits}</b> athlètes.<br>
-          • Taux de recouvrement : <b>${nbInscrits ? Math.round((nbPayes / nbInscrits) * 100) : 0} %</b> des inscriptions réglées.
-        </div>
-      `;
-    }
+    $("btn-save-coach")?.addEventListener("click", async () => {
+      const nameInput = $("coach-new-name");
+      const name = (nameInput?.value || "").trim();
+      if (!name) {
+        toast("⚠️ Veuillez renseigner le nom du coach.");
+        return;
+      }
+      try {
+        await db.collection("coaches").add({
+          nom: name,
+          updated_at: new Date().toISOString()
+        });
+        nameInput.value = "";
+        toast("✅ Coach ajouté avec succès !");
+      } catch (err) {
+        toast("❌ Erreur ajout coach : " + err.message);
+      }
+    });
 
     // ==========================================
     // Synchronisation HelloAsso
@@ -961,7 +1714,6 @@ startBureau({
         return `<span class="tag-badge" style="background:#FFFFFF; border:1px solid #CBD5E1;">${esc(p.prenom)} ${esc(p.nom)} &lt;${esc(email)}&gt;</span>`;
       }).join("") || `<span class="muted">Aucun participant sélectionné.</span>`;
 
-      // Sélecteur de templates
       const sel = $("comp-email-template-select");
       sel.innerHTML = emailTemplates.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
       const defaultTmpl = emailTemplates.find(t => t.name.toLowerCase().includes("compétition") || t.name.toLowerCase().includes("competition")) || emailTemplates[0];
@@ -1043,7 +1795,7 @@ startBureau({
     });
 
     // ==========================================
-    // Export CSV
+    // Export CSV d'une compétition
     // ==========================================
     function exportCompCsv(comp) {
       const parts = comp.participants || [];

@@ -379,7 +379,9 @@ class TestBureauFiles(unittest.TestCase):
 
         # Éléments grand écran de la page bureau
         for elem in ("comps-list-container", "comp-workspace", "comp-search-input",
-                      "comp-form-modal", "comp-email-modal", "btn-add-comp"):
+                      "comp-form-modal", "comp-email-modal", "btn-add-comp",
+                      "btn-nav-comps", "btn-nav-helloasso", "btn-nav-bilan", "btn-nav-coachs",
+                      "section-competitions", "section-helloasso", "section-bilan", "section-coachs"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn("comp-layout", html)
         self.assertIn('apiFetch("/api/helloasso/sync"', html)
