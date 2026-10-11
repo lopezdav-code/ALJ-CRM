@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="18">
-<title>ALJ Escalade — Annuaire des adhérents (v18)</title>
+<meta name="alj-web-version" content="19">
+<title>ALJ Escalade — Annuaire des adhérents (v19)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,6 +16,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/runtime-config.js"></script>
+<script src="/static-web/alj-firebase.js"></script>
 <style>
   /* Charte identique à competitions.html */
   :root {
@@ -137,7 +139,7 @@
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v18</span></b>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v19</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
@@ -231,17 +233,8 @@
 "use strict";
 
 /* ===================== Firebase (Auth + Firestore) ===================== */
-const firebaseConfig = {
-  apiKey: "AIzaSyDtwH7A6XokZZjUcyoL83gx9ZjyuN4IJoQ",
-  authDomain: "smart-amplifier-510811-n6.firebaseapp.com",
-  projectId: "smart-amplifier-510811-n6",
-  storageBucket: "smart-amplifier-510811-n6.firebasestorage.app",
-  messagingSenderId: "796572126711",
-  appId: "1:796572126711:web:a827fd60c313ba2c46f2f2"
-};
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const fsdb = firebase.firestore();
+// Project configuration and emulator (dev): /static-web/alj-firebase.js
+const { auth, db: fsdb } = ALJFirebase.init();
 
 /* Base principale des adhérents (ex-database.db) : collections crm_<table>.
    L'annuaire reconstruit la vue v_adherents_legacy :

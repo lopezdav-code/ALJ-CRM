@@ -40,6 +40,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
+from infrastructure import runtime_env
+
 # Tables synchronisées (les tables legacy `adherents` / `adherents_seasons`,
 # remplacées par le schéma v2, ne sont pas migrées).
 TRACKED_TABLES = (
@@ -62,7 +64,6 @@ REFERENCES = {
     "orders": [("purchases", "order_id")],
     "purchases": [("purchase_options", "purchase_id")],
 }
-FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
 DEFAULT_PROJECT_ID = "smart-amplifier-510811-n6"
 
 
@@ -168,6 +169,8 @@ class RestStore:
     @property
     def project_id(self) -> str:
         if not self._project_id:
+            self._project_id = runtime_env.project_id_override()
+        if not self._project_id:
             try:
                 from infrastructure.firestore_client import FirestoreClient
                 self._project_id = FirestoreClient.get_project_id()
@@ -178,6 +181,9 @@ class RestStore:
     def _token(self) -> str:
         if self._token_provider:
             return self._token_provider()
+        emulator_tok = runtime_env.emulator_token()
+        if emulator_tok:
+            return emulator_tok
         env_tok = os.environ.get("ALJ_FIRESTORE_ACCESS_TOKEN", "").strip()
         if env_tok:
             return env_tok
@@ -187,6 +193,10 @@ class RestStore:
     @property
     def _root(self) -> str:
         return f"projects/{self.project_id}/databases/(default)/documents"
+
+    @property
+    def _base(self) -> str:
+        return f"{runtime_env.firestore_base_url()}/{self._root}"
 
     def _headers(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json"}
@@ -210,7 +220,7 @@ class RestStore:
         }
 
     def list_all(self, collection: str) -> List[Dict[str, Any]]:
-        url = f"{FIRESTORE_BASE_URL}/{self._root}/{collection}"
+        url = f"{self._base}/{collection}"
         out, token = [], None
         while True:
             params = {"pageSize": 300}
@@ -226,7 +236,7 @@ class RestStore:
                 return out
 
     def list_modified_since(self, collection: str, since: str) -> List[Dict[str, Any]]:
-        url = f"{FIRESTORE_BASE_URL}/{self._root}:runQuery"
+        url = f"{self._base}:runQuery"
         body = {"structuredQuery": {
             "from": [{"collectionId": collection}],
             "where": {"fieldFilter": {
@@ -243,7 +253,7 @@ class RestStore:
     def get_many(self, collection: str, doc_ids: Iterable[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         ids = list(dict.fromkeys(doc_ids))
         result: Dict[str, Optional[Dict[str, Any]]] = {}
-        url = f"{FIRESTORE_BASE_URL}/{self._root}:batchGet"
+        url = f"{self._base}:batchGet"
         for i in range(0, len(ids), 300):
             names = [f"{self._root}/{collection}/{d}" for d in ids[i:i + 300]]
             resp = self._request("POST", url, json={"documents": names})
@@ -258,7 +268,7 @@ class RestStore:
         return result
 
     def max_int_id(self, collection: str, field: str) -> int:
-        url = f"{FIRESTORE_BASE_URL}/{self._root}:runQuery"
+        url = f"{self._base}:runQuery"
         body = {"structuredQuery": {
             "from": [{"collectionId": collection}],
             "orderBy": [{"field": {"fieldPath": quote_field_path(field)}, "direction": "DESCENDING"}],
@@ -279,7 +289,7 @@ class RestStore:
         Retourne [{update_time, modified_at}] dans l'ordre."""
         if not writes:
             return []
-        url = f"{FIRESTORE_BASE_URL}/{self._root}:commit"
+        url = f"{self._base}:commit"
         body = []
         for w in writes:
             fields = {k: encode_value(v) for k, v in (w.get("fields") or {}).items()}
