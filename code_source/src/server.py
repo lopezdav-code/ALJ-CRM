@@ -50,12 +50,25 @@ from infrastructure.cloud_database import CloudDatabase
 from starlette.concurrency import run_in_threadpool
 
 
+# Routes that only read/write Firestore collections (competitions, coaches, projections,
+# HelloAsso mirror) through CompetitionFirestoreRepository: they never touch the SQLite
+# cache, so they must not wait for its refresh (a full rebuild after a cold start).
+FIRESTORE_ONLY_PREFIXES = ("/api/competitions", "/api/coaches", "/api/competition-members",
+                           "/api/helloasso/items")
+
+
+def uses_sqlite_cache(path: str) -> bool:
+    """True for the data routes served from the SQLite cache of the crm_* collections."""
+    if any(path == p or path.startswith(p + "/") for p in FIRESTORE_ONLY_PREFIXES):
+        return False
+    return path.startswith("/api/") or path in ("/map", "/pivot")
+
+
 async def cloud_db_middleware(request, call_next):
     """Base principale dans Firestore : le cache SQLite du serveur est mis à jour
     avant les routes de données, et les écritures sont envoyées juste après.
     Enregistré avant le contrôle d'accès : il ne s'exécute qu'après lui."""
-    path = request.url.path
-    relevant = path.startswith("/api/") or path in ("/map", "/pivot")
+    relevant = uses_sqlite_cache(request.url.path)
     # Cloud Run, or local dev on the emulator: the cache follows Firestore as in production
     server_mode = os.environ.get("K_SERVICE") or runtime_env.is_dev()
     if relevant and server_mode and CloudDatabase.is_enabled():

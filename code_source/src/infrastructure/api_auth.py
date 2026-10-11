@@ -12,7 +12,7 @@ Principe
   (admin / coach / lecture seule).
 - Toute route non publique exige au minimum le rôle « coach » ; certaines
   écritures exigent « admin » (fail-closed : une nouvelle route est protégée par
-  défaut).
+  défaut). Exception: reads listed in READONLY_READ_PREFIXES are open to readonly.
 
 Activation
 ----------
@@ -79,6 +79,9 @@ PUBLIC_PATHS = frozenset({
 })
 # Portail bureau et ressources communes : pages et scripts publics, données protégées.
 PUBLIC_PREFIXES = ("/annuaire", "/bureau", "/static-web")
+# Reads open to the readonly role (competitions view of the mobile app); every other
+# route still requires at least "coach".
+READONLY_READ_PREFIXES = ("/api/competitions", "/api/coaches", "/api/competition-members")
 
 
 class AuthError(Exception):
@@ -120,8 +123,11 @@ def required_role(method: str, path: str) -> Optional[str]:
         path = path.rstrip("/")
     if path in PUBLIC_PATHS:
         return None
-    if any(path == p or path.startswith(p + "/") for p in PUBLIC_PREFIXES):
+    if any(path == prefix or path.startswith(prefix + "/") for prefix in PUBLIC_PREFIXES):
         return None
+    if method in ("GET", "HEAD") and any(path == ro_prefix or path.startswith(ro_prefix + "/")
+                                         for ro_prefix in READONLY_READ_PREFIXES):
+        return "readonly"
     if path == "/api/planning" and method not in ("GET", "HEAD"):
         return "admin"  # firestore.rules : planning modifiable par les admins
     if path.startswith("/api/attestations"):

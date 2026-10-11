@@ -89,6 +89,20 @@ class TestRoles(unittest.TestCase):
         self.assertEqual(r("GET", "/api/planning"), "coach")
         self.assertEqual(r("GET", "/annuaire-pirate"), "coach")
 
+    def test_readonly_reads(self):
+        """Competition views are readable by readonly; their writes and every other route are not."""
+        r = api_auth.required_role
+        for path in ("/api/competitions", "/api/competitions/123", "/api/coaches",
+                     "/api/competition-members"):
+            self.assertEqual(r("GET", path), "readonly", path)
+            self.assertEqual(r("HEAD", path), "readonly", path)
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            self.assertEqual(r(method, "/api/competitions/123"), "coach", method)
+            self.assertEqual(r(method, "/api/coaches"), "coach", method)
+        for path in ("/api/competitions-pirate", "/api/members", "/api/helloasso/items",
+                     "/api/email-templates"):
+            self.assertEqual(r("GET", path), "coach", path)
+
     def test_roles_for_claims(self):
         f = api_auth.roles_for_claims
         self.assertEqual(f({"email": "Bureau@ALJ-Escalade.fr", "email_verified": True}),
@@ -192,6 +206,16 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
         self.assertEqual(self.get("/docs").status_code, 401)
         self.assertEqual(self.client.post("/api/send-email", json={}).status_code, 401)
         self.assertEqual(self.client.post("/api/helloasso/sync").status_code, 401)
+
+    def test_readonly_role_end_to_end(self):
+        """Readonly passes the auth check on competition reads (404: no route yet) and nowhere else."""
+        readonly = make_token(email="muah.did@gmail.com")
+        self.assertEqual(self.get("/api/competitions", readonly).status_code, 404)
+        self.assertEqual(self.get("/api/email-status", readonly).status_code, 403)
+        r = self.client.post("/api/competitions", json={}, headers={"Authorization": f"Bearer {readonly}"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.get("/api/competitions", make_token(email="pirate@gmail.com")).status_code, 403)
+        self.assertEqual(self.get("/api/competitions").status_code, 401)
 
     def test_planning_write_requires_admin(self):
         coach = make_token(email="stephane.loridant@orange.fr")

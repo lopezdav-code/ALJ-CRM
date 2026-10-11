@@ -46,7 +46,7 @@ class TestBureauFiles(unittest.TestCase):
         for name in ("index.html", "adherents.html", "outils.html"):
             self.assertTrue(os.path.exists(os.path.join(BUREAU, name)), name)
         for name in ("alj.css", "alj-core.js", "alj-shell.js", "alj-vue.js",
-                      "alj-members.js", "alj-filters.js"):
+                      "alj-members.js", "alj-filters.js", "alj-sync.js"):
             self.assertTrue(os.path.exists(os.path.join(SHARED, name)), name)
 
     def test_routes_serve_only_known_pages(self):
@@ -82,7 +82,8 @@ class TestBureauFiles(unittest.TestCase):
         for asset in ("/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/planning", "/bureau/outils", "/bureau/parametres",
                       "/static-web/alj.css", "/static-web/alj-core.js",
                       "/static-web/alj-shell.js", "/static-web/alj-vue.js",
-                      "/static-web/alj-members.js", "/static-web/alj-filters.js"):
+                      "/static-web/alj-members.js", "/static-web/alj-filters.js",
+                      "/static-web/alj-sync.js"):
             self.assertIn(f'"{asset}"', sw)
 
     def test_planning_file_structure(self):

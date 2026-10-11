@@ -267,7 +267,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/presentation/test_presentation_
 ```
 La CI lance les tests Qt **en processus séparés** (crashs natifs sinon) ; `ruff check src tests` et `mypy` (limité à `schema_v2.py` et `constants.py`) sont bloquants. Les tests de la couche web/API (`test_bureau_web`, `test_mobile_pwa`, `test_api_security`, `test_cloud_run_lot4`, `test_helloasso_webhook`) ne nécessitent pas Qt — ce sont les plus utiles pour la migration. `test_ffme_golden_master` nécessite un fichier de référence local non versionné.
 
-**Déploiement web** : `code_source/deploy_cloud_run.sh` (ou `.bat`) → `gcloud run deploy alj-escalade-api --source . --memory 1Gi --min-instances 0 --max-instances 2 --timeout 300 --allow-unauthenticated` (l'auth est applicative). Règles Firestore : `firebase deploy --only firestore:rules` (`firebase.json`). Guide : `docs/guide_deploiement_cloud_run_helloasso.md`.
+**Déploiement web** : `code_source/deploy_cloud_run.sh` (ou `.bat`) → `gcloud run deploy alj-escalade-api --source . --memory 1Gi --min-instances 0 --max-instances 2 --session-affinity --timeout 300 --allow-unauthenticated` (l'auth est applicative). Règles Firestore : `firebase deploy --only firestore:rules` (`firebase.json`). Guide : `docs/guide_deploiement_cloud_run_helloasso.md`.
 
 **Release desktop** : tag `vX.Y.Z` → GitHub Actions (Windows) → zip portable + `SHA256SUMS`. Le tag, `VERSION` et `APP_VERSION` doivent être identiques (`build_release_assets.py --check-tag`).
 
