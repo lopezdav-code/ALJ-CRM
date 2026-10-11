@@ -17,6 +17,8 @@ encadrants_text / assign_lanes, puis export_planning_excel (openpyxl).
 import math
 import re
 
+from infrastructure.spreadsheet_safety import neutralize_formulas
+
 DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
 GRID_START = 9 * 60    # 9h00
 GRID_END = 22 * 60     # 22h00
@@ -267,6 +269,7 @@ def export_planning_excel(planning_data, saison, out_path):
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
+    neutralize_formulas(wb)
     wb.save(out_path)
     return out_path
 
@@ -337,5 +340,6 @@ def export_planning_list_excel(planning_data, saison, out_path):
         ws.column_dimensions[ws.cell(row=1, column=c).column_letter].width = min(42, max(10, longest + 2))
     ws.freeze_panes = "A2"
 
+    neutralize_formulas(wb)
     wb.save(out_path)
     return out_path

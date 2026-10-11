@@ -560,7 +560,8 @@ class SqliteRepository:
             df = pd.DataFrame(excel_rows)
             # S'assurer que le dossier parent existe
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            df.to_excel(file_path, index=False)
+            from infrastructure.spreadsheet_safety import safe_to_excel
+            safe_to_excel(df, file_path, index=False)  # member data must never become a formula
             print(f"💾 [SQLITE] Base de données exportée avec succès vers Excel : {file_path}")
             return True
         except Exception as e:

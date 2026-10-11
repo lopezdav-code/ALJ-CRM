@@ -202,10 +202,12 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
             self.assertEqual(r.status_code, 200)
             save.assert_called_once()
 
-    def test_cors_preflight_not_blocked(self):
+    def test_cross_origin_preflight_not_approved(self):
+        """No CORS: a foreign site's preflight is never approved, and OPTIONS needs no token."""
         r = self.client.options("/api/send-email", headers={
             "Origin": "https://exemple.fr", "Access-Control-Request-Method": "POST"})
-        self.assertEqual(r.status_code, 200)
+        self.assertNotEqual(r.status_code, 401)
+        self.assertNotIn("access-control-allow-origin", r.headers)
 
     def test_auth_disabled_locally(self):
         with patch.dict(os.environ, {"ALJ_API_AUTH": "off"}):

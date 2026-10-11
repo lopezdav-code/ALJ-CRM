@@ -1,3 +1,4 @@
+import html as _html
 import os
 from paths import CODE_ROOT, ROOT_DIR, find_doc_template
 import re
@@ -255,13 +256,19 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                     with open(template_path_html, "r", encoding="utf-8") as f:
                         html_content = f.read()
                         
-                    html_content = html_content.replace("{Date du jour}", date_jour_fr)
-                    html_content = html_content.replace("{Nom payeur}", payer_last_format)
-                    html_content = html_content.replace("{prénom payeur}", payer_first_format)
-                    html_content = html_content.replace("{Nom adhérent}", user_last_format)
-                    html_content = html_content.replace("{Prénom adhérent}", user_first_format)
-                    html_content = html_content.replace("{Montant}", amount_str)
-                    html_content = html_content.replace("{Saison}", season)
+                    # Values come from member data (public HelloAsso form): escaped so they can
+                    # never inject markup (e.g. an <iframe src="file:///..."> rendered into the PDF)
+                    values = {
+                        "{Date du jour}": date_jour_fr,
+                        "{Nom payeur}": payer_last_format,
+                        "{prénom payeur}": payer_first_format,
+                        "{Nom adhérent}": user_last_format,
+                        "{Prénom adhérent}": user_first_format,
+                        "{Montant}": amount_str,
+                        "{Saison}": season,
+                    }
+                    for placeholder, value in values.items():
+                        html_content = html_content.replace(placeholder, _html.escape(str(value)))
                     
                     # Event loop pour l'asynchronisme de QtWebEngine
                     from PySide6.QtCore import QEventLoop, QUrl, QMarginsF
@@ -277,6 +284,10 @@ def generate_all_attestations(test_mode=False, output_format="pdf", participants
                             logo_path = os.path.join(root_dir, "logo.png")
                     base_url = QUrl.fromLocalFile(logo_path)
                     
+                    # The attestation template needs no script: JavaScript disabled for the render
+                    from PySide6.QtWebEngineCore import QWebEngineSettings
+                    web_page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, False)
+
                     loop = QEventLoop()
                     load_conn = web_page.loadFinished.connect(lambda ok: loop.quit())
                     web_page.setHtml(html_content, base_url)

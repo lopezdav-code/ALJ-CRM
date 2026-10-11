@@ -8,6 +8,7 @@ Fournit :
 
 import base64
 import datetime
+import html as _html
 import io
 import os
 import re
@@ -153,13 +154,19 @@ def build_attestation(
         html = f.read()
 
     # 8. Remplacement des variables du modèle
-    html = html.replace("{Date du jour}", date_jour_fr)
-    html = html.replace("{Nom payeur}", payer_last)
-    html = html.replace("{prénom payeur}", payer_first)
-    html = html.replace("{Nom adhérent}", user_last)
-    html = html.replace("{Prénom adhérent}", user_first)
-    html = html.replace("{Montant}", amount_str)
-    html = html.replace("{Saison}", season)
+    # Values come from member data (public HelloAsso form) and the request body:
+    # escaped so they can never inject markup (e.g. a <link rel="attachment"> read by WeasyPrint).
+    values = {
+        "{Date du jour}": date_jour_fr,
+        "{Nom payeur}": payer_last,
+        "{prénom payeur}": payer_first,
+        "{Nom adhérent}": user_last,
+        "{Prénom adhérent}": user_first,
+        "{Montant}": amount_str,
+        "{Saison}": season,
+    }
+    for placeholder, value in values.items():
+        html = html.replace(placeholder, _html.escape(str(value)))
 
     # 9. Embarquement des images en base64 pour un HTML 100% autonome
     logo_path = _find_image_path("logo.png")
@@ -210,7 +217,7 @@ def _render_minimal_pdf_with_pydyf(html: str) -> bytes:
 
     def clean(txt):
         import unicodedata
-        return unicodedata.normalize("NFKD", str(txt or "")).encode("ascii", "ignore").decode("ascii").replace("(", "[").replace(")", "]")
+        return unicodedata.normalize("NFKD", _html.unescape(str(txt or ""))).encode("ascii", "ignore").decode("ascii").replace("(", "[").replace(")", "]")
 
     pdf = pydyf.PDF()
     font = pydyf.Dictionary({"Type": "/Font", "Subtype": "/Type1", "BaseFont": "/Helvetica"})
@@ -264,6 +271,26 @@ def render_attestation_pdf(html: str) -> bytes:
     """
     try:
         from weasyprint import HTML
-        return HTML(string=html).write_pdf()
+        return HTML(string=html, url_fetcher=_data_uri_only_fetcher()).write_pdf()
     except (ImportError, OSError):
         return _render_minimal_pdf_with_pydyf(html)
+
+
+def _data_uri_only_fetcher():
+    """WeasyPrint URL fetcher limited to data: URIs (embedded logo and signature).
+
+    The attestation is self-contained: any other URL (file://, http://…) is refused,
+    so rendering can never read server files or reach the network.
+    """
+    from weasyprint import urls
+
+    if hasattr(urls, "URLFetcher"):  # WeasyPrint >= 66
+        return urls.URLFetcher(allowed_protocols={"data"})
+
+    from weasyprint import default_url_fetcher  # older versions: plain function
+
+    def fetch(url, *args, **kwargs):
+        if not str(url).lower().startswith("data:"):
+            raise ValueError(f"URL not allowed in an attestation: {url}")
+        return default_url_fetcher(url, *args, **kwargs)
+    return fetch

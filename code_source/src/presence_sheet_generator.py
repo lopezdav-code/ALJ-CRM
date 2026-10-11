@@ -8,6 +8,7 @@ from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.pagebreak import Break
 from paths import ROOT_DIR, find_doc_template
+from infrastructure.spreadsheet_safety import neutralize_formulas, template_formulas
 
 # Pictogramme compact remplaçant le mot "Autonomes" dans la colonne "Autorisation" (votre demande !)
 PICTO_AUTONOME = "🧗"
@@ -512,6 +513,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             ws.row_breaks.append(Break(id=row_offset))
         else:
             wb = openpyxl.load_workbook(template_path)
+            keep_formulas = template_formulas(wb)  # member data must never become a formula
             ws = wb.active
             row_offset = 0
             if same_sheet:
@@ -1017,6 +1019,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
             save_path = os.path.join(output_dir, save_filename)
             
             try:
+                neutralize_formulas(wb, keep_formulas)
                 wb.save(save_path)
                 wb.close()
             except PermissionError:
@@ -1052,6 +1055,7 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
         save_path = os.path.join(output_dir, save_filename)
         
         try:
+            neutralize_formulas(wb_single, keep_formulas)
             wb_single.save(save_path)
             wb_single.close()
         except PermissionError:

@@ -564,10 +564,12 @@ def generate_ffme_csv(participants_data, output_path=None):
         ]
         csv_rows.append(row)
         
+    from infrastructure.spreadsheet_safety import csv_safe
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, delimiter=";")
         writer.writerow(headers)
-        writer.writerows(csv_rows)
+        # Member data must never be evaluated as a formula when the file is opened
+        writer.writerows([[csv_safe(v) for v in row] for row in csv_rows])
         
     print(f"Fichier CSV FFME généré : {csv_path}")
     return ignored_members

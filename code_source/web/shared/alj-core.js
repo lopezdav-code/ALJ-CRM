@@ -22,6 +22,16 @@ export const READONLY_EMAILS = [
 export const COMPETITIONS_URL = "/competitions";
 export const WEB_VERSION = (document.querySelector('meta[name="alj-web-version"]') || {}).content || "?";
 
+/* ===================== CSV export ===================== */
+/* Member data comes from the public HelloAsso form: a value starting with = + - @ would be
+   evaluated as a formula when the CSV is opened in a spreadsheet. Same rule as
+   src/infrastructure/spreadsheet_safety.py (signed numbers and phone numbers are kept). */
+export function csvSafe(value) {
+  if (typeof value !== "string" || !/^[=+\-@\t\r]/.test(value)) return value;
+  if (/^[+-][\d\s().,]*$/.test(value)) return value;
+  return "'" + value;
+}
+
 /* ===================== Firebase ===================== */
 /* Configuration and emulator (dev): see alj-firebase.js. */
 export function initFirebase() {

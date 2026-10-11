@@ -2,6 +2,7 @@ import os
 import openpyxl
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from paths import ROOT_DIR
+from infrastructure.spreadsheet_safety import neutralize_formulas
 
 def clean_filename(name):
     """Nettoie le nom d'un groupe pour en faire un nom de fichier valide."""
@@ -214,6 +215,7 @@ def generate_urgency_contacts_sheet(participants_data):
     # 8. Sauvegarder le classeur Excel final
     save_filename = "Liste_Contacts_Urgence_ALJ.xlsx"
     save_path = os.path.join(output_dir, save_filename)
+    neutralize_formulas(wb)  # member data must never become a formula
     wb.save(save_path)
     wb.close()
     

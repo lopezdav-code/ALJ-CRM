@@ -2089,17 +2089,18 @@ class CompetitionsPage(QWidget):
         out_dir = os.path.join(ROOT_DIR, "exports")
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, f"bilan_competitions_{season}.csv")
+        from infrastructure.spreadsheet_safety import csv_safe
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f, separator=";")
+            writer = csv.writer(f, delimiter=";")
             writer.writerow(["Bilan des compétitions - Saison", season])
             writer.writerow([])
             writer.writerow(["Nom", "Prénom", "Licence FFME", "Tarif"] +
-                            [f"{c.nom} ({c.date_competition})" for c in comps])
+                            [csv_safe(f"{c.nom} ({c.date_competition})") for c in comps])
             for adherent_id, stu in students.items():
                 row = [stu.get("nom", ""), stu.get("prenom", ""),
                        stu.get("num_licence", ""), stu.get("tarif", "")]
                 row += [LIBELLES_STATUT_PAIEMENT.get(parts.get((adherent_id, c.id), ""), "") for c in comps]
-                writer.writerow(row)
+                writer.writerow([csv_safe(v) for v in row])  # member data never evaluated as a formula
         QMessageBox.information(self, "Export réussi", f"Bilan exporté :\n{path}")
 
     def on_bilan_row_clicked(self, row: int, col: int):

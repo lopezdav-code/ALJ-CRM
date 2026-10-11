@@ -1,4 +1,5 @@
 """Configuration pytest commune : sortie console en UTF-8 (émojis des modules applicatifs)."""
+import os
 import sys
 
 for _stream in (sys.stdout, sys.stderr):
@@ -21,3 +22,13 @@ _DEV_ENV_KEYS = ("ALJ_ENV", "FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_H
 def _production_environment(monkeypatch):
     for key in _DEV_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _test_client_host(monkeypatch):
+    """Starlette's TestClient sends `Host: testserver`: accepted by the local-server guard in tests only."""
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from infrastructure import api_auth
+    monkeypatch.setattr(api_auth, "LOCAL_HOSTS", api_auth.LOCAL_HOSTS | {"testserver"})
