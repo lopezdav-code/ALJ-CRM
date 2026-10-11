@@ -11,3 +11,5 @@ pillow==12.3.0
 PySide6==6.11.1
 keyring==25.7.0
 lxml==6.1.1
+# Pure-Python PDF fallback for attestations when WeasyPrint/Pango is unavailable (Windows)
+pydyf==0.12.1
