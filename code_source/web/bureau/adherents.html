@@ -807,6 +807,17 @@ startBureau({
         }
       }
 
+      // Tarifs permanents du club hors créneau (ex: licence seule)
+      const extraTarifs = [
+        { tarif: "Licence sèche", groupe: "Licence seule", details: "Sans créneau de cours" }
+      ];
+      for (const ex of extraTarifs) {
+        tarifsSet.add(ex.tarif);
+        if (!tarifDetails[ex.tarif]) {
+          tarifDetails[ex.tarif] = { groupe: ex.groupe, details: ex.details };
+        }
+      }
+
       const list = Array.from(tarifsSet).sort((a, b) => a.localeCompare(b, "fr"));
       return { list, tarifDetails };
     }

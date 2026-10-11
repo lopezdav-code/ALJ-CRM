@@ -67,6 +67,14 @@ class TestTarifUpdateRepository(unittest.TestCase):
         self.assertEqual(tarifs, sorted(set(tarifs)))
         self.assertIn("Adultes autonomes", tarifs)
         self.assertIn("Loisir - Enfants 2016-2018", tarifs)
+        self.assertIn("Licence sèche", tarifs)
+
+    def test_licence_seche_category(self):
+        if PYSIDE6_AVAILABLE:
+            from presentation.pages.members import get_tariff_category
+            self.assertEqual(get_tariff_category("Licence sèche"), "Licence seule")
+            self.assertEqual(get_tariff_category("Licence seche"), "Licence seule")
+            self.assertEqual(get_tariff_category("Licence seule FFME"), "Licence seule")
 
     def test_update_member_tarif(self):
         self._seed(["Loisir - Enfants 2016-2018", "Loisir - Collège"])

@@ -487,7 +487,9 @@ def get_tariff_category(tarif_name: str) -> str:
     if not tarif_name:
         return "Autre"
     t_lower = tarif_name.lower()
-    if "autonome" in t_lower:
+    if "licence" in t_lower or "seche" in t_lower or "sèche" in t_lower:
+        return "Licence seule"
+    elif "autonome" in t_lower:
         return "Séance autonome"
     elif "compétition" in t_lower or "compet" in t_lower:
         return "Compétition"
@@ -507,7 +509,7 @@ def build_tarif_groups(members_list):
         else:
             groups.setdefault(get_tariff_category(t), []).append(t)
 
-    order = ["Séance autonome", "Cours", "Compétition", "Autre"]
+    order = ["Séance autonome", "Cours", "Compétition", "Licence seule", "Autre"]
     ordered_groups = [(g, groups[g]) for g in order if g in groups] + \
                      [(g, groups[g]) for g in groups if g not in order]
 

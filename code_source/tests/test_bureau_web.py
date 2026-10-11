@@ -331,6 +331,7 @@ class TestBureauFiles(unittest.TestCase):
         self.assertEqual(res.get("status"), "success")
         self.assertIn("tarifs", res)
         self.assertIsInstance(res["tarifs"], list)
+        self.assertIn("Licence sèche", res["tarifs"])
 
     def test_outils_page_tabs_and_iframes_wiring(self):
         """La page outils.html contient les onglets Carte et TCD."""

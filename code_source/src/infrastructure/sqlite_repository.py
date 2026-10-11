@@ -708,10 +708,14 @@ class SqliteRepository:
                 WHERE s.name = ? AND p.tarif_name IS NOT NULL AND TRIM(p.tarif_name) != ''
                 ORDER BY p.tarif_name ASC
             """, (season_name,))
-            return [r["tarif_name"].strip() for r in cursor.fetchall()]
+            db_tarifs = [r["tarif_name"].strip() for r in cursor.fetchall()]
+            from domain.constants import DEFAULT_EXTRA_TARIFS
+            combined = set(db_tarifs) | set(DEFAULT_EXTRA_TARIFS)
+            return sorted(combined)
         except Exception as e:
             print(f"❌ [SQLITE] Erreur lors du chargement des tarifs de la saison {season_name} : {e}")
-            return []
+            from domain.constants import DEFAULT_EXTRA_TARIFS
+            return list(DEFAULT_EXTRA_TARIFS)
         finally:
             conn.close()
 
