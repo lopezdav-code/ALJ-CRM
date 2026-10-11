@@ -46,6 +46,10 @@ export function startBureau({ page, title, onReady }) {
           <h1>${esc(title)}</h1>
           <span class="sync" id="sync-info"></span>
         </header>
+        <div id="google-auth-warning" style="display:none; margin-bottom:14px; background:#FEF2F2; border:1px solid #FCA5A5; border-radius:10px; padding:10px 14px; color:#991B1B; font-size:13px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <span>⚠️ <b>Accès Google & BDD suspendus :</b> Le jeton de connexion Google du club a expiré ou a été révoqué.</span>
+          <a href="/api/auth/google/login?return_to=${encodeURIComponent(location.pathname)}" class="btn btn-primary btn-mini" style="background:#DC2626; color:#fff; text-decoration:none;">🔄 Renouveler l'accès</a>
+        </div>
         <section class="gate card" id="gate" hidden></section>
         <div id="content" hidden></div>
       </div>
@@ -99,6 +103,15 @@ export function startBureau({ page, title, onReady }) {
     if (readyUid !== user.uid) {
       readyUid = user.uid;
       onReady({ user, role, isAdmin: role === "admin", claims });
+      // Vérification asynchrone et discrète de l'état du jeton Google du club
+      try {
+        apiFetch("/api/auth/google/status").then(r => r.ok ? r.json() : null).then(data => {
+          const warn = $("google-auth-warning");
+          if (warn && data) {
+            warn.style.display = data.status === "expired" ? "flex" : "none";
+          }
+        }).catch(() => {});
+      } catch (e) {}
     }
   });
 

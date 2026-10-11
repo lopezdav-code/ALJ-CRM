@@ -63,6 +63,33 @@ class GoogleDriveClient:
         return candidates
 
     @classmethod
+    def get_client_credentials(cls) -> tuple:
+        """Récupère client_id et client_secret depuis SecretStore ou les fichiers client_secret_*.json."""
+        cid = SecretStore.get_secret("GMAIL_CLIENT_ID")
+        sec = SecretStore.get_secret("GMAIL_CLIENT_SECRET")
+        if cid and sec:
+            return cid, sec
+
+        import glob
+        import json
+        from paths import CODE_ROOT, ROOT_DIR
+        for folder in (CODE_ROOT, ROOT_DIR):
+            for pattern in ("client_secret_*.json", "client_secret*.json"):
+                files = glob.glob(os.path.join(folder, pattern))
+                for fpath in files:
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        key = "installed" if "installed" in data else ("web" if "web" in data else None)
+                        if key and "client_id" in data[key] and "client_secret" in data[key]:
+                            cid = data[key]["client_id"]
+                            sec = data[key]["client_secret"]
+                            return cid, sec
+                    except Exception:
+                        pass
+        return cid, sec
+
+    @classmethod
     def get_access_token(cls, env_paths: list = None) -> str:
         """Récupère un access token d'API Google à partir du refresh token.
 
@@ -90,6 +117,10 @@ class GoogleDriveClient:
                 continue
 
             if response.status_code == 200:
+                resp_json = response.json()
+                new_refresh = resp_json.get("refresh_token")
+                if new_refresh and new_refresh != refresh_token:
+                    SecretStore.set_secret("GMAIL_REFRESH_TOKEN", new_refresh)
                 if idx > 0:
                     # Auto-réparation : le candidat de repli fonctionne, le stockage sécurisé
                     # (keyring) contenait donc un refresh token révoqué -> on le remet à jour.
@@ -101,7 +132,7 @@ class GoogleDriveClient:
                     ):
                         SecretStore.set_secret(key, value)
                     print("✅ [DRIVE] Identifiants Google réparés : le token valide est de nouveau actif.")
-                return response.json().get("access_token", "")
+                return resp_json.get("access_token", "")
 
             last_error = f"{response.status_code} - {response.text}"
 
