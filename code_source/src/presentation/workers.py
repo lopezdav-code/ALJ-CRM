@@ -277,6 +277,9 @@ class SendEmailCampaignWorker(QThread):
             # compétition {no_competition}/{name_competition}/{montant_competition}.
             subject_rendered = apply_template_variables(self.subject, m, self.competition_context)
             msg_body = apply_template_variables(self.body, m, self.competition_context)
+            # HTML part: built from the unpersonalised template, then personalised with escaped
+            # values (member data comes from the public HelloAsso form and must never add markup)
+            html_template = self.body or ""
             qr_path = None
             qr_status_msg = "⚠️ QRCode non joint (Option désactivée)" if not self.attach_whatsapp else "⚠️ QRCode non joint (Aucun créneau correspondant)"
             
@@ -330,6 +333,7 @@ class SendEmailCampaignWorker(QThread):
                                 )
                             
                             msg_body += formatted_text
+                            html_template += formatted_text
                             
                             # Télécharger / Générer le QRCode du groupe WhatsApp si absent
                             import urllib.parse
@@ -376,7 +380,9 @@ class SendEmailCampaignWorker(QThread):
                 # 4. Préparer les versions texte brut et HTML (avec signature du club optionnelle)
                 from email_html import build_email_html, build_signature_plain, get_inline_images
                 plain_body = msg_body
-                html_body = build_email_html(msg_body, add_signature=self.add_signature, image_src_mode="cid")
+                html_body = apply_template_variables(
+                    build_email_html(html_template, add_signature=self.add_signature, image_src_mode="cid"),
+                    m, self.competition_context, escape_html=True)
                 inline_imgs = None
                 if self.add_signature:
                     plain_body = msg_body + "\n\n" + build_signature_plain()
@@ -583,7 +589,8 @@ class ExportWorker(QThread):
                 
                 dest_file = os.path.join(ROOT_DIR, "exports", "Anciens_Adherents_Non_Reinscrits.xlsx")
                 os.makedirs(os.path.dirname(dest_file), exist_ok=True)
-                df.to_excel(dest_file, index=False)
+                from infrastructure.spreadsheet_safety import safe_to_excel
+                safe_to_excel(df, dest_file, index=False)  # member data must never become a formula
                 
                 self.progress.emit("Liste des anciens adhérents exportée avec succès !", 100)
                 self.finished.emit(True, f"La liste des {len(excel_rows)} anciens adhérents non réinscrits a été générée.", dest_file)

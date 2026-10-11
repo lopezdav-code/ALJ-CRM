@@ -80,7 +80,8 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "Rapport_Donnees_Manquantes_FFME.xlsx")
     df = pd.DataFrame(rows)
-    df.to_excel(out_path, index=False)
+    from infrastructure.spreadsheet_safety import safe_to_excel
+    safe_to_excel(df, out_path, index=False)  # member data must never become a formula
     print(f"📋 {len(rows)} fiche(s) à compléter -> {out_path}")
     return out_path
 

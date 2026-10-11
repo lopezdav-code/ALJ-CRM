@@ -12,9 +12,8 @@ if _src_dir not in sys.path:
 
 from typing import Optional
 
-from fastapi import FastAPI, Body, BackgroundTasks, Query
+from fastapi import FastAPI, Body, BackgroundTasks, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
 
 # Importer les fonctions de notre script existant
 from helloasso_api import get_campaigns, get_items
@@ -24,6 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from domain.constants import get_active_season, APP_VERSION
+from domain.utils import json_for_script
 from infrastructure.secret_store import SecretStore
 from infrastructure import runtime_env
 
@@ -43,10 +43,9 @@ def get_target_slug():
 
 app = FastAPI(title="Admin Escalade API")
 
-# Contrôle d'accès (jeton Firebase + rôles de firestore.rules) : actif sur Cloud Run
-# et dans l'image Docker (ALJ_API_AUTH=required), désactivé pour le serveur local
-# de l'application de bureau. Enregistré AVANT le CORS pour que les pré-vols
-# OPTIONS soient traités par le middleware CORS (le plus externe).
+# Access control (Firebase token + firestore.rules roles): enforced on Cloud Run and in the
+# Docker image (ALJ_API_AUTH=required), off for the desktop app's local server, which is
+# protected by local_guard_middleware instead (loopback hosts, same-origin writes).
 from infrastructure.cloud_database import CloudDatabase
 from starlette.concurrency import run_in_threadpool
 
@@ -69,8 +68,37 @@ async def cloud_db_middleware(request, call_next):
 
 app.middleware("http")(cloud_db_middleware)
 
-from infrastructure.api_auth import auth_middleware
+from infrastructure.api_auth import auth_middleware, local_guard_middleware
 app.middleware("http")(auth_middleware)
+# Unauthenticated local server only accepts loopback hosts and same-origin writes
+app.middleware("http")(local_guard_middleware)
+
+
+async def security_headers_middleware(request, call_next):
+    """Baseline browser protections on every response (including errors from the guards)."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    # Pages may only be framed by the site itself (clickjacking); srcdoc frames are unaffected
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'")
+    return response
+
+
+app.middleware("http")(security_headers_middleware)  # outermost
+
+GENERIC_ERROR = "Erreur interne du serveur (détails dans les journaux)."
+
+
+def internal_error(e: Exception, where: str) -> str:
+    """Logs the exception server-side; the client only gets a generic message
+    (no paths, SQL or third-party details, notably on the public webhook)."""
+    print(f"❌ [{where}] {type(e).__name__}: {e}")
+    return GENERIC_ERROR
+
+
+def client_error(e: Exception, where: str) -> str:
+    """Validation errors (ValueError) are meant for the user; anything else stays generic."""
+    return str(e) if isinstance(e, ValueError) else internal_error(e, where)
 
 def geocode_missing_addresses(addresses: List[str]):
     """Géocode les adresses manquantes en tâche de fond avec limitation stricte de débit."""
@@ -102,14 +130,8 @@ def geocode_missing_addresses(addresses: List[str]):
         CloudDatabase.flush_only()
     print("🌍 [GEOCODING] Tâche de fond terminée.")
 
-# Autoriser le frontend local à communiquer avec l'API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS: every page calls the API from its own origin. Allowing other origins would let any
+# website read the local (unauthenticated) desktop server.
 
 @app.get("/api/dashboard")
 def get_dashboard_data(background_tasks: BackgroundTasks = None, force_refresh: bool = False):
@@ -370,7 +392,7 @@ def get_sqlite_map_data(background_tasks: BackgroundTasks = None) -> List[Dict[s
 def get_map(background_tasks: BackgroundTasks):
     """Renvoie la page de cartographie Leaflet interactive branchée sur SQLite."""
     map_points = get_sqlite_map_data(background_tasks)
-    map_points_json = json.dumps(map_points, ensure_ascii=False)
+    map_points_json = json_for_script(map_points)
 
     html_content = """<!DOCTYPE html>
 <html>
@@ -380,8 +402,8 @@ def get_map(background_tasks: BackgroundTasks):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <!-- CDN Leaflet -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <!-- CDN Leaflet MarkerCluster -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
@@ -542,6 +564,10 @@ def get_map(background_tasks: BackgroundTasks):
         // Injecter les données de cartographie générées côté serveur
         const mapData = {MAP_DATA_JSON};
 
+        // Member data comes from the public HelloAsso form: always escaped before HTML insertion
+        const escHtml = s => (s == null ? "" : String(s)).replace(/[&<>"']/g,
+            c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
         // Fermer le menu si clic en dehors
         let expanded = false;
         document.addEventListener('click', function(event) {
@@ -580,7 +606,13 @@ def get_map(background_tasks: BackgroundTasks):
 
         Array.from(allGroups).sort().forEach(group => {
             const label = document.createElement('label');
-            label.innerHTML = `<input type="checkbox" class="group-checkbox" value="${group}" checked onchange="applyFilter(event)"> ${group}`;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'group-checkbox';
+            cb.value = group;
+            cb.checked = true;
+            cb.addEventListener('change', applyFilter);
+            label.append(cb, ' ' + group);
             checkboxesContainer.appendChild(label);
         });
 
@@ -637,9 +669,9 @@ def get_map(background_tasks: BackgroundTasks):
                     // Contenu du Popup stylisé
                     const popupContent = `
                         <div class="popup-title">${membersToDisplay.length} Adhérent${membersToDisplay.length > 1 ? 's' : ''}</div>
-                        <div class="popup-address">📍 ${point.address}</div>
+                        <div class="popup-address">📍 ${escHtml(point.address)}</div>
                         <ul class="popup-members-list">
-                            ${membersToDisplay.map(name => `<li>${name}</li>`).join('')}
+                            ${membersToDisplay.map(name => `<li>${escHtml(name)}</li>`).join('')}
                         </ul>
                     `;
 
@@ -754,7 +786,7 @@ def get_pivot_table(season: str = "Toutes les saisons"):
                 "Mois d'Inscription": month_iso or "Inconnue",
             })
             
-        pivot_data_json = json.dumps(pivot_records, ensure_ascii=False)
+        pivot_data_json = json_for_script(pivot_records)
     except Exception as ex:
         print(f"⚠️ Erreur lors de la préparation des données TCD : {ex}")
         pivot_data_json = "[]"
@@ -883,7 +915,7 @@ def get_planning():
     try:
         return SqliteRepository.load_planning_data()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": internal_error(e, "get_planning")}
 
 # Fichiers web statiques (annuaire, logo...) également servis sous /annuaire/.
 # L'annuaire lit la base des adhérents dans Firestore (connexion Google du coach).
@@ -1024,7 +1056,7 @@ def update_planning(planning_data: List[Dict[str, Any]] = Body(...)):
         SqliteRepository.save_planning_data(planning_data)
         return {"status": "success", "message": "Planning mis à jour"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": internal_error(e, "update_planning")}
 
 
 # --------------------------------------------------------------------------
@@ -1063,7 +1095,7 @@ async def webhook_helloasso(payload: Dict[str, Any] = Body(...),
         print(f"⛔ [WEBHOOK_HELLOASSO] Notification refusée ({e.status_code}) : {e.message}")
         return JSONResponse({"status": "rejected", "message": e.message}, status_code=e.status_code)
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": internal_error(e, "webhook_helloasso")}
 
 
 @app.get("/api/email-templates")
@@ -1072,7 +1104,7 @@ def get_email_templates():
     try:
         return {"status": "success", "templates": EmailDispatchService.list_templates()}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": internal_error(e, "get_email_templates")}
 
 
 @app.post("/api/email-templates")
@@ -1115,7 +1147,7 @@ def save_email_template_api(data: Dict[str, Any] = Body(...)):
             }
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "save_email_template_api")})
 
 
 @app.delete("/api/email-templates/{template_name}")
@@ -1134,7 +1166,7 @@ def delete_email_template_api(template_name: str):
 
         return {"status": "success", "message": f"Modèle '{clean_name}' supprimé avec succès."}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "delete_email_template_api")})
 
 
 @app.get("/api/whatsapp-template")
@@ -1145,7 +1177,7 @@ def get_whatsapp_template_api():
         text = SqliteRepository.get_whatsapp_template()
         return {"status": "success", "template": text or ""}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "get_whatsapp_template_api")})
 
 
 @app.post("/api/whatsapp-template")
@@ -1159,7 +1191,7 @@ def save_whatsapp_template_api(data: Dict[str, Any] = Body(...)):
             return JSONResponse(status_code=500, content={"status": "error", "message": "Impossible d'enregistrer le texte WhatsApp."})
         return {"status": "success", "message": "Texte WhatsApp enregistré avec succès.", "template": text}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "save_whatsapp_template_api")})
 
 
 @app.post("/api/preview-email")
@@ -1176,7 +1208,7 @@ def preview_email(data: Dict[str, Any] = Body(...)):
         )
         return {"status": "success", "preview": preview_data}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": internal_error(e, "preview_email")}
 
 
 @app.get("/api/email-status")
@@ -1202,8 +1234,15 @@ def get_email_status():
 
 
 @app.post("/api/send-email")
-def send_email_api(data: Dict[str, Any] = Body(...)):
+def send_email_api(request: Request, data: Dict[str, Any] = Body(...)):
     """Déclenche l'envoi d'e-mails sécurisé via Gmail API ou SMTP avec injection de variables."""
+    from infrastructure.api_auth import has_role
+    claims = getattr(request.state, "user", None)  # None: token check off (local desktop server)
+    reason = EmailDispatchService.unauthorized_send_reason(
+        data.get("recipients"), data.get("sender_email"),
+        is_admin=claims is None or has_role(claims, "admin"))
+    if reason:
+        return JSONResponse(status_code=403, content={"status": "error", "message": reason})
     try:
         result = EmailDispatchService.dispatch_emails(
             template_name=data.get("template_name"),
@@ -1218,7 +1257,7 @@ def send_email_api(data: Dict[str, Any] = Body(...)):
         )
         return result
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": internal_error(e, "send_email_api")}
 
 
 @app.post("/api/helloasso/sync")
@@ -1260,7 +1299,7 @@ def sync_helloasso_api():
             }
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": internal_error(e, "sync_helloasso_api")}
 
 
 # --------------------------------------------------------------------------
@@ -1289,7 +1328,7 @@ def preview_attestation_api(data: Dict[str, Any] = Body(...)):
             headers={"Content-Disposition": f'inline; filename="{filename}"'}
         )
     except Exception as e:
-        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=400, content={"status": "error", "message": client_error(e, "preview_attestation_api")})
 
 
 @app.post("/api/attestations/send")
@@ -1329,11 +1368,17 @@ def send_attestation_api(data: Dict[str, Any] = Body(...)):
         body = apply_template_variables(raw_body, member)
 
         sender_email = data.get("sender_email") or (tmpl.get("sender_email") if tmpl else None) or "inscription@alj-escalade.fr"
+        if not EmailDispatchService.is_allowed_sender(sender_email):
+            return JSONResponse(status_code=403, content={
+                "status": "error", "message": f"Adresse d'expédition non autorisée : {sender_email}"})
         sender_name = data.get("sender_name") or (tmpl.get("sender_name") if tmpl else None) or "Amicale Laïque Jonage - Inscriptions"
 
         add_signature = data.get("add_signature", True)
         from email_html import build_email_html, build_signature_plain, get_inline_images
-        html_body = build_email_html(body, add_signature=add_signature, image_src_mode="cid") if add_signature else None
+        # HTML built from the template, then personalised with escaped values
+        html_body = apply_template_variables(
+            build_email_html(raw_body, add_signature=True, image_src_mode="cid"), member, escape_html=True
+        ) if add_signature else None
         plain_body = body + ("\n\n" + build_signature_plain() if add_signature else "")
         inline_images = get_inline_images() if add_signature else []
 
@@ -1374,7 +1419,7 @@ def send_attestation_api(data: Dict[str, Any] = Body(...)):
             "filename": filename_pdf
         }
     except Exception as e:
-        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=400, content={"status": "error", "message": client_error(e, "send_attestation_api")})
 
 
 @app.get("/api/season-tarifs")
@@ -1387,7 +1432,7 @@ def get_season_tarifs_api(season: Optional[str] = None):
         tarifs = SqliteRepository.get_season_tarifs(target_season)
         return {"status": "success", "season": target_season, "tarifs": tarifs}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "get_season_tarifs_api")})
 
 
 @app.post("/api/members/update")
@@ -1423,7 +1468,7 @@ def update_member_api(data: Dict[str, Any] = Body(...)):
             "fields": fields
         }
     except Exception as e:
-        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=400, content={"status": "error", "message": internal_error(e, "update_member_api")})
 
 
 if __name__ == "__main__":

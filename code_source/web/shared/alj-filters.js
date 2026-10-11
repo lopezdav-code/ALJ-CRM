@@ -2,6 +2,7 @@
    Extrait et adapté de l'annuaire pour le portail bureau web (ordinateur). */
 
 import { normKey, fmtDay, normalizeStatus } from "/static-web/alj-members.js";
+import { csvSafe } from "/static-web/alj-core.js";
 
 export const FILTER_KEY = "alj_bureau_adherents_filters";
 
@@ -211,7 +212,7 @@ export function exportMembersCsv(members, seasonName) {
 
   const escapeCsv = val => {
     if (val == null) return "";
-    const s = String(val).replace(/"/g, '""');
+    const s = String(csvSafe(String(val))).replace(/"/g, '""');
     return `"${s}"`;
   };
 

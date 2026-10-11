@@ -7,6 +7,7 @@ import openpyxl
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 
 from paths import ROOT_DIR, CODE_ROOT
+from infrastructure.spreadsheet_safety import neutralize_formulas, template_formulas
 
 # Configuration paths
 TEMPLATE_DIR = os.path.join(CODE_ROOT, "doc", "template")
@@ -263,6 +264,7 @@ def main():
     # Load workbook
     try:
         wb = openpyxl.load_workbook(COURS_PATH)
+        keep_formulas = template_formulas(wb)  # template formulas kept, member data never becomes one
         ws = wb['Feuil1']
     except Exception as e:
         print(f"❌ [ERREUR] Impossible de charger le fichier {new_filename} : {e}")
@@ -577,6 +579,7 @@ def main():
 
     # Save Excel changes
     try:
+        neutralize_formulas(wb, keep_formulas)
         wb.save(COURS_PATH)
         print(f"🎉 Fichier Excel enregistré avec succès : {os.path.basename(COURS_PATH)}")
     except Exception as e:

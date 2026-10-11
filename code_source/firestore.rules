@@ -7,14 +7,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Email-based roles only for a verified address (always the case with Google sign-in):
+    // an unverified account named like a club address must never get a role.
+    function hasVerifiedEmail() {
+      return request.auth.token.email_verified == true;
+    }
+
     // Vérifie si l'utilisateur est administrateur (custom claim, domaine du club ou liste autorisée)
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.admin == true ||
-        request.auth.token.email.matches('.*@alj-escalade\\.fr$') ||
-        request.auth.token.email in [
-          'lopez.dav@gmail.com'
-        ]
+        (hasVerifiedEmail() && (
+          request.auth.token.email.matches('.*@alj-escalade\\.fr$') ||
+          request.auth.token.email in [
+            'lopez.dav@gmail.com'
+          ]
+        ))
       );
     }
 
@@ -23,9 +31,9 @@ service cloud.firestore {
       return isAuthenticated() && (
         isAdmin() ||
         request.auth.token.coach == true ||
-        request.auth.token.email in [
+        (hasVerifiedEmail() && request.auth.token.email in [
           'stephane.loridant@orange.fr'
-        ]
+        ])
       );
     }
 
@@ -33,11 +41,11 @@ service cloud.firestore {
     function isReadOnly() {
       return isAuthenticated() && (
         request.auth.token.readonly == true ||
-        request.auth.token.email in [
+        (hasVerifiedEmail() && request.auth.token.email in [
           'muah.did@gmail.com',
           'clement.dlf78@gmail.com',
           'delphine0910@gmail.com'
-        ]
+        ])
       );
     }
 

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="alj-web-version" content="19">
-<title>ALJ Escalade — Bureau · Compétitions (v19)</title>
+<meta name="alj-web-version" content="20">
+<title>ALJ Escalade — Bureau · Compétitions (v20)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🏆</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -145,8 +145,7 @@
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { initFirebase, apiFetch } from "/static-web/alj-core.js";
-import { fmtDay } from "/static-web/alj-members.js";
+import { initFirebase, apiFetch, csvSafe } from "/static-web/alj-core.js";
 
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = id => document.getElementById(id);
@@ -1082,7 +1081,7 @@ startBureau({
         ]);
       }
 
-      const csvContent = "\uFEFF" + rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+      const csvContent = "\uFEFF" + rows.map(r => r.map(cell => `"${String(csvSafe(String(cell))).replace(/"/g, '""')}"`).join(";")).join("\r\n");
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

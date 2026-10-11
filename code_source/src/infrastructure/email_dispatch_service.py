@@ -23,6 +23,54 @@ from email_html import build_email_html, build_signature_plain, get_inline_image
 class EmailDispatchService:
     """Service d'orchestration pour l'envoi d'e-mails personnalisés."""
 
+    # Sender addresses: club domain or the configured sending account
+    CLUB_SENDER_DOMAIN = "alj-escalade.fr"
+
+    @classmethod
+    def is_allowed_sender(cls, sender_email: Optional[str]) -> bool:
+        """An empty sender (default account) or a club / configured address."""
+        from infrastructure.secret_store import SecretStore
+        email = (sender_email or "").strip().lower()
+        if not email:
+            return True
+        configured = {(SecretStore.get_secret(k) or "").strip().lower()
+                      for k in ("SMTP_FROM_EMAIL", "GMAIL_USER_EMAIL", "SMTP_USER")}
+        return email.endswith("@" + cls.CLUB_SENDER_DOMAIN) or email in configured - {""}
+
+    @classmethod
+    def known_member_emails(cls) -> set:
+        """Every member and payer address known to the club database (lower-cased)."""
+        SqliteRepository.setup_database()
+        conn = SqliteRepository.get_connection()
+        emails = set()
+        for sql in ("SELECT email_primary, email_secondary FROM users", "SELECT payer_email FROM orders"):
+            for row in conn.execute(sql).fetchall():
+                emails.update(str(v).strip().lower() for v in tuple(row) if v)
+        try:
+            emails.update(str(a.get("email") or "").strip().lower() for a in CompetitionRepository.list_adherents())
+        except Exception as e:
+            print(f"⚠️ [EMAIL_DISPATCH] Competition members unavailable for the recipient check: {e}")
+        emails.discard("")
+        return emails
+
+    @classmethod
+    def unauthorized_send_reason(cls, recipients: Optional[List[Dict[str, Any]]],
+                                 sender_email: Optional[str], is_admin: bool) -> Optional[str]:
+        """Reason to refuse a send request (None = allowed).
+
+        Coaches may only write to known members / payers; nobody may send as a foreign
+        address. Stops a compromised account from mailing anyone from the club's account."""
+        if not cls.is_allowed_sender(sender_email):
+            return f"Adresse d'expédition non autorisée : {sender_email}"
+        if is_admin or not recipients:
+            return None
+        known = cls.known_member_emails()
+        unknown = sorted({str(recipient.get("email") or "").strip() for recipient in recipients
+                          if str(recipient.get("email") or "").strip().lower() not in known} - {""})
+        if unknown:
+            return f"Destinataire(s) inconnu(s) de la base adhérents : {', '.join(unknown[:5])}"
+        return None
+
     @classmethod
     def list_templates(cls) -> List[Dict[str, Any]]:
         """Retourne la liste des modèles d'e-mails disponibles en base SQLite."""
@@ -160,7 +208,10 @@ class EmailDispatchService:
         if add_signature:
             plain_text = body_rendered + "\n\n" + build_signature_plain()
 
-        html_text = build_email_html(body_rendered, add_signature=add_signature, image_src_mode="cid")
+        # HTML built from the template, then personalised with escaped values
+        html_text = apply_template_variables(
+            build_email_html(body_tmpl or "", add_signature=add_signature, image_src_mode="cid"),
+            dummy_recipient, comp_ctx, escape_html=True)
 
         return {
             "subject": subj_rendered,
@@ -251,7 +302,10 @@ class EmailDispatchService:
                 plain_body = body_rendered + "\n\n" + build_signature_plain()
                 inline_imgs = get_inline_images()
 
-            html_body = build_email_html(body_rendered, add_signature=add_signature, image_src_mode="cid")
+            # HTML built from the template, then personalised with escaped values
+            html_body = apply_template_variables(
+                build_email_html(body_tmpl or "", add_signature=add_signature, image_src_mode="cid"),
+                dest, comp_ctx, escape_html=True)
 
             try:
                 ok = EmailRepository.send_email(

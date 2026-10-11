@@ -1,6 +1,27 @@
+import html as _html
+import json
 import unicodedata
 from typing import Any
 import pandas as pd
+
+
+def sanitize_email_header(value: Any) -> str:
+    """E-mail header value without line breaks (header injection from member data)."""
+    return " ".join(str(value or "").splitlines()).strip()
+
+
+def json_for_script(obj: Any) -> str:
+    """JSON safe to embed inside an inline <script> block.
+
+    json.dumps does not escape `</script>` or `<!--`: a member value containing them
+    would end the script and inject markup. `<`, `>`, `&` and the JS line separators
+    are emitted as \\u escapes, which JSON.parse / JS literals decode back unchanged.
+    """
+    out = json.dumps(obj, ensure_ascii=False)
+    for char, escape in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
+                         (" ", "\\u2028"), (" ", "\\u2029")):
+        out = out.replace(char, escape)
+    return out
 
 def normalize_string(s) -> str:
     """
@@ -70,7 +91,8 @@ def clean_city_name(city_raw) -> str:
     return " ".join(c.split())
 
 
-def apply_template_variables(text: str, member: Any, competition_context: dict = None) -> str:
+def apply_template_variables(text: str, member: Any, competition_context: dict = None,
+                             escape_html: bool = False) -> str:
     """Remplace les variables de personnalisation {…} d'un sujet ou corps d'e-mail.
 
     Gère indifféremment un objet (ex: Member, SimpleNamespace) ou un dictionnaire :
@@ -78,6 +100,9 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
     - {num_licence} : licence FFME du destinataire ;
     - variables compétition : {no_competition}, {name_competition}, {montant_competition},
       {date_competition} (laissées telles quelles si absentes du contexte).
+
+    escape_html=True: values are HTML-escaped, for a template already converted to HTML
+    (member data comes from the public HelloAsso form and must never add markup).
     """
     if text is None:
         return ""
@@ -97,19 +122,20 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
         tarif = str(getattr(member, "tarif_name", getattr(member, "tarif", "")) or "").strip()
         season = str(getattr(member, "season_name", getattr(member, "season", "")) or "").strip()
 
-    out = out.replace("{Prénom}", first)
-    out = out.replace("{Nom}", last)
-    out = out.replace("{first_name}", first)
-    out = out.replace("{last_name}", last)
-    out = out.replace("{num_licence}", licence)
+    enc = _html.escape if escape_html else (lambda v: v)
+    out = out.replace("{Prénom}", enc(first))
+    out = out.replace("{Nom}", enc(last))
+    out = out.replace("{first_name}", enc(first))
+    out = out.replace("{last_name}", enc(last))
+    out = out.replace("{num_licence}", enc(licence))
     if tarif:
-        out = out.replace("{tarif}", tarif)
+        out = out.replace("{tarif}", enc(tarif))
     if season:
-        out = out.replace("{season}", season)
+        out = out.replace("{season}", enc(season))
 
     for key in ("no_competition", "name_competition", "montant_competition", "date_competition"):
         val = str(ctx.get(key) or "").strip()
         if val:
-            out = out.replace("{" + key + "}", val)
+            out = out.replace("{" + key + "}", enc(val))
     return out
 

@@ -23,8 +23,8 @@ Connexion : le bouton « Se connecter » ouvre le sélecteur de comptes de l'ém
 | Compte | Rôle |
 |---|---|
 | `albus.dumbledore@alj-escalade.fr` | admin (domaine du club) |
-| `severus.snape@poudlard.example` | coach (custom claim) |
-| `argus.filch@poudlard.example` | lecture seule (custom claim) |
+| `severus.snape@hogwarts.example` | coach (custom claim) |
+| `argus.filch@hogwarts.example` | lecture seule (custom claim) |
 
 « Add new account » permet d'en créer d'autres (e-mail libre, claims JSON).
 

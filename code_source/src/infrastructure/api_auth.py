@@ -281,5 +281,51 @@ async def auth_middleware(request, call_next):
     return await call_next(request)
 
 
+# ---------------------------------------------------------------------------
+# Local server without authentication (desktop app, local runs)
+# ---------------------------------------------------------------------------
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _host_name(host: str) -> str:
+    host = (host or "").strip().lower()
+    if host.startswith("["):  # IPv6 literal: [::1]:8000
+        return host.split("]", 1)[0] + "]"
+    return host.rsplit(":", 1)[0]
+
+
+def local_request_error(method: str, host: str, origin: Optional[str],
+                        fetch_site: Optional[str], scheme: str = "http") -> Optional[str]:
+    """Reason to reject a request to the unauthenticated local server (None = allowed).
+
+    - Host must be a loopback name: blocks DNS rebinding (a foreign domain resolved to 127.0.0.1).
+    - Writes must come from the server's own pages: blocks a website the user visits from
+      sending requests to the local API (e.g. mass e-mails, member updates).
+    """
+    if _host_name(host) not in LOCAL_HOSTS:
+        return "Host non autorisé"
+    if (method or "GET").upper() in SAFE_METHODS:
+        return None
+    if (fetch_site or "").lower() in ("cross-site", "same-site"):
+        return "Requête d'un autre site refusée"
+    if origin and origin.rstrip("/").lower() != f"{scheme}://{host}".lower():
+        return "Requête d'un autre site refusée"
+    return None
+
+
+async def local_guard_middleware(request, call_next):
+    """Protects the local server when the Firebase token check is off (no-op on Cloud Run)."""
+    from fastapi.responses import JSONResponse
+
+    if not auth_enforced():
+        reason = local_request_error(
+            request.method, request.headers.get("host", ""), request.headers.get("origin"),
+            request.headers.get("sec-fetch-site"), request.url.scheme)
+        if reason:
+            return JSONResponse({"status": "error", "message": reason}, status_code=403)
+    return await call_next(request)
+
+
 def constant_time_equals(a: str, b: str) -> bool:
     return hmac.compare_digest(str(a).encode(), str(b).encode())

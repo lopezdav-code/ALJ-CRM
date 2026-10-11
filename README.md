@@ -51,8 +51,8 @@ Arrêt : `Ctrl+C` pour le serveur, `docker compose -f dev/docker-compose.yml dow
 | Compte | Rôle |
 |---|---|
 | `albus.dumbledore@alj-escalade.fr` | admin |
-| `severus.snape@poudlard.example` | coach |
-| `argus.filch@poudlard.example` | lecture seule |
+| `severus.snape@hogwarts.example` | coach |
+| `argus.filch@hogwarts.example` | lecture seule |
 
 ### À savoir
 
@@ -68,3 +68,45 @@ cd code_source && source venv/bin/activate
 python -m pytest tests --ignore=tests/test_app_smoke.py   # voir .github/workflows pour la liste de la CI
 ruff check src
 ```
+
+## Déployer sur Cloud Run
+
+Depuis `code_source/` (Google Cloud Shell ou poste avec le Google Cloud SDK) :
+
+```bash
+./deploy_cloud_run.sh                     # production : la nouvelle version reçoit 100 % du trafic
+./deploy_cloud_run.sh --test              # version de test : 0 % du trafic, URL dédiée
+./deploy_cloud_run.sh --rollback          # retour à la révision précédant celle en ligne
+./deploy_cloud_run.sh --rollback <REV>    # retour à une révision précise
+```
+
+Chaque déploiement crée une **révision** Cloud Run immuable ; le script affiche la révision en ligne,
+demande confirmation, puis donne l'URL de l'application à la fin.
+
+### Tester avant la mise en production
+
+1. `./deploy_cloud_run.sh --test` : la révision est publiée sur une URL du type
+   `https://test---alj-escalade-api-….run.app`, sans recevoir de trafic.
+2. Vérifier sur cette URL : `/health`, connexion, pages modifiées.
+3. Promouvoir sans reconstruire avec la commande `gcloud run services update-traffic … --to-tags test=100`
+   affichée par le script (ou relancer un déploiement de production).
+
+### Revenir en arrière
+
+`./deploy_cloud_run.sh --rollback` bascule tout le trafic sur une ancienne révision, sans reconstruction,
+en quelques secondes. Le script liste les dernières révisions : vérifier que la cible n'est pas une
+version de test jamais promue. Après un déploiement en production, la commande de retour exacte est
+affichée. Le prochain déploiement en production renvoie le trafic sur la nouvelle révision.
+
+### À savoir
+
+- La version de test utilise **les données Firestore et les secrets de production** : toute action
+  (envoi d'e-mails, modification d'adhérents) y est réelle.
+- Un rollback ne restaure que le code, jamais les données.
+- Si la connexion échoue sur l'URL de test, ajouter son domaine dans Firebase Authentication >
+  Settings > Authorized domains.
+- Les webhooks HelloAsso arrivent toujours sur l'URL principale, donc sur la révision de production.
+- `firestore.rules` n'est **pas** déployé par ce script (`firebase deploy --only firestore:rules`) :
+  les règles s'appliquent immédiatement à toute la production. Historique et retour arrière dans la
+  console Firebase > Firestore > Rules.
+- `deploy_cloud_run.bat` (Windows) ne fait qu'un déploiement en production, sans `--test` ni `--rollback`.
