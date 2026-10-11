@@ -8,6 +8,7 @@
 #   ./deploy_cloud_run.sh --test              Deploy a test revision (0% of traffic, own URL)
 #   ./deploy_cloud_run.sh --rollback [REV]    Send all traffic back to REV
 #                                             (default: the revision before the live one)
+#   ./deploy_cloud_run.sh --cleanup           Remove the test URL (the revision itself is kept)
 # ==============================================================================
 
 set -euo pipefail
@@ -17,21 +18,17 @@ REGION="europe-west1"
 TEST_TAG="test"
 
 usage() {
-    sed -n '6,10p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '6,11p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 MODE="prod"
 ROLLBACK_TARGET=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --test)
-            [ "$MODE" = "prod" ] || { echo "❌ --test and --rollback cannot be combined."; exit 1; }
-            MODE="test"
-            ;;
-        --rollback)
-            [ "$MODE" = "prod" ] || { echo "❌ --test and --rollback cannot be combined."; exit 1; }
-            MODE="rollback"
-            if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then
+        --test|--rollback|--cleanup)
+            [ "$MODE" = "prod" ] || { echo "❌ --test, --rollback and --cleanup cannot be combined."; exit 1; }
+            MODE="${1#--}"
+            if [ "$MODE" = "rollback" ] && [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then
                 ROLLBACK_TARGET="$2"
                 shift
             fi
@@ -111,6 +108,27 @@ echo "  - Region               : $REGION"
 PREVIOUS_REVISION=$(live_revision || true)
 echo "  - Live revision        : ${PREVIOUS_REVISION:-none}"
 echo ""
+
+# ------------------------------------------------------------------------------
+# Cleanup: drop the test tag so its URL stops serving (it runs on production data)
+# ------------------------------------------------------------------------------
+if [ "$MODE" = "cleanup" ]; then
+    TEST_URL=$(tagged_url "$TEST_TAG")
+    if [ -z "$TEST_URL" ]; then
+        echo "ℹ️  No '$TEST_TAG' tag on $SERVICE_NAME. Nothing to do."
+        exit 0
+    fi
+    echo "Test URL to remove: $TEST_URL"
+    confirm "Remove the '$TEST_TAG' tag?"
+    gcloud run services update-traffic "$SERVICE_NAME" "${GCLOUD_TARGET[@]}" --remove-tags "$TEST_TAG"
+
+    echo ""
+    echo "✅ CLEANUP DONE: $TEST_URL no longer serves the app."
+    echo "   The revision is kept (still usable with --rollback). Production traffic is unchanged."
+    echo "   Its OAuth origin / redirect URI can stay registered: the next --test reuses the same URL."
+    print_links "$(service_url)"
+    exit 0
+fi
 
 # ------------------------------------------------------------------------------
 # Rollback: move traffic only, nothing is rebuilt
@@ -199,12 +217,16 @@ echo "==========================================================================
 if [ "$MODE" = "test" ]; then
     echo "✅ TEST REVISION DEPLOYED: $NEW_REVISION (0% of traffic)"
     echo "=============================================================================="
-    print_links "$(tagged_url "$TEST_TAG")"
+    TEST_URL=$(tagged_url "$TEST_TAG")
+    print_links "$TEST_URL"
     echo ""
     echo "▶️  Promote it to production (no rebuild):"
     echo "   gcloud run services update-traffic $SERVICE_NAME --project $CURRENT_PROJECT --region $REGION --to-tags $TEST_TAG=100"
     echo ""
-    echo "ℹ️  If sign-in fails on this URL, add its domain to Firebase Authentication > Authorized domains."
+    echo "ℹ️  Sign-in fails with redirect_uri_mismatch until this URL is registered on the Google OAuth client"
+    echo "   (Cloud console > APIs & Services > Credentials > client 796572126711-npcue84...):"
+    echo "   - Authorized JavaScript origin: $TEST_URL"
+    echo "   - Authorized redirect URI     : $TEST_URL/competitions"
 else
     # A previous rollback pins traffic to a fixed revision: make sure the new one serves it
     gcloud run services update-traffic "$SERVICE_NAME" "${GCLOUD_TARGET[@]}" --to-latest > /dev/null
