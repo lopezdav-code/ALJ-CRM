@@ -244,8 +244,8 @@ Cloud Firestore** — la même base que la page web PWA (temps réel des deux c�
 | `src/infrastructure/firestore_sync.py` | Projection SQLite → Firestore (`prepare_firestore_data`, push/pull REST) + `import_sqlite_into_firestore` (fusion sans écrasement) |
 | `src/presentation/pages/competitions.py` | Onglet desktop « 🏆 Compétitions » à deux niveaux : onglets **globaux** (🏆 Épreuves / 🔄 HelloAsso / 📊 Bilan) et détail d'épreuve avec ses onglets propres (📋 Détails — sans champ campagne —, 👥 Compétiteurs) ; barre Firestore (🔄 Actualiser, ⬆️ import ancienne base) |
 | `web/competitions.html` | Page web de gestion servie sur `/competitions` (temps réel Firestore via `onSnapshot`, écritures sur l'ID canonique `String(id)`) |
-| `tests/test_competition_module.py` | Tests unitaires (dépôt SQLite hérité, rapprochement, bilan) |
-| `tests/test_competition_firestore_repository.py` | Tests du dépôt Firestore (client simulé en mémoire) |
+| `tests/domain/test_competition_module.py` | Tests unitaires (dépôt SQLite hérité, rapprochement, bilan) |
+| `tests/infrastructure/test_competition_firestore_repository.py` | Tests du dépôt Firestore (client simulé en mémoire) |
 
 ### Onglet Créneaux — Vue semaine et Exports Excel (v2.2.7 → 2.2.10)
 

@@ -65,7 +65,7 @@ Arrêt : `Ctrl+C` pour le serveur, `docker compose -f dev/docker-compose.yml dow
 
 ```bash
 cd code_source && source venv/bin/activate
-python -m pytest tests --ignore=tests/test_app_smoke.py   # voir .github/workflows pour la liste de la CI
+python -m pytest tests --ignore=tests/presentation   # voir .github/workflows pour la liste de la CI
 ruff check src
 ```
 
