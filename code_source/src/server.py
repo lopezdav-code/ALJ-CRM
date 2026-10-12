@@ -100,10 +100,11 @@ async def security_headers_middleware(request, call_next):
 app.middleware("http")(security_headers_middleware)  # outermost
 
 # Data routes of the web front end (competitions, coaches, HelloAsso links): src/api/
-from api.competitions import router as competitions_router
+from api import coaches, competition_members, competitions, helloasso_items, participants
 from api.responses import service_error_handler
 from services.errors import ServiceError
-app.include_router(competitions_router)
+for _api in (competitions, participants, coaches, competition_members, helloasso_items):
+    app.include_router(_api.router)
 app.add_exception_handler(ServiceError, service_error_handler)
 
 GENERIC_ERROR = "Erreur interne du serveur (détails dans les journaux)."

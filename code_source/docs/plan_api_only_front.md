@@ -320,7 +320,7 @@ Consequences:
 | A11 | repo `apply_helloasso_payment` (repo:668) | Overwrites `montant_paye` and `commande_helloasso`: a participant paying with several orders keeps only the last one. | **Still present** (now also on manual links). |
 | A12 | repo `sync_adherents_from_main` (repo:220-339) | Projections `adherents`/`planning` are upsert-only: deleted or out-of-season members and slots are never removed. | **Still present.** |
 | A13 | `alj-members.js` vs repo `_read_planning_groups` (342) | Tariff → group tie-break: JS takes the first row, Python the last. | Resolved by choosing one rule (S11). |
-| A14 | `src/server.py:1803` | `/api/auth/google/test` calls `ensure_fresh(max_age_seconds=10)`, but the parameter is `max_age`: TypeError (caught), so `database.ok` is always false. The test mocks it away. | **Still present.** |
+| A14 | `src/server.py:1803` | `/api/auth/google/test` calls `ensure_fresh(max_age_seconds=10)`, but the parameter is `max_age`: TypeError (caught), so `database.ok` is always false. The test mocks it away. | **Fixed on main** (89c9394: `ensure_fresh` accepts `max_age_seconds`, the call uses `max_age`). |
 | A15 | `/api/auth/google/callback`, `update-token`; `secret_store.py:42-92` | On Cloud Run the refresh token is saved to the instance's `.env`/environment only: lost on restart, not shared between instances. | **Still present.** |
 | A16 | `src/server.py:1582,1625` | `return_to` and `error` are put into HTML/JS unescaped (open redirect / reflected injection); OAuth `state` is unsigned and not checked. **Security, prioritize.** | **Still present.** |
 | A17 | `/api/auth/google/status` (public) | Exposes the connected account's e-mail without authentication. | **Still present.** |

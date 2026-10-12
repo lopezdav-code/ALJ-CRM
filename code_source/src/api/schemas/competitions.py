@@ -1,26 +1,15 @@
-"""Request bodies of the API routes used by the web front end (validated by FastAPI)."""
+"""Bodies of the competition routes (api.competitions)."""
 
 import re
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from domain.competition_models import (
-    PAIEMENT_ANNULE_PERDU,
-    PAIEMENT_ANNULE_REPORTE,
-    STATUT_EN_PREPARATION,
-    STATUTS_COMPETITION,
-)
+from api.schemas.base import RequestBody
+from domain.competition_models import STATUT_EN_PREPARATION, STATUTS_COMPETITION
 
 _ISO_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})?$")
-MAX_COACHES = 3  # the domain model stores coach1_id..coach3_id
-
-# Cancellation choice for a participant who already paid -> payment status
-CANCEL_MODES = {"perdu": PAIEMENT_ANNULE_PERDU, "reporte": PAIEMENT_ANNULE_REPORTE}
-
-
-class _Body(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+MAX_COACHES = 3  # the domain model stores coach1_id..coach3_id (plan cleanup C2)
 
 
 def _check_statut(value):
@@ -35,7 +24,7 @@ def _check_date(value):
     return value
 
 
-class CompetitionCreate(_Body):
+class CompetitionCreate(RequestBody):
     nom: str = Field(min_length=1)
     id_ffme: str = ""
     date_competition: str = ""
@@ -52,7 +41,7 @@ class CompetitionCreate(_Body):
     _dates = field_validator("date_competition", "date_fin")(_check_date)
 
 
-class CompetitionUpdate(_Body):
+class CompetitionUpdate(RequestBody):
     """Partial update: only the fields sent are changed."""
     nom: Optional[str] = Field(None, min_length=1)
     id_ffme: Optional[str] = None
@@ -67,41 +56,3 @@ class CompetitionUpdate(_Body):
 
     _statut = field_validator("statut")(_check_statut)
     _dates = field_validator("date_competition", "date_fin")(_check_date)
-
-
-class ParticipantAdd(_Body):
-    adherent_id: int
-    selectionne: bool = True
-
-
-class ParticipantUpdate(_Body):
-    selectionne: Optional[bool] = None
-    present: Optional[bool] = None  # pass-through field (plan appendix B)
-
-
-class ParticipantCancel(_Body):
-    mode: str
-    note: str = Field(min_length=1)
-
-    @field_validator("mode")
-    @classmethod
-    def _mode(cls, value):
-        if value not in CANCEL_MODES:
-            raise ValueError(f"mode must be one of {', '.join(CANCEL_MODES)}")
-        return value
-
-
-class CoachIn(_Body):
-    nom: str = Field(min_length=1)
-
-
-class ItemLink(_Body):
-    competition_id: Optional[int] = None
-    adherent_id: Optional[int] = None
-    commentaire: str = ""
-
-
-class ItemIgnore(_Body):
-    ignore: bool
-    motif: str = ""
-    commentaire: str = ""

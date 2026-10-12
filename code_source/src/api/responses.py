@@ -30,6 +30,10 @@ def json_with_etag(request: Request, payload: Any) -> Response:
     return Response(content=body, media_type="application/json", headers=headers)
 
 
+# Body of a write that has nothing else to return
+SUCCESS = {"status": "success"}
+
+
 def error(status: int, message: str, code: Optional[str] = None) -> JSONResponse:
     """Same error shape as the other API routes ({status, message}), plus a machine code."""
     body = {"status": "error", "message": message}
