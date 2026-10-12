@@ -626,11 +626,24 @@ def get_map(background_tasks: BackgroundTasks):
         // Initialiser la carte Leaflet centrée par défaut sur Jonage
         const map = L.map('map').setView([45.795, 5.045], 13);
 
-        // Ajouter les tuiles OpenStreetMap
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Fond de carte OpenStreetMap France (100% libre, gratuit, sans clé API ni filigrane)
+        const osmFr = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+            maxZoom: 20,
+            attribution: '&copy; OpenStreetMap France | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        // Fond alternatif Esri World Street Map (ultra-rapide, sans clé API)
+        const esriStreet = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS'
+        });
+
+        osmFr.addTo(map);
+
+        L.control.layers({
+            "OpenStreetMap France": osmFr,
+            "Plan Esri": esriStreet
+        }, null, { position: 'topright' }).addTo(map);
 
         let markers = L.markerClusterGroup({
             showCoverageOnHover: false,
@@ -1800,7 +1813,7 @@ def test_google_auth():
                 results["database"]["message"] = f"Fichier Drive '{name}' accessible."
         else:
             if CloudDatabase.is_enabled():
-                CloudDatabase.ensure_fresh(max_age_seconds=10)
+                CloudDatabase.ensure_fresh(max_age=10)
                 results["database"]["ok"] = True
                 results["database"]["message"] = "Base Firestore synchronisée et opérationnelle."
             else:

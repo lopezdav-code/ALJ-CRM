@@ -1021,9 +1021,11 @@ class CloudDatabase:
             return False
 
     @classmethod
-    def ensure_fresh(cls, max_age: int = 30) -> None:
+    def ensure_fresh(cls, max_age: int = 30, max_age_seconds: Optional[int] = None) -> None:
         """Serveur (Cloud Run) : construit le cache au premier appel, puis récupère
         les modifications si la dernière réception date de plus de `max_age` s."""
+        if max_age_seconds is not None:
+            max_age = max_age_seconds
         if not cls.is_enabled():
             return
         if (not cache_is_valid(cls.db_path(), cls.store().project_id)
