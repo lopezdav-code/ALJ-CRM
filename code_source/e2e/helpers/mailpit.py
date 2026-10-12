@@ -18,7 +18,9 @@ class Mailpit:
         req = urllib.request.Request(self.api + path, method=method)
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read()
-        return json.loads(body) if body else None
+            is_json = resp.headers.get_content_type() == "application/json"
+        # Some endpoints answer plain text (DELETE /messages → "ok")
+        return json.loads(body) if is_json else body.decode("utf-8", errors="replace")
 
     def clear(self) -> None:
         self._request("DELETE", "/messages")

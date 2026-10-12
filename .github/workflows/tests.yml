@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  workflow_call: # Reused by the release workflow before packaging
+  workflow_call:
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        python-version: '3.13'
+        python-version-file: 'code_source/.python-version'
         cache: 'pip'
 
     - name: Install Dependencies
@@ -47,7 +47,7 @@ jobs:
         QT_QPA_PLATFORM: offscreen
       # Qt test files create PySide6 widgets: they run in separate processes to
       # avoid native crashes caused by Qt state leaking from one test file to the
-      # next (0xC0000409 when running the full suite at once).
+      # next.
       run: |
         python -m pytest tests --ignore=tests/presentation/test_app_smoke.py --ignore=tests/presentation/test_communication_sender.py --ignore=tests/presentation/test_member_email_shortcut.py --ignore=tests/presentation/test_presentation_lot3.py --ignore=tests/presentation/test_presentation_lot4.py --ignore=tests/presentation/test_presentation_lot5.py --ignore=tests/presentation/test_tarif_update.py &&
         python -m pytest tests/presentation/test_app_smoke.py tests/presentation/test_member_email_shortcut.py tests/presentation/test_tarif_update.py tests/presentation/test_presentation_lot3.py &&
@@ -57,7 +57,7 @@ jobs:
 
   e2e:
     # Browser tests (Playwright) against the local dev stack: Firebase emulator + Mailpit
-    # (code_source/dev/docker-compose.yml), fake data, server in dev mode. Linux only (Docker).
+    # (code_source/dev/docker-compose.yml), fake data, server in dev mode.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -68,13 +68,12 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Start dev stack (Firebase emulator + Mailpit)
-      # Started first: the emulator image builds while Python and the browser are installed.
       run: docker compose -f dev/docker-compose.yml up -d --build
 
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        python-version: '3.11' # same as the Docker image (Cloud Run)
+        python-version-file: 'code_source/.python-version'
         cache: 'pip'
 
     - name: Install system libraries (WeasyPrint)

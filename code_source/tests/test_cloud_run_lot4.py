@@ -71,6 +71,15 @@ class TestCloudRunLot4(unittest.TestCase):
         self.assertIn("uvicorn server:app", content)
         self.assertIn("requirements-docker.txt", content)
 
+    def test_dockerfile_python_matches_python_version_file(self):
+        """The image runs the Python of .python-version (also read by the CI and make_portable.py)."""
+        with open(os.path.join(_code_root, ".python-version"), encoding="utf-8") as f:
+            expected = f.read().strip()
+        with open(os.path.join(_code_root, "Dockerfile"), encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn(f"FROM python:{expected}-slim", content,
+                      "Update the FROM line of the Dockerfile together with .python-version.")
+
     def test_dockerignore_security(self):
         """Vérifie que les secrets et fichiers de données sont rigoureusement exclus."""
         ignore_path = os.path.join(_code_root, ".dockerignore")

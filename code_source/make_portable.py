@@ -27,7 +27,9 @@ from build_release_assets import (
     DEFAULT_REPO, read_version, sha256_of, stage_source_tree, write_sha256_sums,
 )
 
-PYTHON_EMBED_VERSION = "3.13.7"
+# Embedded Python: the version of .python-version (single source for the whole project)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".python-version"), encoding="utf-8") as _f:
+    PYTHON_EMBED_VERSION = _f.read().strip()
 PYTHON_EMBED_URL = (
     f"https://www.python.org/ftp/python/{PYTHON_EMBED_VERSION}/"
     f"python-{PYTHON_EMBED_VERSION}-embed-amd64.zip"
