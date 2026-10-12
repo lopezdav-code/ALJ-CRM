@@ -54,3 +54,73 @@ jobs:
         python -m pytest tests/presentation/test_communication_sender.py &&
         python -m pytest tests/presentation/test_presentation_lot4.py &&
         python -m pytest tests/presentation/test_presentation_lot5.py
+
+  e2e:
+    # Browser tests (Playwright) against the local dev stack: Firebase emulator + Mailpit
+    # (code_source/dev/docker-compose.yml), fake data, server in dev mode. Linux only (Docker).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: code_source
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+
+    - name: Start dev stack (Firebase emulator + Mailpit)
+      # Started first: the emulator image builds while Python and the browser are installed.
+      run: docker compose -f dev/docker-compose.yml up -d --build
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.11' # same as the Docker image (Cloud Run)
+        cache: 'pip'
+
+    - name: Install system libraries (WeasyPrint)
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-docker.txt -r requirements-e2e.txt
+
+    - name: Cache Playwright browsers
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('code_source/requirements-e2e.txt') }}
+
+    - name: Install Chromium
+      run: python -m playwright install --with-deps chromium
+
+    - name: Lint (ruff)
+      run: python -m ruff check e2e
+
+    - name: Wait for dev stack
+      run: |
+        for url in http://localhost:8081/ http://localhost:9099/ http://localhost:8025/; do
+          timeout 180 bash -c "until curl -s -o /dev/null $url; do sleep 2; done" || { echo "$url unreachable"; exit 1; }
+        done
+
+    - name: Run e2e tests (pytest + Playwright)
+      run: >
+        python -m pytest -c e2e/pytest.ini e2e
+        --output e2e-results --tracing retain-on-failure
+        --screenshot only-on-failure --video retain-on-failure
+
+    - name: Dev stack logs
+      if: failure()
+      run: mkdir -p e2e-results && docker compose -f dev/docker-compose.yml logs --no-color > e2e-results/docker-compose.log 2>&1
+
+    - name: Upload e2e artifacts
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: e2e-results
+        path: code_source/e2e-results/
+        retention-days: 7
+
+    - name: Stop dev stack
+      if: always()
+      run: docker compose -f dev/docker-compose.yml down

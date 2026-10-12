@@ -45,6 +45,28 @@ Connexion : le bouton « Se connecter » ouvre le sélecteur de comptes de l'ém
 - **Service worker** : en cas de page figée après un changement, « Mettre à jour » sur le badge
   de version ou désenregistrer le SW (DevTools → Application).
 
+## Tests e2e (Playwright)
+
+Tests navigateur de bout en bout dans `code_source/e2e/`, sur cette même pile (émulateur + Mailpit).
+Ils sont lancés par la CI (job `e2e` de `.github/workflows/tests.yml`, Ubuntu) à chaque PR et push sur `main`.
+
+```bash
+cd code_source
+docker compose -f dev/docker-compose.yml up -d
+pip install -r requirements-docker.txt -r requirements-e2e.txt
+python -m playwright install --with-deps chromium    # WSL/Linux : bibliothèques système (sudo)
+python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute la suite
+```
+
+- ⚠️ **La suite réinitialise les données de l'émulateur** (elle relance le seed). Le serveur de test tourne
+  sur le port `8090` (`E2E_PORT`), avec son propre cache SQLite temporaire : `run_server.sh` (8080) peut rester lancé.
+- Connexion sans passer par le sélecteur de comptes : `login_as(page, "admin" | "coach" | "readonly")`
+  (`e2e/helpers/auth.py`). E-mails : fixture `mailpit` (`e2e/helpers/mailpit.py`).
+- Déboguer : `--headed --slowmo 300`, ou `--tracing retain-on-failure` puis
+  `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux du serveur et du seed :
+  `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
+- En CI, en cas d'échec : artefact `e2e-results` (traces, captures, vidéos, journaux serveur et Docker).
+
 ## Fichiers
 
 | Fichier | Rôle |
