@@ -1315,6 +1315,130 @@ def sync_helloasso_api():
         return {"status": "error", "message": internal_error(e, "sync_helloasso_api")}
 
 
+@app.post("/api/competitions/{comp_id}/fetch-results")
+async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = Body(default={})):
+    """
+    Récupère les résultats officiels depuis MyCompet FFME pour une compétition donnée,
+    extrait les compétiteurs de l'Amicale Laïque de Jonage et met à jour leurs classements.
+    """
+    from mycompet_scraper import fetch_and_parse_mycompet_results, normalize_result_url, find_mycompet_result_url
+    from infrastructure.firestore_client import FirestoreClient
+
+    url = (payload.get("url") or payload.get("result_id") or "").strip()
+
+    comp_doc = None
+    try:
+        comp_doc = FirestoreClient.get_document("competitions", comp_id)
+    except Exception as e:
+        print(f"⚠️ [MYCOMPET] Impossible de lire la compétition {comp_id} sur Firestore : {e}")
+
+    if not url and comp_doc:
+        url = comp_doc.get("url_resultats") or comp_doc.get("id_resultat_ffme") or ""
+
+    # Détection automatique transparente si aucune URL n'est renseignée
+    if not url and comp_doc:
+        nom = comp_doc.get("nom") or ""
+        date = comp_doc.get("date_competition") or ""
+        lieu = comp_doc.get("lieu") or ""
+        id_ffme = comp_doc.get("id_ffme") or ""
+        auto_url = await run_in_threadpool(find_mycompet_result_url, nom, date, lieu, str(id_ffme))
+        if auto_url:
+            url = auto_url
+
+    if not url:
+        return JSONResponse({
+            "status": "needs_url",
+            "message": "Résultats introuvables automatiquement sur MyCompet. Veuillez renseigner l'URL ou le numéro de résultat (ex: https://mycompet.ffme.fr/resultat/resultat_13660 ou 13660)."
+        }, status_code=404)
+
+    try:
+        club_kw = payload.get("club") or "JONAGE"
+        scraped_results = await run_in_threadpool(fetch_and_parse_mycompet_results, url, club_kw)
+    except Exception as e:
+        print(f"❌ [MYCOMPET] Erreur scraping MyCompet ({url}) : {e}")
+        return JSONResponse({
+            "status": "error",
+            "message": f"Erreur lors de la récupération des résultats MyCompet : {e}"
+        }, status_code=502)
+
+    matched_count = 0
+    participants = list((comp_doc.get("participants") if comp_doc else None) or [])
+
+    now_iso = datetime.datetime.now().isoformat()
+    canonical_url = normalize_result_url(url)
+
+    by_licence = {}
+    by_name = {}
+    for r in scraped_results:
+        lic = str(r.get("licence") or "").strip()
+        if lic:
+            by_licence[lic] = r
+        full = f"{r.get('nom', '')} {r.get('prenom', '')}".strip().lower()
+        if full:
+            by_name[full] = r
+
+    for p in participants:
+        p_lic = str(p.get("num_licence") or "").strip()
+        p_name = f"{p.get('nom', '')} {p.get('prenom', '')}".strip().lower()
+
+        match = by_licence.get(p_lic) or by_name.get(p_name)
+        if match:
+            matched_count += 1
+            p["classement"] = match.get("classement") or ""
+            p["resultat_ffme"] = f"{match.get('classement')}e" if match.get("classement") else ""
+            p["categorie_ffme"] = match.get("categorie") or ""
+            p["performance_ffme"] = match.get("performance") or ""
+            p["resultat_synced_at"] = now_iso
+
+    if comp_doc:
+        try:
+            FirestoreClient.update_fields("competitions", comp_id, {
+                "participants": participants,
+                "url_resultats": canonical_url,
+                "resultats_synced_at": now_iso
+            })
+        except Exception as e:
+            print(f"⚠️ [MYCOMPET] Erreur mise à jour Firestore : {e}")
+
+    # Sauvegarde miroir dans la base SQLite locale si disponible
+    try:
+        from infrastructure.competition_repository import CompetitionRepository
+        if os.path.exists(CompetitionRepository.get_db_path()):
+            CompetitionRepository.setup_database()
+            conn = CompetitionRepository.get_connection()
+            try:
+                conn.execute(
+                    "UPDATE competitions SET url_resultats = ?, resultats_synced_at = ? WHERE id = ? OR id_ffme = ?",
+                    (canonical_url, now_iso, comp_id, comp_id)
+                )
+                for p in participants:
+                    aid = p.get("adherent_id")
+                    if aid:
+                        conn.execute(
+                            """UPDATE participants SET classement = ?, resultat_ffme = ?,
+                               categorie_ffme = ?, performance_ffme = ?, resultat_synced_at = ?
+                               WHERE (competition_id = ? OR competition_id = (SELECT id FROM competitions WHERE id_ffme = ?))
+                               AND adherent_id = ?""",
+                            (p.get("classement") or "", p.get("resultat_ffme") or "",
+                             p.get("categorie_ffme") or "", p.get("performance_ffme") or "",
+                             now_iso, comp_id, comp_id, aid)
+                        )
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as e:
+        print(f"⚠️ [SQLITE] Erreur sauvegarde locale des résultats : {e}")
+
+    return {
+        "status": "success",
+        "url": canonical_url,
+        "total_scraped": len(scraped_results),
+        "matched_count": matched_count,
+        "results": scraped_results,
+        "participants": participants
+    }
+
+
 # --------------------------------------------------------------------------
 # Attestations de paiement PDF (un adhérent à la fois, admin uniquement)
 # --------------------------------------------------------------------------

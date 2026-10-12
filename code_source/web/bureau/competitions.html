@@ -577,6 +577,10 @@ startBureau({
               <label class="fld">Coach(s) encadrant(s)</label>
               <div id="f-coaches-box" style="display:flex; flex-wrap:wrap; gap:8px; border:1px solid #CBD5E1; border-radius:6px; padding:8px; background:#F8FAFC; max-height:100px; overflow-y:auto;"></div>
             </div>
+            <div>
+              <label class="fld">Lien résultats MyCompet (optionnel)</label>
+              <input type="text" id="f-url-resultats" class="search-input" placeholder="Ex: https://mycompet.ffme.fr/resultat/resultat_13660 ou 13660" style="width:100%;">
+            </div>
             <div class="btn-row" style="margin-top:10px;">
               <button type="button" class="btn btn-muted" id="comp-modal-cancel">Annuler</button>
               <button type="submit" class="btn btn-primary" id="comp-modal-submit">Enregistrer l'épreuve</button>
@@ -838,6 +842,7 @@ startBureau({
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-edit-comp">✏️ Modifier</button>` : ""}
+              <button class="btn btn-muted btn-mini" id="btn-fetch-results" style="color:var(--blue); border-color:#BFDBFE;">🏆 Trouver les résultats</button>
               <button class="btn btn-primary btn-mini" id="btn-email-comp">✉️ Campagne e-mail</button>
               <button class="btn btn-muted btn-mini" id="btn-export-comp-csv">📥 Export CSV</button>
               ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-del-comp" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>` : ""}
@@ -882,11 +887,67 @@ startBureau({
       });
 
       $("btn-edit-comp")?.addEventListener("click", () => openEditCompModal(comp));
+      $("btn-fetch-results")?.addEventListener("click", () => fetchCompResults(comp));
       $("btn-del-comp")?.addEventListener("click", () => deleteActiveComp(comp));
       $("btn-email-comp")?.addEventListener("click", () => openEmailCampaignModal(comp));
       $("btn-export-comp-csv")?.addEventListener("click", () => exportCompCsv(comp));
 
       renderSubTabContent(comp);
+    }
+
+    async function fetchCompResults(comp, manualUrl = null) {
+      if (!comp) return;
+      const compId = comp.id || comp.docId;
+      const btn = $("btn-fetch-results");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Recherche MyCompet…";
+      }
+
+      const targetUrl = manualUrl || comp.url_resultats || "";
+      if (targetUrl) {
+        toast(`⏳ Recherche des résultats pour « ${comp.nom} »…`, 4000);
+      } else {
+        toast(`🔍 Détection automatique des résultats MyCompet pour « ${comp.nom} » en cours…`, 5000);
+      }
+
+      try {
+        const res = await apiFetch(`/api/competitions/${encodeURIComponent(compId)}/fetch-results`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: targetUrl, club: "JONAGE" })
+        });
+
+        const data = await res.json();
+
+        // Si l'URL n'a pas été trouvée automatiquement, demander en fallback à l'utilisateur
+        if (res.status === 404 && data.status === "needs_url") {
+          const promptVal = prompt(
+            `Résultats introuvables automatiquement sur MyCompet pour « ${comp.nom} ».\n\n` +
+            `Si les résultats sont publiés, veuillez saisir l'URL ou le numéro de la page de résultat (ex: https://mycompet.ffme.fr/resultat/resultat_13660 ou 13660) :`,
+            ""
+          );
+          if (promptVal && promptVal.trim()) {
+            return fetchCompResults(comp, promptVal.trim());
+          }
+          return;
+        }
+
+        if (!res.ok || data.status === "error") {
+          throw new Error(data.message || `Erreur serveur HTTP ${res.status}`);
+        }
+
+        const resId = data.url ? data.url.split("/").pop() : "";
+        toast(`🏆 ${data.matched_count} résultat(s) associé(s) sur ${data.total_scraped} compétiteur(s) ALJ trouvés (${resId}) !`, 7000);
+      } catch (err) {
+        console.error("Erreur récupération résultats MyCompet :", err);
+        toast(`❌ Erreur MyCompet : ${err.message}`, 8000);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "🏆 Trouver les résultats";
+        }
+      }
     }
 
     function renderSubTabContent(comp) {
@@ -917,6 +978,7 @@ startBureau({
                 <th>Licence FFME</th>
                 <th>Catégorie</th>
                 <th>Créneau</th>
+                <th style="text-align:center;">Résultat FFME</th>
                 <th style="text-align:center;">Participe</th>
                 <th>Paiement HelloAsso</th>
                 <th style="text-align:center;">Présent</th>
@@ -943,7 +1005,7 @@ startBureau({
 
     function renderParticipantsRows(comp, parts) {
       if (!parts.length) {
-        return `<tr><td colspan="9" style="text-align:center; padding:30px;" class="muted">Aucun participant inscrit pour le moment. Utilisez l'onglet « Inscrire un adhérent ».</td></tr>`;
+        return `<tr><td colspan="10" style="text-align:center; padding:30px;" class="muted">Aucun participant inscrit pour le moment. Utilisez l'onglet « Inscrire un adhérent ».</td></tr>`;
       }
 
       return parts.map(p => {
@@ -951,12 +1013,35 @@ startBureau({
         const colorP = PAIEMENT_COLORS[stP] || "#94A3B8";
         const labelP = PAIEMENT_LABELS[stP] || stP;
 
+        let rankBadge = `<span class="muted" style="font-size:11.5px;">—</span>`;
+        if (p.classement) {
+          const r = String(p.classement).trim();
+          let icon = "🏅";
+          let colBg = "#FEF3C7";
+          let colTxt = "#B45309";
+          let border = "#FDE68A";
+          if (r === "1") { icon = "🥇"; colBg = "#FEF08A"; colTxt = "#854D0E"; border = "#FACC15"; }
+          else if (r === "2") { icon = "🥈"; colBg = "#F1F5F9"; colTxt = "#334155"; border = "#CBD5E1"; }
+          else if (r === "3") { icon = "🥉"; colBg = "#FFEDD5"; colTxt = "#9A3412"; border = "#FDBA74"; }
+
+          const suffix = r === "1" ? "er" : "e";
+          rankBadge = `
+            <div style="display:inline-flex; flex-direction:column; align-items:center;">
+              <span class="tag-badge" style="background:${colBg}; color:${colTxt}; border:1px solid ${border}; font-weight:800; font-size:12px; padding:2px 8px;">
+                ${icon} ${esc(r)}${suffix}
+              </span>
+              ${p.categorie_ffme ? `<span class="muted" style="font-size:10.5px; margin-top:2px;">${esc(p.categorie_ffme)}</span>` : ""}
+            </div>
+          `;
+        }
+
         return `
           <tr data-aid="${esc(p.adherent_id)}">
             <td class="cell-name">${esc(String(p.nom || "").toUpperCase())} ${esc(p.prenom || "")}</td>
             <td class="cell-sub">${esc(p.num_licence || "—")}</td>
             <td class="cell-sub">${esc(p.categorie || "—")}</td>
             <td class="cell-sub">${esc(p.groupe || p.tarif || "—")}</td>
+            <td style="text-align:center;">${rankBadge}</td>
             <td style="text-align:center;">
               <input type="checkbox" class="part-select-chk" ${p.selectionne ? "checked" : ""} style="accent-color:var(--blue); width:auto; cursor:pointer;" ${isAdmin ? "" : "disabled"}>
             </td>
@@ -1974,6 +2059,7 @@ startBureau({
       $("f-type").value = "Bloc";
       $("f-prix").value = "15";
       $("f-idffme").value = "";
+      $("f-url-resultats").value = "";
       renderCoachCheckboxes([], []);
       $("comp-form-modal").style.display = "flex";
       $("f-nom").focus();
@@ -1989,6 +2075,7 @@ startBureau({
       $("f-type").value = c.type || "Bloc";
       $("f-prix").value = c.prix != null ? c.prix : "15";
       $("f-idffme").value = c.id_ffme || "";
+      $("f-url-resultats").value = c.url_resultats || "";
       renderCoachCheckboxes(c.coach_ids || [], c.coaches || []);
       $("comp-form-modal").style.display = "flex";
       $("f-nom").focus();
@@ -2011,6 +2098,7 @@ startBureau({
       const type = $("f-type").value;
       const prix = parseFloat($("f-prix").value || "0") || 0;
       const idffme = $("f-idffme").value.trim();
+      const urlResultats = $("f-url-resultats").value.trim();
 
       const selectedCoachIds = [];
       const selectedCoachNames = [];
@@ -2028,6 +2116,7 @@ startBureau({
         if (editCompId) {
           await db.collection("competitions").doc(String(editCompId)).update({
             nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
+            url_resultats: urlResultats,
             coach_ids: selectedCoachIds,
             coaches: selectedCoachNames,
             updated_at: new Date().toISOString()
@@ -2036,6 +2125,7 @@ startBureau({
         } else {
           const newDoc = await db.collection("competitions").add({
             nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
+            url_resultats: urlResultats,
             coach_ids: selectedCoachIds,
             coaches: selectedCoachNames,
             participants: [],

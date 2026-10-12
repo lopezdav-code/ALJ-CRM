@@ -173,6 +173,17 @@ class CompetitionRepository:
                 conn.execute("ALTER TABLE competitions ADD COLUMN coach2_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL")
             if "coach3_id" not in comp_cols:
                 conn.execute("ALTER TABLE competitions ADD COLUMN coach3_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL")
+            if "url_resultats" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN url_resultats TEXT DEFAULT ''")
+            if "resultats_synced_at" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN resultats_synced_at TEXT DEFAULT ''")
+
+            # Migration : colonnes résultats et pointage dans la table participants
+            part_cols = {r["name"] for r in conn.execute("PRAGMA table_info(participants)").fetchall()}
+            for col_name in ("classement", "resultat_ffme", "categorie_ffme", "performance_ffme", "resultat_synced_at", "present"):
+                if col_name not in part_cols:
+                    col_type = "INTEGER DEFAULT 0" if col_name == "present" else "TEXT DEFAULT ''"
+                    conn.execute(f"ALTER TABLE participants ADD COLUMN {col_name} {col_type}")
                 
             conn.commit()
         finally:

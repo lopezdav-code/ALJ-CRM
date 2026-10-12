@@ -85,6 +85,8 @@ class Competition:
     coach1_id: int = None
     coach2_id: int = None
     coach3_id: int = None
+    url_resultats: str = ""
+    resultats_synced_at: str = ""
     # Identifiant Firestore réel du document (peut différer de str(id) sur une
     # base héritée ; normalisé au premier chargement par le référentiel).
     doc_id: str = None
@@ -104,6 +106,8 @@ class Competition:
             "coach1_id": self.coach1_id,
             "coach2_id": self.coach2_id,
             "coach3_id": self.coach3_id,
+            "url_resultats": self.url_resultats,
+            "resultats_synced_at": self.resultats_synced_at,
         }
 
     @classmethod
@@ -122,6 +126,8 @@ class Competition:
             coach1_id=row.get("coach1_id"),
             coach2_id=row.get("coach2_id"),
             coach3_id=row.get("coach3_id"),
+            url_resultats=str(row.get("url_resultats") or ""),
+            resultats_synced_at=str(row.get("resultats_synced_at") or ""),
             doc_id=row.get("doc_id") or row.get("_doc_id"),
         )
 
@@ -139,11 +145,17 @@ class Participant:
     email: str = ""
     tarif: str = ""
     selectionne: bool = False
+    present: bool = False            # pointage sur place le jour de la compétition
     statut_paiement: str = PAIEMENT_NON_INVITE
     date_synchro_helloasso: str = ""
     montant_paye: float = 0.0
     commande_helloasso: str = ""     # n° de commande HelloAsso (renseigné à la synchro)
     note_paiement: str = ""          # commentaire du coach (annulation, régularisation…)
+    classement: str = ""             # rang ou classement FFME (ex: "1", "4", "13")
+    resultat_ffme: str = ""          # libellé complet (ex: "1er", "4e")
+    categorie_ffme: str = ""         # catégorie officielle MyCompet (ex: "U13Femme")
+    performance_ffme: str = ""       # points ou score MyCompet
+    resultat_synced_at: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -156,11 +168,17 @@ class Participant:
             "email": self.email,
             "tarif": self.tarif,
             "selectionne": bool(self.selectionne),
+            "present": bool(self.present),
             "statut_paiement": self.statut_paiement,
             "date_synchro_helloasso": self.date_synchro_helloasso,
             "montant_paye": self.montant_paye,
             "commande_helloasso": self.commande_helloasso,
             "note_paiement": self.note_paiement,
+            "classement": self.classement,
+            "resultat_ffme": self.resultat_ffme,
+            "categorie_ffme": self.categorie_ffme,
+            "performance_ffme": self.performance_ffme,
+            "resultat_synced_at": self.resultat_synced_at,
         }
 
     @classmethod
@@ -181,4 +199,9 @@ class Participant:
             montant_paye=float(row.get("montant_paye") or 0.0),
             commande_helloasso=str(row.get("commande_helloasso") or ""),
             note_paiement=str(row.get("note_paiement") or ""),
+            classement=str(row.get("classement") or ""),
+            resultat_ffme=str(row.get("resultat_ffme") or ""),
+            categorie_ffme=str(row.get("categorie_ffme") or ""),
+            performance_ffme=str(row.get("performance_ffme") or ""),
+            resultat_synced_at=str(row.get("resultat_synced_at") or ""),
         )

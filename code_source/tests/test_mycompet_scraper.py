@@ -126,5 +126,65 @@ class TestMyCompetScraper(unittest.TestCase):
             if os.path.exists(exports_dir) and not os.listdir(exports_dir):
                 os.rmdir(exports_dir)
 
+    def test_normalize_result_url(self):
+        from mycompet_scraper import normalize_result_url
+        self.assertEqual(normalize_result_url("13660"), "https://mycompet.ffme.fr/resultat/resultat_13660")
+        self.assertEqual(normalize_result_url("resultat_13660"), "https://mycompet.ffme.fr/resultat/resultat_13660")
+        self.assertEqual(
+            normalize_result_url("https://mycompet.ffme.fr/resultat/resultat_13660"),
+            "https://mycompet.ffme.fr/resultat/resultat_13660"
+        )
+        self.assertEqual(normalize_result_url(""), "")
+
+    def test_parse_mycompet_results_html(self):
+        from mycompet_scraper import parse_mycompet_results_html
+        sample_html = """
+        <div class="regroupement">
+            <div class="regroupement-header">[U13]Femme</div>
+            <div class="regroupement-table">
+                <table>
+                    <tr><th>Rang</th><th>Identité</th><th>Total</th><th>Points</th><th>Cl.</th></tr>
+                    <tr>
+                        <td>1</td>
+                        <td><a href="palmares_111111.html"><strong>AUTRE Club</strong><br>CLUB VERTIGE</a></td>
+                        <td>15</td><td>1000</td><td>1</td>
+                    </tr>
+                    <tr>
+                        <td>9</td>
+                        <td><a href="palmares_930654.html"><strong>BULAND Julia</strong><br>AMICALE LAIQUE DE JONAGE</a></td>
+                        <td>11</td><td>666.26</td><td>9</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <div class="regroupement">
+            <div class="regroupement-header">[U15]Homme</div>
+            <div class="regroupement-table">
+                <table>
+                    <tr>
+                        <td>1</td>
+                        <td><a href="palmares_970269.html"><strong>CHAZOT Tiago</strong><br>AMICALE LAIQUE DE JONAGE</a></td>
+                        <td>14</td><td>3044.04</td><td>1</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        """
+        results = parse_mycompet_results_html(sample_html, club_keyword="JONAGE")
+        self.assertEqual(len(results), 2)
+
+        buland = next(r for r in results if r["licence"] == "930654")
+        self.assertEqual(buland["nom"], "BULAND")
+        self.assertEqual(buland["prenom"], "Julia")
+        self.assertEqual(buland["classement"], "9")
+        self.assertEqual(buland["categorie"], "U13Femme")
+
+        chazot = next(r for r in results if r["licence"] == "970269")
+        self.assertEqual(chazot["nom"], "CHAZOT")
+        self.assertEqual(chazot["prenom"], "Tiago")
+        self.assertEqual(chazot["classement"], "1")
+        self.assertEqual(chazot["categorie"], "U15Homme")
+
+
 if __name__ == "__main__":
     unittest.main()

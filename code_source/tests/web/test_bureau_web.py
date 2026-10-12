@@ -379,13 +379,42 @@ class TestBureauFiles(unittest.TestCase):
 
         # Éléments grand écran de la page bureau
         for elem in ("comps-list-container", "comp-workspace", "comp-search-input",
-                      "comp-form-modal", "comp-email-modal", "btn-add-comp",
+                      "comp-form-modal", "comp-email-modal", "btn-add-comp", "btn-fetch-results",
                       "btn-nav-comps", "btn-nav-helloasso", "btn-nav-bilan", "btn-nav-coachs",
                       "section-competitions", "section-helloasso", "section-bilan", "section-coachs"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn("comp-layout", html)
         self.assertIn('apiFetch("/api/helloasso/sync"', html)
         self.assertIn('apiFetch("/api/send-email"', html)
+        self.assertIn("/fetch-results", html)
+
+    @patch("mycompet_scraper.fetch_and_parse_mycompet_results")
+    @patch("infrastructure.firestore_client.FirestoreClient.get_document")
+    @patch("infrastructure.firestore_client.FirestoreClient.update_fields")
+    def test_fetch_competition_results_endpoint(self, mock_update, mock_get, mock_scraper):
+        mock_get.return_value = {
+            "id": "comp_123",
+            "nom": "Test Comp",
+            "participants": [
+                {"nom": "BULAND", "prenom": "Julia", "num_licence": "930654"},
+                {"nom": "DUPONT", "prenom": "Jean", "num_licence": "000000"}
+            ]
+        }
+        mock_scraper.return_value = [
+            {"nom": "BULAND", "prenom": "Julia", "licence": "930654", "classement": "9", "categorie": "U13Femme"}
+        ]
+        client = TestClient(app, base_url="http://localhost")
+        resp = client.post(
+            "/api/competitions/comp_123/fetch-results",
+            json={"url": "13660"},
+            headers={"Host": "localhost", "Origin": "http://localhost"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["matched_count"], 1)
+        self.assertEqual(data["total_scraped"], 1)
+        mock_update.assert_called_once()
 
     def test_email_template_crud_endpoints_and_sqlite(self):
         """Les endpoints POST et DELETE /api/email-templates modifient correctement SQLite."""
