@@ -1,4 +1,4 @@
-"""Routes of src/api/competitions.py over the in-memory Firestore (auth off, local server)."""
+"""Routes of src/api/competitions.py (and services/competition_service.py) over the in-memory Firestore (auth off, local server)."""
 
 import os
 import unittest
@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 from support.fake_firestore import FirestoreRepoTestCase
 
 import server
-from api import competitions as routes
 from domain.competition_models import Competition, PAIEMENT_PAYE
 from infrastructure.competition_firestore_repository import CompetitionFirestoreRepository as Repo
 from infrastructure.firestore_client import FirestoreError
+from services import competition_service
 
 
 class ApiTestCase(FirestoreRepoTestCase):
@@ -22,8 +22,8 @@ class ApiTestCase(FirestoreRepoTestCase):
         env = patch.dict(os.environ, {"ALJ_API_AUTH": "off"})
         env.start()
         self.addCleanup(env.stop)
-        routes.invalidate_cache()
-        self.addCleanup(routes.invalidate_cache)
+        competition_service.invalidate_cache()
+        self.addCleanup(competition_service.invalidate_cache)
         self.client = TestClient(server.app)
 
     def create(self, **body):

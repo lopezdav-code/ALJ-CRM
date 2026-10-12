@@ -216,7 +216,7 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
     def test_readonly_role_end_to_end(self):
         """Readonly can read competitions, and nothing else."""
         readonly = make_token(email="muah.did@gmail.com")
-        with patch("api.competitions.Repo.list_competition_docs", return_value=[]):
+        with patch("services.competition_service.Repo.list_competition_docs", return_value=[]):
             self.assertEqual(self.get("/api/competitions", readonly).status_code, 200)
         self.assertEqual(self.get("/api/email-status", readonly).status_code, 403)
         r = self.client.post("/api/competitions", json={}, headers={"Authorization": f"Bearer {readonly}"})

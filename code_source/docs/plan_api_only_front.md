@@ -93,6 +93,7 @@ Existing routes reused unchanged: `/api/helloasso/sync`, `/api/send-email`, `/ap
 - **Offline (mobile page).** Write controls are not disabled; writes are refused with a toast and the header shows « 📴 Hors ligne — données du … (lecture seule) ». The snapshot also holds the coaches list (names only, no personal data).
 - **Bureau page, paid participant.** Unticking « Participe » for someone who paid now asks for a comment and « report / perdu » (`prompt` + `confirm`, minimal UI), then calls the cancel route. Before, the bureau page silently overwrote the status.
 - **Bureau page field names fixed (A6).** It now reads the real fields (`nom/prenom/tarif/email`, mirror `montant/order_id/payer_*`, athlete from `raw_json`) and knows the statuses `annule_perdu/annule_reporte`. Admin-only controls are relaxed to coach (D5). It keeps no offline snapshot (desktop).
+- **Layers: controller → service → repository** (added during review). `src/api/competitions.py` only handles HTTP: it parses the body, calls the service, and shapes the response (ETag, `{status: success}`). `src/services/competition_service.py` holds the rules: existence checks, partial update, pass-through fields, `already_paid`/`already_linked`/`motif_required`, and the 5 s list cache with its invalidation on write. It raises `services.errors` (`NotFound`, `InvalidRequest`, `Conflict`, `StorageUnavailable`) and turns Firestore errors into them. It knows nothing about HTTP. One exception handler, `api.responses.service_error_handler` registered in `server.py`, maps each error class to 404/400/409/503 with the same `{status, message, code}` body. Phase 2 (`/api/members`) follows the same layout.
 - **Repository additions** (`competition_firestore_repository.py`):
   - `ParticipantAlreadyPaid`, `ItemAlreadyLinked`;
   - `set_selection(refuse_unselect_paid=)`, `set_present`;
@@ -174,6 +175,64 @@ Consequences:
 
 **Out of scope.** The JS role helpers (`web/shared/alj-core.js` `roleFor`, and the PWA pages) and `firestore.rules`. The rules lose their role logic in phase 3; the JS checks only control what the UI shows.
 
+#### C2 — Competition coaches: an association instead of three fixed columns
+
+**Problem.** A competition stores its coaches as three fixed slots, `coach1_id`, `coach2_id` and `coach3_id`. This is a repeating group: a list modelled as numbered columns.
+- **Arbitrary limit of 3.** The API rejects a 4th coach only because there is no 4th column (`MAX_COACHES` in `src/api/schemas.py`; see S10). The PWA used to allow more.
+- **Three copies of the same information in each Firestore document** (`_build_comp_doc`, `competition_firestore_repository.py:~170`):
+  - `coach1_id..coach3_id`;
+  - `coach_ids` (array);
+  - `coaches` (names copied from the `coaches` collection).
+
+  Every writer has to keep the three in step. Readers fall back from one to the other (`_comp_from_doc`, around line 146). A partly failed coach rename or delete leaves them out of step (A7, A10).
+- **Slot logic everywhere:**
+  - Every query on a coach has to check three columns (`WHERE coach1_id = ? OR coach2_id = ? OR coach3_id = ?`, `competition_repository.py:952`).
+  - Deleting a coach means checking every slot of every competition.
+  - Code packs and unpacks lists into slots: `_apply_coaches` in `src/api/competitions.py`, `firestore_sync.py:117`.
+  - Order is meaningful by accident: removing coach 1 leaves a gap or shifts the others.
+- **Spread across every layer:**
+  - the domain model (`competition_models.py:85-87`, `to_dict`/`from_row`);
+  - the SQLite schema (`competition_repository.py:170-175`, 390-401);
+  - the Firestore repository and `firestore_sync.py`;
+  - the desktop form (three `QComboBox`, `presentation/pages/competitions.py:883-905`);
+  - both web pages.
+
+**Note on cardinality.** The link is **many-to-many**, not 1-n. A competition has several coaches, and a coach is on several competitions. "1-n" holds only on each side of the link table: one competition → n links, one coach → n links.
+
+**Change.**
+1. **Domain.** `Competition.coach_ids: list[int]`, an ordered list with no length limit, replacing `coach1_id..coach3_id`.
+2. **SQLite (desktop).** Add a join table with foreign keys:
+   ```sql
+   CREATE TABLE competition_coaches (
+       competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+       coach_id       INTEGER NOT NULL REFERENCES coaches(id)      ON DELETE CASCADE,
+       position       INTEGER NOT NULL DEFAULT 0,   -- display order only
+       PRIMARY KEY (competition_id, coach_id)
+   );
+   CREATE INDEX idx_competition_coaches_coach ON competition_coaches(coach_id);
+   ```
+   - Migration: copy the non-null `coach1..3_id` into the table, then drop the three columns.
+   - Deleting a coach becomes a single `ON DELETE CASCADE`.
+   - "Competitions of coach X" becomes one indexed join.
+3. **Firestore.** It has no joins or foreign keys, so a separate link collection would mean extra reads on every competition list and multi-document writes with no cascade.
+   - The idiomatic Firestore equivalent of a many-to-many link is **one array of ids on the owning document**: keep `coach_ids` as the **only** source of truth.
+   - "Competitions of coach X" is the `array-contains` query.
+   - Remove `coach1_id..coach3_id` and the copied `coaches` names. The API adds the names when it reads (it already loads the `coaches` collection), so renaming a coach no longer rewrites every competition (`_refresh_coach_names`, A10).
+   - Data migration: strip the obsolete fields from existing documents. Readers keep accepting them during the transition.
+4. **API.** `coach_ids` without `max_length`; delete `MAX_COACHES` and `_apply_coaches`. Responses keep `coach_ids` and gain resolved `coaches: [{id, nom}]`.
+5. **Clients:**
+   - Desktop: a multi-select list replaces the three combo boxes.
+   - Both web pages: read `coaches` from the API response.
+   - `presence_sheet_generator.py` already works on a list (`encadrants`).
+
+**Side effects to handle.**
+- **Old desktop builds** keep writing `coach1..3_id`, and they write Firestore directly.
+  - Ship the desktop change first, with readers that accept both shapes.
+  - Remove the old fields only once every club PC runs the new version.
+- **Order.** Today "Coach 1" may implicitly mean the lead coach. Check with the club. If it matters, keep `position` / array order and show it. If not, drop `position`.
+
+**Out of scope until decided.** A lead-coach role, or other per-link attributes (e.g. driver, judge). These would justify Firestore link documents instead of an id array.
+
 ## Front-end changes per page
 
 - **`web/competitions.html` (PWA):**
@@ -212,7 +271,7 @@ Consequences:
   - Deleting a coach clears `coach1..3_id`.
   - Competitions created from the bureau page get a numeric id.
   - Counters are always recomputed.
-  - At most 3 coaches per competition (the repo stores `coach1..3_id`; the PWA allowed more). The API returns 400 above 3; check existing data first.
+  - At most 3 coaches per competition (the repo stores `coach1..3_id`; the PWA allowed more). The API returns 400 above 3; check existing data first. The limit itself goes away with cleanup C2.
 - **S11 — Planning-group tie-break.** JS picks the **first** planning row matching a tariff; Python (`_read_planning_groups`, repo:342) picks the **last**. Moving `/api/members` to Python must pick one. Recommendation: use the JS rule (first by id) everywhere, so member pages don't change. The `adherents` projection may then change for members whose tariff is in two groups.
 - **S12 — Dev environment.** `dev/dev.env` sets `ALJ_API_AUTH=off`, and emulator ID tokens can't pass `verify_firebase_token`, so roles can't be exercised end to end in dev. Role coverage relies on the `make_token` unit tests.
 - **S13 — CI.** ~~Only runs on release tags.~~ Since #18, `tests.yml` runs pytest on push/PR (the presentation tests in separate processes).
