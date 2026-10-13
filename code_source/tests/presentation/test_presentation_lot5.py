@@ -49,7 +49,7 @@ class TestPresentationLot5(unittest.TestCase):
         self.assertIsNotNone(page.open_folder_btn)
         
         # Mock de os.startfile et os.path.exists
-        with patch("os.startfile") as mock_startfile, \
+        with patch("os.startfile", create=True) as mock_startfile, \
              patch("os.path.exists", return_value=True):
              
             # Test 1 : Clic sur ouvrir le dossier
@@ -93,7 +93,7 @@ class TestPresentationLot5(unittest.TestCase):
         self.assertFalse(hasattr(page, "cours_pdf_checkbox"), "La case PDF Cours.xlsx doit être supprimée avec l'export Cours.")
         
         # Mock de os.startfile et os.path.exists
-        with patch("os.startfile") as mock_startfile, \
+        with patch("os.startfile", create=True) as mock_startfile, \
              patch("os.path.exists", return_value=True) as mock_exists:
             
             page.open_template_folder()
