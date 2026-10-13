@@ -643,6 +643,7 @@ startBureau({
     let activeCoachId = null;
     let activeBilanAthleteId = null;
     let compFilterStatus = "all";
+    let partFilterStatus = "all";
     let activeSubTab = "participants";
     let haFilterStatus = "all";
     let emailTemplates = [];
@@ -779,6 +780,7 @@ startBureau({
       container.querySelectorAll(".comp-card[data-id]").forEach(card => {
         card.addEventListener("click", () => {
           activeCompId = card.dataset.id;
+          partFilterStatus = "all";
           renderCompsList();
           renderActiveCompWorkspace();
         });
@@ -837,6 +839,17 @@ startBureau({
                   ? coachNames.map(cn => `<span class="tag-badge" style="background:#EFF6FF; color:var(--blue); border:1px solid #BFDBFE; font-weight:600; font-size:11.5px; padding:2px 8px;">🏃 ${esc(cn)}</span>`).join("")
                   : `<span class="muted" style="font-style:italic; font-size:12px;">Aucun coach assigné</span>`
                 }
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12.5px; flex-wrap:wrap;">
+                <span style="font-weight:700; color:#475569;">🏆 Résultats FFME :</span>
+                ${comp.url_resultats ? `
+                  <a href="${esc(comp.url_resultats)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue); font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:5px; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:6px; padding:2px 8px;" title="Consulter la page officielle des résultats MyCompet">
+                    🌐 ${esc(comp.url_resultats)} ↗
+                  </a>
+                  ${comp.resultats_synced_at ? `<span class="muted" style="font-size:11px;">(synchronisés)</span>` : ""}
+                ` : `
+                  <span class="muted" style="font-style:italic; font-size:12px;">Non renseignés — cliquez sur « 🏆 Trouver les résultats » pour les détecter automatiquement</span>
+                `}
               </div>
             </div>
 
@@ -937,8 +950,12 @@ startBureau({
           throw new Error(data.message || `Erreur serveur HTTP ${res.status}`);
         }
 
+        comp.url_resultats = data.url;
+        comp.resultats_synced_at = new Date().toISOString();
         const resId = data.url ? data.url.split("/").pop() : "";
         toast(`🏆 ${data.matched_count} résultat(s) associé(s) sur ${data.total_scraped} compétiteur(s) ALJ trouvés (${resId}) !`, 7000);
+        renderActiveCompWorkspace();
+        renderCompsList();
       } catch (err) {
         console.error("Erreur récupération résultats MyCompet :", err);
         toast(`❌ Erreur MyCompet : ${err.message}`, 8000);
@@ -962,9 +979,39 @@ startBureau({
 
     function renderParticipantsTab(comp, pane) {
       const parts = comp.participants || [];
+      const nbParticipe = parts.filter(p => p.selectionne).length;
+      const nbEnAttente = parts.filter(p => p.statut_paiement === "en_attente").length;
+
+      function getFilteredParts() {
+        const q = ($("part-filter-input")?.value || "").toLowerCase().trim();
+        let list = parts;
+        if (partFilterStatus === "selected") {
+          list = list.filter(p => p.selectionne);
+        } else if (partFilterStatus === "unpaid") {
+          list = list.filter(p => p.statut_paiement === "en_attente");
+        }
+        if (q) {
+          list = list.filter(p => `${p.nom} ${p.prenom} ${p.num_licence || ''}`.toLowerCase().includes(q));
+        }
+        return list;
+      }
+
       pane.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-          <input type="search" id="part-filter-input" class="search-input" placeholder="Rechercher un compétiteur…" style="max-width:280px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input type="search" id="part-filter-input" class="search-input" placeholder="Rechercher un compétiteur…" style="max-width:240px;">
+            <div class="filter-chips">
+              <button class="filter-chip${partFilterStatus === 'all' ? ' active' : ''}" id="part-chip-all">
+                📋 Tous (${parts.length})
+              </button>
+              <button class="filter-chip${partFilterStatus === 'selected' ? ' active' : ''}" id="part-chip-selected">
+                ✅ Participe : Oui (${nbParticipe})
+              </button>
+              <button class="filter-chip${partFilterStatus === 'unpaid' ? ' active' : ''}" id="part-chip-unpaid">
+                ⏳ Paiement en attente (${nbEnAttente})
+              </button>
+            </div>
+          </div>
           <div style="font-size:12px; color:#64748B;">
             Astuce : cochez la case <b>Présent</b> pour pointer l'arrivée sur place en direct.
           </div>
@@ -987,16 +1034,37 @@ startBureau({
               </tr>
             </thead>
             <tbody id="parts-tbody">
-              ${renderParticipantsRows(comp, parts)}
+              ${renderParticipantsRows(comp, getFilteredParts())}
             </tbody>
           </table>
         </div>
       `;
 
-      $("part-filter-input")?.addEventListener("input", e => {
-        const q = e.target.value.toLowerCase().trim();
-        const filtered = parts.filter(p => `${p.nom} ${p.prenom}`.toLowerCase().includes(q));
-        $("parts-tbody").innerHTML = renderParticipantsRows(comp, filtered);
+      function updatePartFilterChips() {
+        $("part-chip-all")?.classList.toggle("active", partFilterStatus === "all");
+        $("part-chip-selected")?.classList.toggle("active", partFilterStatus === "selected");
+        $("part-chip-unpaid")?.classList.toggle("active", partFilterStatus === "unpaid");
+        $("parts-tbody").innerHTML = renderParticipantsRows(comp, getFilteredParts());
+        attachParticipantListeners(comp);
+      }
+
+      $("part-chip-all")?.addEventListener("click", () => {
+        partFilterStatus = "all";
+        updatePartFilterChips();
+      });
+
+      $("part-chip-selected")?.addEventListener("click", () => {
+        partFilterStatus = "selected";
+        updatePartFilterChips();
+      });
+
+      $("part-chip-unpaid")?.addEventListener("click", () => {
+        partFilterStatus = "unpaid";
+        updatePartFilterChips();
+      });
+
+      $("part-filter-input")?.addEventListener("input", () => {
+        $("parts-tbody").innerHTML = renderParticipantsRows(comp, getFilteredParts());
         attachParticipantListeners(comp);
       });
 

@@ -384,6 +384,9 @@ class TestBureauFiles(unittest.TestCase):
                       "section-competitions", "section-helloasso", "section-bilan", "section-coachs"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn("comp-layout", html)
+        self.assertIn("part-chip-all", html)
+        self.assertIn("part-chip-selected", html)
+        self.assertIn("part-chip-unpaid", html)
         self.assertIn('apiFetch("/api/helloasso/sync"', html)
         self.assertIn('apiFetch("/api/send-email"', html)
         self.assertIn("/fetch-results", html)
