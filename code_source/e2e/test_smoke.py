@@ -10,7 +10,8 @@ from helpers import stack
 
 pytestmark = pytest.mark.smoke
 
-BUREAU_PAGES = ["/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/outils"]
+BUREAU_PAGES = ["/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/planning",
+                "/bureau/outils", "/bureau/parametres"]
 MOBILE_PAGES = ["/competitions", "/index"]
 
 

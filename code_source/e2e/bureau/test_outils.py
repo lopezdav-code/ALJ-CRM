@@ -1,4 +1,4 @@
-"""Office portal, Outils page: members map, pivot table, Google connection status."""
+"""Office portal, Outils page: members map, pivot table; Google token warning of every office page."""
 import json
 
 from playwright.sync_api import expect
@@ -38,19 +38,6 @@ def test_pivot_table_by_season(page):
         page.locator("#pivot-season-select").select_option("2025-2026")
     expect(page.locator("#iframe-pivot")).to_be_visible()
     expect(frame.locator(".pvtTable, .pvtUi").first).to_be_visible()
-
-
-def test_google_status_without_token(page):
-    _open(page)
-    page.locator("#tab-btn-google").click()
-    expect(page.locator("#google-status-badge")).to_contain_text("Non connecté")
-    expect(page.locator("#google-account-email")).to_have_text("Non configuré")
-    expect(page.locator("#google-db-mode")).to_contain_text("Firestore")
-
-    page.locator("#btn-google-test").click()
-    expect(page.locator("#google-test-results")).to_be_visible()
-    expect(page.locator("#google-test-details")).to_contain_text("🔴 Jeton OAuth2")
-    expect(page.locator("#toast")).to_contain_text("ont échoué")
 
 
 def test_refresh_button(page):

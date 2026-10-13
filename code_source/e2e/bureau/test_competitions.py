@@ -146,7 +146,8 @@ def test_competition_csv_export(page, test_data, members, tmp_path):
     rows = _read_csv(info.value, tmp_path)
     assert rows[0][:3] == ["Nom", "Prénom", "N° Licence"]
     assert len(rows) == 1 + len(members)
-    assert sorted(r[5] for r in rows[1:]) == ["Non", "Non", "Oui"]
+    participe = rows[0].index("Participe")
+    assert sorted(r[participe] for r in rows[1:]) == ["Non", "Non", "Oui"]
 
 
 def test_season_balance(page, test_data, members, tmp_path):
