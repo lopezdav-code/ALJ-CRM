@@ -197,6 +197,10 @@ def parse_mycompet_results_html(html_text: str, club_keyword: str = "JONAGE") ->
                 cat_match = re.search(r'(\[?[Uu]\d{2}\]?\s*(?:Femme|Homme|F|H)?|\[?(?:Sénior|Senior|Vétéran|Veteran)\]?\s*(?:Femme|Homme|F|H)?)', prev[-1].text_content())
                 cat_name = cat_match.group(1).replace("[", "").replace("]", "").strip() if cat_match else prev[-1].text_content().strip()
 
+        # Calculer le nombre total de participants dans cette catégorie / épreuve
+        athlete_rows = elem.xpath(".//table//tr[.//a[contains(@href, 'palmares')]]") if elem.tag != "table" else elem.xpath(".//tr[.//a[contains(@href, 'palmares')]]")
+        total_in_cat = len(athlete_rows)
+
         rows = elem.xpath(".//tr[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), '" + club_kw + "')]")
         for r in rows:
             a_elem = r.xpath(".//a[contains(@href, 'palmares')]")
@@ -237,6 +241,7 @@ def parse_mycompet_results_html(html_text: str, club_keyword: str = "JONAGE") ->
                     "licence": licence,
                     "categorie": cat_name,
                     "classement": rank_str,
+                    "total_categorie": total_in_cat,
                     "performance": perf_str,
                 }
 

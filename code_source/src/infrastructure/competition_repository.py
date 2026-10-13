@@ -180,9 +180,9 @@ class CompetitionRepository:
 
             # Migration : colonnes résultats et pointage dans la table participants
             part_cols = {r["name"] for r in conn.execute("PRAGMA table_info(participants)").fetchall()}
-            for col_name in ("classement", "resultat_ffme", "categorie_ffme", "performance_ffme", "resultat_synced_at", "present"):
+            for col_name in ("classement", "total_categorie", "resultat_ffme", "categorie_ffme", "performance_ffme", "resultat_synced_at", "present"):
                 if col_name not in part_cols:
-                    col_type = "INTEGER DEFAULT 0" if col_name == "present" else "TEXT DEFAULT ''"
+                    col_type = "INTEGER DEFAULT 0" if col_name in ("present", "total_categorie") else "TEXT DEFAULT ''"
                     conn.execute(f"ALTER TABLE participants ADD COLUMN {col_name} {col_type}")
                 
             conn.commit()

@@ -1384,8 +1384,12 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
         match = by_licence.get(p_lic) or by_name.get(p_name)
         if match:
             matched_count += 1
-            p["classement"] = match.get("classement") or ""
-            p["resultat_ffme"] = f"{match.get('classement')}e" if match.get("classement") else ""
+            cl = str(match.get("classement") or "").strip()
+            tot = int(match.get("total_categorie") or 0)
+            p["classement"] = cl
+            p["total_categorie"] = tot
+            suffix = f" / {tot}" if tot > 0 else "e"
+            p["resultat_ffme"] = f"{cl}{suffix}" if cl else ""
             p["categorie_ffme"] = match.get("categorie") or ""
             p["performance_ffme"] = match.get("performance") or ""
             p["resultat_synced_at"] = now_iso
@@ -1415,11 +1419,11 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
                     aid = p.get("adherent_id")
                     if aid:
                         conn.execute(
-                            """UPDATE participants SET classement = ?, resultat_ffme = ?,
+                            """UPDATE participants SET classement = ?, total_categorie = ?, resultat_ffme = ?,
                                categorie_ffme = ?, performance_ffme = ?, resultat_synced_at = ?
                                WHERE (competition_id = ? OR competition_id = (SELECT id FROM competitions WHERE id_ffme = ?))
                                AND adherent_id = ?""",
-                            (p.get("classement") or "", p.get("resultat_ffme") or "",
+                            (p.get("classement") or "", int(p.get("total_categorie") or 0), p.get("resultat_ffme") or "",
                              p.get("categorie_ffme") or "", p.get("performance_ffme") or "",
                              now_iso, comp_id, comp_id, aid)
                         )

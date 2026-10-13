@@ -1084,6 +1084,7 @@ startBureau({
         let rankBadge = `<span class="muted" style="font-size:11.5px;">—</span>`;
         if (p.classement) {
           const r = String(p.classement).trim();
+          const tot = p.total_categorie ? ` / ${p.total_categorie}` : "";
           let icon = "🏅";
           let colBg = "#FEF3C7";
           let colTxt = "#B45309";
@@ -1092,11 +1093,11 @@ startBureau({
           else if (r === "2") { icon = "🥈"; colBg = "#F1F5F9"; colTxt = "#334155"; border = "#CBD5E1"; }
           else if (r === "3") { icon = "🥉"; colBg = "#FFEDD5"; colTxt = "#9A3412"; border = "#FDBA74"; }
 
-          const suffix = r === "1" ? "er" : "e";
+          const suffix = (!tot && r === "1") ? "er" : (!tot ? "e" : "");
           rankBadge = `
             <div style="display:inline-flex; flex-direction:column; align-items:center;">
               <span class="tag-badge" style="background:${colBg}; color:${colTxt}; border:1px solid ${border}; font-weight:800; font-size:12px; padding:2px 8px;">
-                ${icon} ${esc(r)}${suffix}
+                ${icon} ${esc(r)}${suffix}${tot}
               </span>
               ${p.categorie_ffme ? `<span class="muted" style="font-size:10.5px; margin-top:2px;">${esc(p.categorie_ffme)}</span>` : ""}
             </div>
@@ -2337,16 +2338,18 @@ startBureau({
       }
 
       const rows = [
-        ["Nom", "Prénom", "N° Licence", "Catégorie", "Créneau", "Participe", "Paiement", "Montant", "Commande", "Présent", "Téléphone"]
+        ["Nom", "Prénom", "N° Licence", "Catégorie", "Créneau", "Résultat FFME", "Participe", "Paiement", "Montant", "Commande", "Présent", "Téléphone"]
       ];
 
       for (const p of parts) {
+        const resText = p.classement ? `${p.classement}${p.total_categorie ? ` / ${p.total_categorie}` : 'e'}${p.categorie_ffme ? ` (${p.categorie_ffme})` : ''}` : "";
         rows.push([
           p.nom || "",
           p.prenom || "",
           p.num_licence || "",
           p.categorie || "",
           p.groupe || p.tarif || "",
+          resText,
           p.selectionne ? "Oui" : "Non",
           PAIEMENT_LABELS[p.statut_paiement] || p.statut_paiement || "",
           p.montant_paye ? `${p.montant_paye} €` : "",

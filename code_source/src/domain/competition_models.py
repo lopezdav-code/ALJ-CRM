@@ -152,7 +152,8 @@ class Participant:
     commande_helloasso: str = ""     # n° de commande HelloAsso (renseigné à la synchro)
     note_paiement: str = ""          # commentaire du coach (annulation, régularisation…)
     classement: str = ""             # rang ou classement FFME (ex: "1", "4", "13")
-    resultat_ffme: str = ""          # libellé complet (ex: "1er", "4e")
+    total_categorie: int = 0         # nombre total de compétiteurs dans la catégorie (ex: 14)
+    resultat_ffme: str = ""          # libellé complet (ex: "6 / 14" ou "1er / 15")
     categorie_ffme: str = ""         # catégorie officielle MyCompet (ex: "U13Femme")
     performance_ffme: str = ""       # points ou score MyCompet
     resultat_synced_at: str = ""
@@ -175,6 +176,7 @@ class Participant:
             "commande_helloasso": self.commande_helloasso,
             "note_paiement": self.note_paiement,
             "classement": self.classement,
+            "total_categorie": self.total_categorie,
             "resultat_ffme": self.resultat_ffme,
             "categorie_ffme": self.categorie_ffme,
             "performance_ffme": self.performance_ffme,
@@ -194,12 +196,14 @@ class Participant:
             email=str(row.get("email") or ""),
             tarif=str(row.get("tarif") or ""),
             selectionne=bool(sel) and str(sel) not in ("0", "Non", "non"),
+            present=bool(row.get("present")),
             statut_paiement=str(row.get("statut_paiement") or PAIEMENT_NON_INVITE),
             date_synchro_helloasso=str(row.get("date_synchro_helloasso") or ""),
             montant_paye=float(row.get("montant_paye") or 0.0),
             commande_helloasso=str(row.get("commande_helloasso") or ""),
             note_paiement=str(row.get("note_paiement") or ""),
             classement=str(row.get("classement") or ""),
+            total_categorie=int(row.get("total_categorie") or 0),
             resultat_ffme=str(row.get("resultat_ffme") or ""),
             categorie_ffme=str(row.get("categorie_ffme") or ""),
             performance_ffme=str(row.get("performance_ffme") or ""),

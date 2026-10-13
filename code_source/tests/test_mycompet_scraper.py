@@ -177,12 +177,14 @@ class TestMyCompetScraper(unittest.TestCase):
         self.assertEqual(buland["nom"], "BULAND")
         self.assertEqual(buland["prenom"], "Julia")
         self.assertEqual(buland["classement"], "9")
+        self.assertEqual(buland["total_categorie"], 2)
         self.assertEqual(buland["categorie"], "U13Femme")
 
         chazot = next(r for r in results if r["licence"] == "970269")
         self.assertEqual(chazot["nom"], "CHAZOT")
         self.assertEqual(chazot["prenom"], "Tiago")
         self.assertEqual(chazot["classement"], "1")
+        self.assertEqual(chazot["total_categorie"], 1)
         self.assertEqual(chazot["categorie"], "U15Homme")
 
 
