@@ -63,7 +63,9 @@ def server(e2e_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request
     env = stack.dev_environment(data_dir, **helloasso.SERVER_ENV)
     log_path = e2e_logs / "server.log"
     stack.seed(env, log_path)
-    TestData(env).save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
+    data = TestData(env)
+    data.save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
+    data.fill_geocache()
     srv = stack.ServerProcess(env, int(os.environ.get("E2E_PORT", "8090")), log_path)
     srv.start()
     yield srv
@@ -102,11 +104,21 @@ def mobile_context(new_context, playwright) -> BrowserContext:
     return new_context(**device)
 
 
+# Raised by Playwright itself, not by the pages: service_workers="block" patches navigator.serviceWorker
+# in every frame, which throws in the sandboxed iframes of the Outils page (map, pivot table)
+_HARNESS_ERRORS = ("Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled "
+                   "because the context is sandboxed",)
+
+
 def _checked_page(context: BrowserContext):
     """New page whose uncaught JavaScript exceptions fail the test (reported at teardown)."""
     page = context.new_page()
     errors = []
-    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def record(error):
+        if not str(error).startswith(_HARNESS_ERRORS):
+            errors.append(str(error))
+    page.on("pageerror", record)
     yield page
     assert not errors, f"uncaught JavaScript error(s): {errors}"
 
