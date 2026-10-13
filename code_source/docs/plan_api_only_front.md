@@ -29,9 +29,9 @@ The plan file is updated with any decisions taken during a review. Nothing is co
 
 | Phase | State | Notes |
 |---|---|---|
-| 0 | Done, awaiting review | Cold-start measurement still to do against production (needs a deploy). ETag responses use `Cache-Control: no-store`: the page keeps the last body and sends `If-None-Match` itself (`alj-sync.js`), so personal data never lands in the browser's HTTP cache. |
-| 1 | Done, awaiting review | See « Phase 1 — as built » below. |
-| 2 | Not started | |
+| 0 | Done (approved) | Cold-start measurement still to do against production (needs a deploy). ETag responses use `Cache-Control: no-store`: the page keeps the last body and sends `If-None-Match` itself (`alj-sync.js`), so personal data never lands in the browser's HTTP cache. |
+| 1 | Done (approved) | See « Phase 1 — as built » below. |
+| 2 | Done, awaiting review | See « Phase 2 — as built » below. |
 | 3 | Not started | |
 | 4 | Not started | Cleanup backlog, filled during reviews |
 
@@ -117,6 +117,37 @@ Existing routes reused unchanged: `/api/helloasso/sync`, `/api/send-email`, `/ap
 | GET `/api/members?season=` | C | New pure module `src/domain/member_view.py`: rows from `v_adherents_legacy` (`schema_v2.py:641`) plus the fields that only JS computes today (`age` at `YYYY-09-01`, `creneau_groupe`, `categorie`, `creneau_details`, `status_norm`, `payer`), ported from `alj-members.js:97-207`. Returns one season only (today the browser downloads every season). | `startMembersListener` (`alj-members.js:219`) used by `bureau/adherents.html:1315`; `index.html:391-404` |
 
 Existing member writes (`/api/members/update`, `/api/attestations/*`) are unchanged. After a write, the page refetches.
+
+#### Phase 2 — as built (deviations and notes for review)
+
+- **Layers, as in phase 1.**
+  - Controllers: `api/seasons.py` and `api/members.py`.
+  - Services: `services/season_service.py` and `services/member_service.py`.
+  - Pure view: `domain/member_view.py`, ported from `buildMembersData`.
+  - Repository: `SqliteRepository.list_seasons` and `list_member_rows`.
+  - Both routes go through the SQLite cache middleware (`ensure_fresh`, 30 s) and are coach-only (default rule of `required_role`).
+- **Response shapes.**
+  - `GET /api/seasons` → `{seasons, active}`.
+  - `GET /api/members?season=` → `{season, members, creneaux}`. Without `season`, the server uses the active one; an unknown season → 404 `not_found`.
+  - Deviation: `creneaux` (slot groups and their tariffs) travels with the members. Both pages need it to group members, and this saves a third poll.
+- **Rows come from a dedicated query, not `v_adherents_legacy`.** The view has no `purchase_id`, which `/api/members/update` needs. It also runs one subquery per insurance option for every row, which the pages don't use.
+  - `test_member_rows.py` checks that the query returns the same people as the view.
+- **Age at the start of the requested season.** The JS computed every age at the *active* season's start, even when a past season was displayed. Same result for the active season; past seasons now show the age during that season.
+- **S11 applied everywhere.** A tariff listed under two planning groups belongs to the first row by id, both in `/api/members` and in the Firestore `adherents` projection (`_read_planning_groups` now uses `member_view.tarif_slots`). A13 is resolved.
+- **Front end.**
+  - New classic script `web/shared/alj-members-sync.js` (`ALJMembersSync.start`) polls both routes and switches season on demand. A remembered season that no longer exists falls back to the active one. It is used by `bureau/adherents.html` and `index.html`.
+  - `bureau/outils.html` reads `/api/seasons`. Its default season is now the active one, instead of a hard-coded `2026-2027`.
+  - `alj-members.js` keeps the display helpers only. Dropped: `buildMembersData`, `startMembersListener`, `calcAge`, `normalizeGender`.
+  - The browser now downloads one season instead of every season of the five `crm_*` collections.
+  - The directory is online only (D2), and the PWA got its own `apiFetch` (ID token).
+  - After a member update, the bureau page refetches; the 🔄 buttons refetch too.
+- **Parity check on the emulator data** (dev, script in the session scratchpad, not committed): it rebuilt the list the way `alj-members.js` did, from the `crm_*` collections.
+  - Same people and purchases in both seasons (43 and 62).
+  - Identical slot group, category, age, normalized status and payer for all 62 members of the active season.
+- **Not verified:**
+  - In a browser.
+  - The cold start on Cloud Run (the first `/api/members` after scale-to-zero waits for the cache rebuild; S3, D3).
+- **Still loaded (removed in phase 3):** the Firestore SDK and `enablePersistence` on `index.html`.
 
 ### Phase 0 — Foundations (before phase 1)
 
@@ -325,7 +356,7 @@ Consequences:
 | A10 | coach cascades (PWA 1718/1739; repo `_refresh_coach_names`, `delete_coach`) | Several sequential competition updates with no rollback; a failure leaves names or ids partly updated (repo just logs). | **Still present.** |
 | A11 | repo `apply_helloasso_payment` (repo:668) | Overwrites `montant_paye` and `commande_helloasso`: a participant paying with several orders keeps only the last one. | **Still present** (now also on manual links). |
 | A12 | repo `sync_adherents_from_main` (repo:220-339) | Projections `adherents`/`planning` are upsert-only: deleted or out-of-season members and slots are never removed. | **Still present.** |
-| A13 | `alj-members.js` vs repo `_read_planning_groups` (342) | Tariff → group tie-break: JS takes the first row, Python the last. | Resolved by choosing one rule (S11). |
+| A13 | `alj-members.js` vs repo `_read_planning_groups` (342) | Tariff → group tie-break: JS takes the first row, Python the last. | **Resolved in phase 2**: first row by id everywhere (`domain.member_view.tarif_slots`). |
 | A14 | `src/server.py:1803` | `/api/auth/google/test` calls `ensure_fresh(max_age_seconds=10)`, but the parameter is `max_age`: TypeError (caught), so `database.ok` is always false. The test mocks it away. | **Fixed on main** (89c9394: `ensure_fresh` accepts `max_age_seconds`, the call uses `max_age`). |
 | A15 | `/api/auth/google/callback`, `update-token`; `secret_store.py:42-92` | On Cloud Run the refresh token is saved to the instance's `.env`/environment only: lost on restart, not shared between instances. | **Still present.** |
 | A16 | `src/server.py:1582,1625` | `return_to` and `error` are put into HTML/JS unescaped (open redirect / reflected injection); OAuth `state` is unsigned and not checked. **Security, prioritize.** | **Still present.** |

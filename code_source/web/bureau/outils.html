@@ -20,7 +20,7 @@
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { apiFetch, initFirebase } from "/static-web/alj-core.js";
+import { apiFetch } from "/static-web/alj-core.js";
 
 const esc = s => (s == null ? "" : String(s))
   .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1007,27 +1007,20 @@ startBureau({
       loadPivot(e.target.value, true);
     });
 
-    // Chargement des saisons depuis Firestore pour peupler le sélecteur TCD
-    try {
-      const { db } = initFirebase();
-      db.collection("crm_seasons").get().then(snap => {
-        const seasons = [];
-        snap.forEach(d => {
-          const x = d.data();
-          if (x && x._deleted !== true && x.name) seasons.push(x.name);
-        });
-        seasons.sort().reverse();
-        if (seasons.length) {
-          const defaultSeason = seasons.includes("2026-2027") ? "2026-2027" : seasons[0];
-          seasonSelect.innerHTML =
-            seasons.map(s => `<option value="${esc(s)}" ${s === defaultSeason ? "selected" : ""}>${esc(s)}</option>`).join("") +
-            '<option value="Toutes les saisons">Toutes les saisons</option>';
-          currentPivotSeason = defaultSeason;
-        }
-      }).catch(err => {
-        console.warn("Impossible de lister crm_seasons pour les outils :", err);
-      });
-    } catch (e) {}
+    // Seasons of the pivot table selector (active season selected)
+    apiFetch("/api/seasons").then(async res => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const { seasons, active } = await res.json();
+      if (seasons.length) {
+        const defaultSeason = seasons.includes(active) ? active : seasons[0];
+        seasonSelect.innerHTML =
+          seasons.map(s => `<option value="${esc(s)}" ${s === defaultSeason ? "selected" : ""}>${esc(s)}</option>`).join("") +
+          '<option value="Toutes les saisons">Toutes les saisons</option>';
+        currentPivotSeason = defaultSeason;
+      }
+    }).catch(err => {
+      console.warn("Impossible de lister les saisons pour les outils :", err);
+    });
 
     // Vérifier si un onglet est passé dans l'URL (?tab=ffme, ?tab=ffme-import, ?tab=presence, ?tab=pivot)
     const urlTab = new URLSearchParams(window.location.search).get("tab");

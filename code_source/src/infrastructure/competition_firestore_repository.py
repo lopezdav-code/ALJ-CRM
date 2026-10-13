@@ -40,6 +40,7 @@ from domain.competition_models import (
 )
 from domain.constants import get_active_season
 from domain.age_rules import parse_birth_date, age_at, get_season_start_date
+from domain import member_view
 from domain.utils import normalize_string
 from infrastructure.firestore_client import (
     META_KEYS,
@@ -393,24 +394,14 @@ class CompetitionFirestoreRepository:
 
     @staticmethod
     def _read_planning_groups(main_conn) -> Dict[str, str]:
-        """{tarif normalisé -> groupe de créneau} depuis la table planning."""
-        pairs: Dict[str, str] = {}
+        """{tarif normalisé -> groupe de créneau} depuis la table planning (same rule as the
+        member pages, domain.member_view: a tariff in two groups belongs to the first by id)."""
         try:
-            for pr in main_conn.execute("SELECT groupe, helloasso_tarifs FROM planning").fetchall():
-                groupe = str(pr["groupe"] or "").strip()
-                if not groupe:
-                    continue
-                try:
-                    tarifs = json.loads(str(pr["helloasso_tarifs"] or "[]"))
-                except (ValueError, TypeError):
-                    tarifs = []
-                for t in tarifs or []:
-                    t = str(t or "").strip()
-                    if t:
-                        pairs[normalize_string(t)] = groupe
+            rows = [dict(r) for r in main_conn.execute(
+                "SELECT id, groupe, helloasso_tarifs FROM planning").fetchall()]
         except Exception:
-            pass
-        return pairs
+            return {}
+        return {k: slot["groupe"] for k, slot in member_view.tarif_slots(rows).items()}
 
     @classmethod
     def list_planning_groups(cls) -> Dict[str, str]:

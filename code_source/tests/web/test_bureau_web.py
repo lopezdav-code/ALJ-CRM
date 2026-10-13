@@ -275,13 +275,12 @@ class TestBureauFiles(unittest.TestCase):
     def test_adherents_page_elements(self):
         """La page adherents.html contient le tableau, les filtres et le panneau de détail."""
         html = _read(os.path.join(BUREAU, "adherents.html"))
-        members_js = _read(os.path.join(SHARED, "alj-members.js"))
         filters_js = _read(os.path.join(SHARED, "alj-filters.js"))
         for elem in ("members-table", "members-tbody", "detail-pane", "search-input",
                       "season-select", "export-csv-btn", "status-chips", "filter-box"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn("Attestation envoyée", html)
-        self.assertIn("email_sent_date", members_js)
+        self.assertIn("email_sent_date", html)
         self.assertIn('data-sort="order_date"', html)
         self.assertIn("Date d'inscription", html)
         self.assertIn("order_date", filters_js)
@@ -318,6 +317,18 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("export function getMemberDiplomes", members_js)
         self.assertIn("diplome", filters_js)
         self.assertIn("ville", filters_js)
+
+    def test_member_pages_use_members_api(self):
+        """Members and seasons come from the API, never Firestore directly (plan phase 2)."""
+        adherents = _read(os.path.join(BUREAU, "adherents.html"))
+        outils = _read(os.path.join(BUREAU, "outils.html"))
+        members_js = _read(os.path.join(SHARED, "alj-members.js"))
+        for name, text in (("adherents", adherents), ("outils", outils), ("alj-members.js", members_js)):
+            for firestore_call in (".collection(", "onSnapshot", "crm_"):
+                self.assertNotIn(firestore_call, text, f"{name}: {firestore_call}")
+        self.assertIn('<script src="/static-web/alj-members-sync.js"></script>', adherents)
+        self.assertIn("ALJMembersSync.start(", adherents)
+        self.assertIn('apiFetch("/api/seasons")', outils)
 
     def test_adherents_email_modal_and_api_wiring(self):
         """L'Étape 2 intègre la modale d'e-mail et le câblage aux endpoints d'e-mail."""

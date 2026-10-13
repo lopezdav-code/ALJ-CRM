@@ -99,11 +99,13 @@ async def security_headers_middleware(request, call_next):
 
 app.middleware("http")(security_headers_middleware)  # outermost
 
-# Data routes of the web front end (competitions, coaches, HelloAsso links): src/api/
-from api import coaches, competition_members, competitions, helloasso_items, participants
+# Data routes of the web front end (competitions, coaches, HelloAsso links, members): src/api/
+from api import (coaches, competition_members, competitions, helloasso_items, members,
+                 participants, seasons)
 from api.responses import service_error_handler
 from services.errors import ServiceError
-for _api in (competitions, participants, coaches, competition_members, helloasso_items):
+for _api in (competitions, participants, coaches, competition_members, helloasso_items,
+             members, seasons):
     app.include_router(_api.router)
 app.add_exception_handler(ServiceError, service_error_handler)
 
