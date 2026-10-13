@@ -15,6 +15,7 @@ from playwright.sync_api import BrowserContext
 
 from helpers import stack
 from helpers.auth import login_as as _login_as
+from helpers.data import TestData
 from helpers.mailpit import Mailpit
 
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
@@ -54,6 +55,14 @@ def server(dev_stack, e2e_logs, tmp_path_factory, request):
 @pytest.fixture(scope="session")
 def base_url(server) -> str:
     return server.url
+
+
+@pytest.fixture(scope="session")
+def connect_options():
+    """E2E_PLAYWRIGHT_WS=ws://127.0.0.1:3000/ : browser served by the official Playwright image
+    (no system libraries needed on the host, see dev/README.md)."""
+    ws_endpoint = os.environ.get("E2E_PLAYWRIGHT_WS")
+    return {"endpoint": ws_endpoint} if ws_endpoint else None
 
 
 @pytest.fixture(scope="session")
@@ -103,3 +112,9 @@ def mailpit(dev_stack) -> Mailpit:
     client = Mailpit()
     client.clear()
     return client
+
+
+@pytest.fixture(scope="session")
+def test_data(server) -> TestData:
+    """Creates and reads competitions through the application's repository (helpers/data.py)."""
+    return TestData(server.env)

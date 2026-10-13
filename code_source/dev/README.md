@@ -60,8 +60,22 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
 
 - ⚠️ **La suite réinitialise les données de l'émulateur** (elle relance le seed). Le serveur de test tourne
   sur le port `8090` (`E2E_PORT`), avec son propre cache SQLite temporaire : `run_server.sh` (8080) peut rester lancé.
+- **Sans installer les bibliothèques système de Chromium** (WSL sans sudo) : navigateur servi par l'image
+  officielle Playwright (même version que `requirements-e2e.txt`), réseau de l'hôte pour joindre `localhost` :
+  ```bash
+  docker run -d --name alj-e2e-browser --network host --init --ipc=host --user pwuser \
+    mcr.microsoft.com/playwright:v1.63.0-noble \
+    /bin/sh -c "cd /home/pwuser && npx -y playwright@1.63.0 run-server --port 3000 --host 127.0.0.1"
+  E2E_PLAYWRIGHT_WS=ws://127.0.0.1:3000/ python -m pytest -c e2e/pytest.ini e2e
+  ```
 - Connexion sans passer par le sélecteur de comptes : `login_as(page, "admin" | "coach" | "readonly")`
-  (`e2e/helpers/auth.py`). E-mails : fixture `mailpit` (`e2e/helpers/mailpit.py`).
+  (`e2e/helpers/auth.py`). E-mails : fixture `mailpit` (`e2e/helpers/mailpit.py`). Données de test : fixture
+  `test_data` (`e2e/helpers/data.py`), qui passe par le dépôt de l'application ; chaque test crée ses propres
+  compétitions sous un nom unique.
+- Bugs connus : tests marqués `xfail(strict=True)` avec la référence du bug (ex. A6 de
+  `docs/plan_api_only_front.md`). Ils échouent (XPASS) dès que le bug est corrigé : retirer alors le marqueur.
+- L'émulateur Firestore grossit à chaque exécution (≈ 400 Mo) : s'il ne répond plus après de nombreuses
+  exécutions, `docker restart alj-dev-firebase-emulator-1` (la suite réinitialise les données de toute façon).
 - Déboguer : `--headed --slowmo 300`, ou `--tracing retain-on-failure` puis
   `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux du serveur et du seed :
   `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
