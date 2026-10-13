@@ -197,3 +197,107 @@ def test_coach_cannot_edit_in_office(page):
     expect(workspace.locator("#btn-edit-comp")).to_have_count(0)
     expect(workspace.locator("#btn-del-comp")).to_have_count(0)
     expect(page.locator("#parts-tbody .part-select-chk").first).to_be_disabled()
+
+
+# ---------------------------------------------------------------------------
+# Competitors workflow: manual payment, withdrawal (credit kept or lost), check-in
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def workflow(test_data, members):
+    """A competition with a paid competitor and an unpaid one, opened by the admin."""
+    paid, unpaid, _ = members
+    nom = unique_name("E2E Workflow")
+    cid = test_data.create_competition(nom, date=_iso(28), prix=12, participants=[paid["id"], unpaid["id"]],
+                                       selected=[paid["id"], unpaid["id"]])
+    test_data.mark_paid(cid, paid["id"], 12.0, order_ref="E2E-PAID")
+    return {"id": cid, "nom": nom, "paid": paid, "unpaid": unpaid}
+
+
+@pytest.fixture
+def dialogs(page):
+    """Answers confirm() boxes (accept unless told otherwise) and prompt() boxes with `text`."""
+    answer = {"accept": True, "text": ""}
+
+    def handle(dialog):
+        if not answer["accept"]:
+            dialog.dismiss()
+        elif dialog.type == "prompt":
+            dialog.accept(answer["text"])
+        else:
+            dialog.accept()
+    page.on("dialog", handle)
+    return answer
+
+
+def _stored(test_data, workflow, member):
+    return next(p for p in test_data.competition(workflow["id"])["participants"] if p["adherent_id"] == member["id"])
+
+
+def test_manual_payment(page, test_data, workflow, dialogs):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    row = participant_row(page, workflow["unpaid"])
+    expect(row).to_contain_text("En attente")
+    dialogs["text"] = "12,5"
+    row.locator(".part-mark-paid-btn").click()
+    expect(page.locator("#toast")).to_contain_text("Paiement manuel de 12.5 € enregistré")
+    expect(participant_row(page, workflow["unpaid"])).to_contain_text("Payé (12.5 €)")
+    stored = _stored(test_data, workflow, workflow["unpaid"])
+    assert (stored["statut_paiement"], stored["montant_paye"], stored["commande_helloasso"]) == (
+        "paye", 12.5, "Règlement manuel")
+
+
+def test_paid_competitor_cannot_be_removed(page, workflow):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    row = participant_row(page, workflow["paid"])
+    expect(row).to_contain_text("Payé (12 €)")
+    expect(row.locator(".part-remove-btn")).to_have_count(0)
+    expect(row.locator(".part-action-select")).to_be_visible()
+
+
+@pytest.mark.parametrize("decision, badge", [("annule_reporte", "Report (12 €)"), ("annule_perdu", "Annulé — perdu (12 €)")])
+def test_withdrawal_of_paid_competitor(page, test_data, workflow, dialogs, decision, badge):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    participant_row(page, workflow["paid"]).locator(".part-action-select").select_option(decision)
+    row = participant_row(page, workflow["paid"])
+    expect(row).to_contain_text(badge)
+    expect(row.locator(".part-select-chk")).not_to_be_checked()
+    stored = _stored(test_data, workflow, workflow["paid"])
+    assert (stored["statut_paiement"], stored["selectionne"], stored["montant_paye"]) == (decision, False, 12)
+
+    # A withdrawal entered by mistake can be undone
+    row.locator(".part-restore-paid-btn").click()
+    expect(participant_row(page, workflow["paid"])).to_contain_text("Payé (12 €)")
+    stored = _stored(test_data, workflow, workflow["paid"])
+    assert (stored["statut_paiement"], stored["selectionne"]) == ("paye", True)
+
+
+def test_withdrawal_needs_confirmation(page, test_data, workflow, dialogs):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    dialogs["accept"] = False
+    select = participant_row(page, workflow["paid"]).locator(".part-action-select")
+    select.select_option("annule_perdu")
+    expect(select).to_have_value("")
+    assert _stored(test_data, workflow, workflow["paid"])["statut_paiement"] == "paye"
+
+
+def test_checked_in_competitor_is_locked(page, test_data, workflow):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    participant_row(page, workflow["paid"]).locator(".part-present-chk").check()
+    row = participant_row(page, workflow["paid"])
+    expect(row).to_contain_text("Sur place")
+    expect(row.locator(".part-action-select, .part-remove-btn")).to_have_count(0)
+    assert _stored(test_data, workflow, workflow["paid"])["present"] is True
+
+
+def test_remove_unpaid_competitor(page, test_data, workflow, dialogs):
+    open_competitions(page)
+    select_competition(page, workflow["nom"])
+    participant_row(page, workflow["unpaid"]).locator(".part-remove-btn").click()
+    expect(participant_row(page, workflow["unpaid"])).to_have_count(0)
+    remaining = [p["adherent_id"] for p in test_data.competition(workflow["id"])["participants"]]
+    assert remaining == [workflow["paid"]["id"]]

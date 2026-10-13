@@ -1,5 +1,12 @@
-"""Office portal, Outils page: members map, pivot table; Google token warning of every office page."""
+"""Office portal, Outils page: members map, pivot table, attendance sheets, FFME export; Google token
+warning of every office page."""
+import csv
+import io
 import json
+import zipfile
+
+import openpyxl
+import pytest
 
 from playwright.sync_api import expect
 
@@ -61,3 +68,81 @@ def test_no_warning_when_token_is_fine(page):
     login_as(page, "admin")
     expect(page.locator("#content")).to_be_visible()
     expect(page.locator("#google-auth-warning")).to_be_hidden()
+
+
+# ---------------------------------------------------------------------------
+# Attendance sheets and FFME licences export
+# ---------------------------------------------------------------------------
+def _open_tab(page, tab):
+    _open(page)
+    page.locator(f"#tab-btn-{tab}").click()
+    expect(page.locator(f"#pane-{tab}")).to_be_visible()
+    return page
+
+
+def _saved(download, folder):
+    target = folder / download.suggested_filename
+    download.save_as(target)
+    return target
+
+
+def test_course_attendance_sheets(page, tmp_path):
+    config = page.request.get("/api/presence/config").json()
+    courses = config["cours"]
+    assert courses, "the seed plans supervised courses"
+    _open_tab(page, "presence")
+    expect(page.locator("#cours-badge-count")).to_have_text(f"{len(courses)} créneau(x)")
+    expect(page.locator(".cours-cb")).to_have_count(len(courses))
+    expect(page.locator("#cours-start-date")).to_have_value(config["default_dates"]["start"])
+
+    page.locator("#btn-deselect-all-cours").click()
+    page.locator("#btn-download-cours").click()
+    expect(page.locator("#toast")).to_contain_text("cocher au moins un groupe")
+
+    # One workbook, one sheet page per course
+    page.locator("#btn-select-all-cours").click()
+    with page.expect_download() as info:
+        page.locator("#btn-download-cours").click()
+    workbook = openpyxl.load_workbook(_saved(info.value, tmp_path))
+    text = " ".join(str(c) for ws in workbook.worksheets for row in ws.iter_rows(values_only=True) for c in row if c)
+    assert all(course["groupe"] in text for course in courses)
+
+    # One file per course, in a ZIP archive
+    page.locator("input[name='cours-format'][value='zip']").check()
+    with page.expect_download() as info:
+        page.locator("#btn-download-cours").click()
+    with zipfile.ZipFile(_saved(info.value, tmp_path)) as archive:
+        names = archive.namelist()
+    assert len(names) == len(courses) and all(n.endswith(".xlsx") for n in names)
+
+
+@pytest.mark.xfail(strict=True, reason="domain.planning_groups.is_autonome_creneau ignores the slot type "
+                                       "(`autonome`) and only looks for « autonome » in the group/tariff names; "
+                                       "the seeded names are English (« Independent »)")
+def test_autonomous_attendance_sheet(page, tmp_path):
+    _open_tab(page, "presence")
+    expect(page.locator("#presence-autonome-summary")).not_to_contain_text("Total adhérents : 0")
+    with page.expect_download(timeout=10_000) as info:
+        page.locator("#btn-download-autonome").click()
+    assert _saved(info.value, tmp_path).stat().st_size > 0
+
+
+def test_ffme_licences_export(page, tmp_path):
+    stats = page.request.get("/api/ffme/stats").json()
+    _open_tab(page, "ffme")
+    expect(page.locator("#ffme-stat-total")).to_have_text(str(stats["estimated_total"]))
+    expect(page.locator("#ffme-stat-renewals")).to_have_text(str(stats["renewals_count"]))
+    expect(page.locator("#ffme-stat-new")).to_have_text(str(stats["new_licences_count"]))
+    assert stats["renewals_count"] + stats["new_licences_count"] == stats["estimated_total"]
+
+    with page.expect_download() as info:
+        page.locator("#btn-download-ffme").click()
+    assert info.value.suggested_filename.startswith("import_ffme_")
+    text = _saved(info.value, tmp_path).read_text(encoding="utf-8-sig")
+    rows = list(csv.reader(io.StringIO(text), delimiter=";"))
+    assert rows[0][:3] == ["numero de licence", "nom", "prenom"]
+    assert len([r for r in rows[1:] if r]) == stats["estimated_total"]
+
+    page.locator("#ffme-include-termine").check()
+    with page.expect_response(lambda r: "include_termine=true" in r.url and r.ok), page.expect_download():
+        page.locator("#btn-download-ffme").click()
