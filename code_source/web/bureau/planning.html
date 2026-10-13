@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
+<meta name="alj-web-version" content="21">
+<title>ALJ Escalade — Bureau · Planning (v21)</title>
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<link rel="stylesheet" href="/static-web/alj.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/runtime-config.js"></script>
+<script src="/static-web/alj-firebase.js"></script>
+
+<style>
+/* Styles spécifiques de la grille hebdomadaire */
+.week-grid-container {
+  display: flex;
+  background: #FFF;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-x: auto;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.time-col {
+  width: 55px;
+  min-width: 55px;
+  border-right: 1px solid var(--line);
+  background: #F8FAFC;
+  display: flex;
+  flex-direction: column;
+}
+.time-col-header {
+  height: 40px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.time-slot-label {
+  height: 50px;
+  box-sizing: border-box;
+  border-bottom: 1px dashed #E2E8F0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  font-size: 11px;
+  color: #64748B;
+  font-weight: 600;
+}
+.days-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
+  flex: 1;
+}
+.day-column {
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.day-column:last-child {
+  border-right: none;
+}
+.day-header {
+  height: 40px;
+  border-bottom: 1px solid var(--line);
+  background: #F1F5F9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E293B;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.day-slots-track {
+  position: relative;
+  height: 650px; /* 13 heures (9h à 22h) * 50px */
+  background-image: linear-gradient(to bottom, #F8FAFC 1px, transparent 1px);
+  background-size: 100% 50px;
+}
+.plan-slot-card {
+  position: absolute;
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  font-size: 11.5px;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  transition: transform 0.15s, box-shadow 0.15s;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.plan-slot-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+  z-index: 20;
+}
+.slot-type-competition { background: #E8F5E9; border: 1.5px solid #66BB6A; color: #1B5E20; }
+.slot-type-perfectionnement { background: #FCE4EC; border: 1.5px solid #EC407A; color: #880E4F; }
+.slot-type-cours, .slot-type-loisir { background: #E8EAF6; border: 1.5px solid #7986CB; color: #1A237E; }
+.slot-type-autonome-bloc { background: #FFF3E0; border: 1.5px solid #FFA726; color: #E65100; }
+.slot-type-autonome { background: #F3F4F6; border: 1.5px solid #9CA3AF; color: #374151; }
+
+@media print {
+  body { background: #FFF !important; }
+  #shell > header, #shell > aside, .side, .side-foot, .filter-chips, .btn, #tools-refresh-btn, .header-actions { display: none !important; }
+  .main { padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; }
+  .card { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 0 !important; }
+  .week-grid-container { border: 1px solid #000 !important; border-radius: 0 !important; }
+  .day-slots-track { height: 750px !important; }
+  @page { size: landscape; margin: 8mm; }
+}
+</style>
+</head>
+<body>
+<div id="shell"></div>
+
+<script type="module">
+import { startBureau } from "/static-web/alj-shell.js";
+import { apiFetch, initFirebase } from "/static-web/alj-core.js";
+
+const esc = s => (s == null ? "" : String(s))
+  .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+startBureau({
+  page: "planning",
+  title: "Planning & Créneaux",
+  onReady: ({ user, role, isAdmin }) => {
+    const content = document.getElementById("content");
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:12px; padding:12px 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div class="m-name" style="font-size:16px;">📅 Planning & Gestion des Créneaux</div>
+            <div class="m-sub">Création, modification des créneaux, animateurs, tarifs HelloAsso et impression de la grille.</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;" class="header-actions">
+            <button class="btn btn-primary" id="btn-create-slot">➕ Nouveau créneau</button>
+            <button class="btn btn-muted" id="btn-print-grid">🖨️ Imprimer la grille</button>
+            <div class="dropdown" style="position:relative; display:inline-block;">
+              <button class="btn btn-muted" id="btn-export-menu">📥 Exporter Excel ▾</button>
+              <div id="export-dropdown" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; background:#FFF; border:1px solid var(--line); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); min-width:200px; z-index:100;">
+                <a href="#" id="btn-export-excel-grid" style="display:block; padding:8px 12px; font-size:12.5px; color:var(--ink); text-decoration:none; border-bottom:1px solid #F1F5F9;">📊 Grille hebdomadaire (.xlsx)</a>
+                <a href="#" id="btn-export-excel-list" style="display:block; padding:8px 12px; font-size:12.5px; color:var(--ink); text-decoration:none;">📋 Liste des créneaux (.xlsx)</a>
+              </div>
+            </div>
+            <button class="btn btn-muted btn-mini" id="planning-refresh-btn" title="Recharger le planning">🔄</button>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; border-top:1px solid #F1F5F9; padding-top:8px; flex-wrap:wrap; gap:8px;">
+          <div class="filter-chips">
+            <span class="filter-chip active" id="tab-btn-visual">🗓️ Vue Semaine visuelle</span>
+            <span class="filter-chip" id="tab-btn-table">📋 Tableau des créneaux</span>
+          </div>
+          <div id="active-slots-count" class="badge" style="background:#F1F5F9; color:#475569; font-size:12px;">Chargement…</div>
+        </div>
+      </div>
+
+      <!-- VUE 1 : GRILLE VISUELLE HEBDOMADAIRE -->
+      <div id="pane-visual" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="week-grid-container">
+          <!-- Colonne Heures -->
+          <div class="time-col">
+            <div class="time-col-header">HEURE</div>
+            <div class="time-slot-label">09h00</div>
+            <div class="time-slot-label">10h00</div>
+            <div class="time-slot-label">11h00</div>
+            <div class="time-slot-label">12h00</div>
+            <div class="time-slot-label">13h00</div>
+            <div class="time-slot-label">14h00</div>
+            <div class="time-slot-label">15h00</div>
+            <div class="time-slot-label">16h00</div>
+            <div class="time-slot-label">17h00</div>
+            <div class="time-slot-label">18h00</div>
+            <div class="time-slot-label">19h00</div>
+            <div class="time-slot-label">20h00</div>
+            <div class="time-slot-label">21h00</div>
+          </div>
+          <!-- 6 Jours : Lundi à Samedi -->
+          <div class="days-grid" id="days-grid-columns">
+            <!-- Colonnes générées dynamiquement -->
+          </div>
+        </div>
+      </div>
+
+      <!-- VUE 2 : TABLEAU DÉTAILLÉ -->
+      <div id="pane-table" style="display:none; flex-direction:column; gap:10px;">
+        <div class="card" style="margin-bottom:0; padding:10px 14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <input type="text" id="planning-search-input" placeholder="🔍 Filtrer les créneaux (nom, jour, encadrant, tarif)..." class="search-input" style="flex:1; min-width:240px; padding:6px 10px; font-size:12.5px; border:1px solid var(--line); border-radius:6px;">
+            <div class="filter-chips">
+              <span class="filter-chip active filter-type-chip" data-type="all">Tous</span>
+              <span class="filter-chip filter-type-chip" data-type="cours">Cours</span>
+              <span class="filter-chip filter-type-chip" data-type="perfectionnement">Perfectionnement</span>
+              <span class="filter-chip filter-type-chip" data-type="compétition">Compétition</span>
+              <span class="filter-chip filter-type-chip" data-type="autonome">Autonome</span>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0; padding:0; overflow-x:auto;">
+          <table class="table" style="width:100%; font-size:12.5px; border-collapse:collapse;">
+            <thead>
+              <tr style="background:#F8FAFC; border-bottom:1px solid var(--line); text-align:left;">
+                <th style="padding:8px 12px; width:130px;">Jour & Horaires</th>
+                <th style="padding:8px 12px;">Groupe & Catégorie</th>
+                <th style="padding:8px 12px; width:110px;">Type</th>
+                <th style="padding:8px 12px;">Encadrant(s)</th>
+                <th style="padding:8px 12px;">Tarif(s) HelloAsso</th>
+                <th style="padding:8px 12px; width:45px; text-align:center;">WA</th>
+                <th style="padding:8px 12px; width:90px; text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="planning-table-tbody">
+              <tr><td colspan="7" style="padding:20px; text-align:center;" class="muted">Chargement du planning…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- MODALE CRÉATION / ÉDITION DE CRÉNEAU -->
+      <div id="slot-modal" class="modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:1000; align-items:center; justify-content:center; padding:15px;">
+        <div class="card" style="max-width:580px; width:100%; max-height:90vh; overflow-y:auto; padding:20px; margin:0; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--line); padding-bottom:8px;">
+            <b id="slot-modal-title" style="font-size:16px;">➕ Nouveau créneau</b>
+            <button class="btn-close" id="btn-close-modal" style="background:none; border:none; font-size:18px; cursor:pointer; color:var(--muted);">&times;</button>
+          </div>
+
+          <form id="slot-form" style="display:flex; flex-direction:column; gap:12px;">
+            <input type="hidden" id="slot-id" value="">
+
+            <div>
+              <label class="fld">Nom du groupe *</label>
+              <input type="text" id="slot-groupe" required placeholder="Ex : Loisir collège - lundi 18h30" class="search-input" style="width:100%; box-sizing:border-box; padding:7px 10px; font-size:13px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label class="fld">Jour *</label>
+                <select id="slot-jour" class="select-input" style="width:100%; padding:6px 8px; font-size:13px;">
+                  <option value="Lundi">Lundi</option>
+                  <option value="Mardi">Mardi</option>
+                  <option value="Mercredi">Mercredi</option>
+                  <option value="Jeudi">Jeudi</option>
+                  <option value="Vendredi">Vendredi</option>
+                  <option value="Samedi">Samedi</option>
+                  <option value="Dimanche">Dimanche</option>
+                </select>
+              </div>
+              <div>
+                <label class="fld">Horaires * (ex: 18:00 - 20:00)</label>
+                <input type="text" id="slot-horaires" required placeholder="18:00 - 20:00" class="search-input" style="width:100%; box-sizing:border-box; padding:7px 10px; font-size:13px; border:1px solid var(--line); border-radius:6px;">
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label class="fld">Type de groupe</label>
+                <select id="slot-type" class="select-input" style="width:100%; padding:6px 8px; font-size:13px;">
+                  <option value="cours">Cours / Loisir</option>
+                  <option value="perfectionnement">Perfectionnement</option>
+                  <option value="compétition">Compétition</option>
+                  <option value="autonome">Autonome</option>
+                  <option value="découverte">Découverte</option>
+                  <option value="autre">Autre</option>
+                </select>
+              </div>
+              <div>
+                <label class="fld">Catégorie d'âge</label>
+                <input type="text" id="slot-categorie" placeholder="Ex: U11-U13, Collège, Adultes..." class="search-input" style="width:100%; box-sizing:border-box; padding:7px 10px; font-size:13px; border:1px solid var(--line); border-radius:6px;">
+              </div>
+            </div>
+
+            <div>
+              <label class="fld">Encadrant(s) (séparés par des virgules)</label>
+              <input type="text" id="slot-encadrants" placeholder="Ex : Antoine GAUTHIER, Rodolphe JULLIEN" class="search-input" style="width:100%; box-sizing:border-box; padding:7px 10px; font-size:13px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+
+            <div>
+              <label class="fld">Lien d'invitation WhatsApp (optionnel)</label>
+              <input type="url" id="slot-whatsapp" placeholder="https://chat.whatsapp.com/..." class="search-input" style="width:100%; box-sizing:border-box; padding:7px 10px; font-size:13px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+
+            <div>
+              <label class="fld">Tarifs HelloAsso associés (cocher les tarifs de la campagne)</label>
+              <div id="slot-tarifs-checkboxes" style="max-height:120px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; padding:6px 8px; display:flex; flex-direction:column; gap:4px; background:#FAFAFA;">
+                <span class="muted" style="font-size:11.5px;">Chargement des tarifs…</span>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label class="fld">Année naissance Min (ex: 2015)</label>
+                <input type="text" id="slot-naissance-min" placeholder="2015" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12.5px; border:1px solid var(--line); border-radius:6px;">
+              </div>
+              <div>
+                <label class="fld">Année naissance Max (ex: 2018)</label>
+                <input type="text" id="slot-naissance-max" placeholder="2018" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12.5px; border:1px solid var(--line); border-radius:6px;">
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px; border-top:1px solid #F1F5F9; padding-top:12px;">
+              <button type="button" class="btn btn-muted" id="btn-cancel-modal">Annuler</button>
+              <button type="submit" class="btn btn-primary" id="btn-save-modal">💾 Enregistrer le créneau</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="toast"></div>
+    `;
+
+    function toast(msg, ms = 4000) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    let planningItems = [];
+    let availableTarifs = [];
+    let activeTab = "visual"; // 'visual' | 'table'
+    let currentFilterType = "all";
+
+    const daysList = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+
+    const tabBtnVisual = document.getElementById("tab-btn-visual");
+    const tabBtnTable = document.getElementById("tab-btn-table");
+    const paneVisual = document.getElementById("pane-visual");
+    const paneTable = document.getElementById("pane-table");
+    const daysGrid = document.getElementById("days-grid-columns");
+    const tableTbody = document.getElementById("planning-table-tbody");
+    const activeSlotsCount = document.getElementById("active-slots-count");
+    const searchInput = document.getElementById("planning-search-input");
+    const refreshBtn = document.getElementById("planning-refresh-btn");
+
+    // Menu Export
+    const btnExportMenu = document.getElementById("btn-export-menu");
+    const exportDropdown = document.getElementById("export-dropdown");
+    const btnExportExcelGrid = document.getElementById("btn-export-excel-grid");
+    const btnExportExcelList = document.getElementById("btn-export-excel-list");
+    const btnPrintGrid = document.getElementById("btn-print-grid");
+
+    // Modal
+    const slotModal = document.getElementById("slot-modal");
+    const slotModalTitle = document.getElementById("slot-modal-title");
+    const slotForm = document.getElementById("slot-form");
+    const btnCreateSlot = document.getElementById("btn-create-slot");
+    const btnCloseModal = document.getElementById("btn-close-modal");
+    const btnCancelModal = document.getElementById("btn-cancel-modal");
+    const slotTarifsContainer = document.getElementById("slot-tarifs-checkboxes");
+
+    function parseTimeStr(str) {
+      if (!str) return null;
+      const m = str.match(/(\d{1,2})[h:](\d{2})?/i);
+      if (!m) return null;
+      const h = parseInt(m[1], 10);
+      const min = m[2] ? parseInt(m[2], 10) : 0;
+      return h + min / 60.0;
+    }
+
+    function parseInterval(horaires) {
+      if (!horaires) return [null, null];
+      const parts = horaires.split("-");
+      if (parts.length < 2) return [null, null];
+      return [parseTimeStr(parts[0]), parseTimeStr(parts[1])];
+    }
+
+    function getSlotClass(type, groupe) {
+      const t = (type || "").toLowerCase();
+      const g = (groupe || "").toLowerCase();
+      if (t.includes("comp") || g.includes("comp")) return "slot-type-competition";
+      if (t.includes("perf") || g.includes("perf")) return "slot-type-perfectionnement";
+      if (t.includes("autonome") || g.includes("autonome")) {
+        return g.includes("bloc") ? "slot-type-autonome-bloc" : "slot-type-autonome";
+      }
+      return "slot-type-cours";
+    }
+
+    function renderVisualGrid() {
+      daysGrid.innerHTML = daysList.map(d => `
+        <div class="day-column" data-day="${d}">
+          <div class="day-header">${d}</div>
+          <div class="day-slots-track" id="track-${d}"></div>
+        </div>
+      `).join("");
+
+      // Placer les créneaux
+      daysList.forEach(day => {
+        const track = document.getElementById(`track-${day}`);
+        const daySlots = planningItems.filter(item => (item.jour || "").toLowerCase() === day.toLowerCase());
+
+        // Calcul des voies pour éviter le chevauchement
+        const parsedSlots = [];
+        daySlots.forEach(item => {
+          const [start, end] = parseInterval(item.horaires);
+          if (start !== null && end !== null && end > start) {
+            parsedSlots.push({ item, start, end, lane: 0 });
+          }
+        });
+
+        parsedSlots.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+
+        // Attribution des couloirs
+        const lanesEnd = [];
+        parsedSlots.forEach(slot => {
+          let placed = false;
+          for (let i = 0; i < lanesEnd.length; i++) {
+            if (lanesEnd[i] <= slot.start + 0.05) {
+              slot.lane = i;
+              lanesEnd[i] = slot.end;
+              placed = true;
+              break;
+            }
+          }
+          if (!placed) {
+            slot.lane = lanesEnd.length;
+            lanesEnd.push(slot.end);
+          }
+        });
+
+        const totalLanes = Math.max(1, lanesEnd.length);
+
+        parsedSlots.forEach(slot => {
+          const top = Math.max(0, (slot.start - 9.0) * 50);
+          const height = Math.max(28, (slot.end - slot.start) * 50 - 4);
+          const widthPct = (100 / totalLanes);
+          const leftPct = slot.lane * widthPct;
+
+          const encStr = (slot.item.encadrants || []).join(" / ");
+          const typeCls = getSlotClass(slot.item.type, slot.item.groupe);
+
+          const el = document.createElement("div");
+          el.className = `plan-slot-card ${typeCls}`;
+          el.style.top = `${top}px`;
+          el.style.height = `${height}px`;
+          el.style.left = `calc(${leftPct}% + 2px)`;
+          el.style.width = `calc(${widthPct}% - 4px)`;
+
+          el.innerHTML = `
+            <div>
+              <b style="font-size:11px; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(slot.item.groupe)}</b>
+              <div style="font-size:10.5px; opacity:0.9;">🕒 ${esc(slot.item.horaires)}</div>
+            </div>
+            ${encStr ? `<div style="font-size:10px; opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">👤 ${esc(encStr)}</div>` : ''}
+          `;
+          el.title = `${slot.item.groupe} (${slot.item.horaires})\n${encStr ? 'Enc. : ' + encStr : ''}\nCliquez pour modifier`;
+          el.addEventListener("click", () => openEditSlotModal(slot.item));
+          track.appendChild(el);
+        });
+      });
+    }
+
+    function renderTable() {
+      const q = (searchInput.value || "").trim().toLowerCase();
+      let filtered = planningItems.filter(item => {
+        if (currentFilterType !== "all") {
+          const t = (item.type || "").toLowerCase();
+          const g = (item.groupe || "").toLowerCase();
+          if (currentFilterType === "cours" && !t.includes("cours") && !g.includes("loisir")) return false;
+          if (currentFilterType === "perfectionnement" && !t.includes("perf") && !g.includes("perf")) return false;
+          if (currentFilterType === "compétition" && !t.includes("comp") && !g.includes("comp")) return false;
+          if (currentFilterType === "autonome" && !t.includes("autonome") && !g.includes("autonome")) return false;
+        }
+        if (!q) return true;
+        const searchPool = [
+          item.groupe, item.jour, item.horaires, item.type, item.categorie_age,
+          (item.encadrants || []).join(" "), (item.helloasso_tarifs || []).join(" ")
+        ].join(" ").toLowerCase();
+        return searchPool.includes(q);
+      });
+
+      if (!filtered.length) {
+        tableTbody.innerHTML = `<tr><td colspan="7" style="padding:20px; text-align:center;" class="muted">Aucun créneau correspondant.</td></tr>`;
+        return;
+      }
+
+      tableTbody.innerHTML = filtered.map(item => {
+        const typeCls = getSlotClass(item.type, item.groupe);
+        const encStr = (item.encadrants || []).join(", ") || "—";
+        const tarifsStr = (item.helloasso_tarifs || []).map(t => `<span class="badge" style="background:#F1F5F9; font-size:11px; margin:1px 2px; display:inline-block;">${esc(t)}</span>`).join("") || "<span class='muted'>Aucun tarif lié</span>";
+        const waIcon = item.whatsapp_link ? `<a href="${esc(item.whatsapp_link)}" target="_blank" title="Ouvrir le groupe WhatsApp" style="font-size:16px; text-decoration:none;">🟢</a>` : `<span class="muted" style="font-size:11px;">—</span>`;
+
+        return `
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:8px 12px; font-weight:600;">
+              <div>${esc(item.jour || '—')}</div>
+              <div class="muted" style="font-size:11px;">🕒 ${esc(item.horaires || '—')}</div>
+            </td>
+            <td style="padding:8px 12px;">
+              <b>${esc(item.groupe)}</b>
+              ${item.categorie_age ? `<div class="muted" style="font-size:11.5px;">Catégorie : ${esc(item.categorie_age)}</div>` : ''}
+              ${item.naissance_min || item.naissance_max ? `<div class="muted" style="font-size:10.5px;">Nés entre ${esc(item.naissance_min || '...')} et ${esc(item.naissance_max || '...')}</div>` : ''}
+            </td>
+            <td style="padding:8px 12px;">
+              <span class="badge ${typeCls}" style="font-size:11px; padding:2px 8px;">${esc(item.type || 'cours')}</span>
+            </td>
+            <td style="padding:8px 12px; font-size:12px;">${esc(encStr)}</td>
+            <td style="padding:8px 12px; max-width:240px;">${tarifsStr}</td>
+            <td style="padding:8px 12px; text-align:center;">${waIcon}</td>
+            <td style="padding:8px 12px; text-align:center; white-space:nowrap;">
+              <button class="btn btn-muted btn-mini btn-edit-slot" data-id="${item.id}" title="Modifier">✏️</button>
+              <button class="btn btn-muted btn-mini btn-del-slot" data-id="${item.id}" title="Supprimer" style="color:#DC2626;">🗑️</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      tableTbody.querySelectorAll(".btn-edit-slot").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const id = parseInt(btn.dataset.id, 10);
+          const found = planningItems.find(x => x.id === id);
+          if (found) openEditSlotModal(found);
+        });
+      });
+
+      tableTbody.querySelectorAll(".btn-del-slot").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const id = parseInt(btn.dataset.id, 10);
+          const found = planningItems.find(x => x.id === id);
+          if (found && confirm(`Voulez-vous vraiment supprimer le créneau « ${found.groupe} » (${found.jour} ${found.horaires}) ?`)) {
+            deleteSlot(id);
+          }
+        });
+      });
+    }
+
+    async function loadPlanning() {
+      try {
+        activeSlotsCount.textContent = "Chargement…";
+        const res = await apiFetch("/api/planning");
+        if (res.ok) {
+          planningItems = await res.json();
+          activeSlotsCount.textContent = `${planningItems.length} créneau(x) configuré(s)`;
+          renderVisualGrid();
+          renderTable();
+        } else {
+          activeSlotsCount.textContent = "Erreur chargement";
+          toast("❌ Impossible de charger le planning.");
+        }
+      } catch (err) {
+        console.error("Erreur planning :", err);
+        activeSlotsCount.textContent = "Erreur réseau";
+      }
+    }
+
+    async function loadTarifs() {
+      try {
+        const res = await apiFetch("/api/season-tarifs");
+        if (res.ok) {
+          const data = await res.json();
+          availableTarifs = data.tarifs || [];
+        }
+      } catch (e) {}
+    }
+
+    function openEditSlotModal(item = null) {
+      slotForm.reset();
+      const isEdit = !!item;
+      slotModalTitle.textContent = isEdit ? `✏️ Modifier le créneau #${item.id}` : "➕ Nouveau créneau";
+      document.getElementById("slot-id").value = isEdit ? item.id : "";
+      document.getElementById("slot-groupe").value = isEdit ? (item.groupe || "") : "";
+      document.getElementById("slot-jour").value = isEdit ? (item.jour || "Lundi") : "Lundi";
+      document.getElementById("slot-horaires").value = isEdit ? (item.horaires || "") : "18:00 - 20:00";
+      document.getElementById("slot-type").value = isEdit ? (item.type || "cours") : "cours";
+      document.getElementById("slot-categorie").value = isEdit ? (item.categorie_age || "") : "";
+      document.getElementById("slot-encadrants").value = isEdit ? (item.encadrants || []).join(", ") : "";
+      document.getElementById("slot-whatsapp").value = isEdit ? (item.whatsapp_link || "") : "";
+      document.getElementById("slot-naissance-min").value = isEdit ? (item.naissance_min || "") : "";
+      document.getElementById("slot-naissance-max").value = isEdit ? (item.naissance_max || "") : "";
+
+      const linkedTarifs = isEdit ? (item.helloasso_tarifs || []) : [];
+
+      if (!availableTarifs.length) {
+        slotTarifsContainer.innerHTML = `<span class="muted" style="font-size:11.5px;">Aucun tarif de saison configuré. Saisissez le tarif dans le nom de groupe.</span>`;
+      } else {
+        slotTarifsContainer.innerHTML = availableTarifs.map(t => {
+          const checked = linkedTarifs.includes(t) ? "checked" : "";
+          return `
+            <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; cursor:pointer;">
+              <input type="checkbox" class="modal-tarif-chk" value="${esc(t)}" ${checked}>
+              <span>${esc(t)}</span>
+            </label>
+          `;
+        }).join("");
+      }
+
+      slotModal.style.display = "flex";
+    }
+
+    function closeModal() {
+      slotModal.style.display = "none";
+    }
+
+    slotForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      const idVal = document.getElementById("slot-id").value;
+      const chks = document.querySelectorAll(".modal-tarif-chk:checked");
+      const selectedTarifs = Array.from(chks).map(cb => cb.value);
+
+      const encRaw = document.getElementById("slot-encadrants").value;
+      const encList = encRaw.split(",").map(x => x.trim()).filter(Boolean);
+
+      const payload = {
+        id: idVal ? parseInt(idVal, 10) : 0,
+        groupe: document.getElementById("slot-groupe").value.trim(),
+        jour: document.getElementById("slot-jour").value.trim(),
+        horaires: document.getElementById("slot-horaires").value.trim(),
+        type: document.getElementById("slot-type").value.trim(),
+        categorie_age: document.getElementById("slot-categorie").value.trim(),
+        encadrants: encList,
+        helloasso_tarifs: selectedTarifs,
+        whatsapp_link: document.getElementById("slot-whatsapp").value.trim(),
+        naissance_min: document.getElementById("slot-naissance-min").value.trim(),
+        naissance_max: document.getElementById("slot-naissance-max").value.trim(),
+      };
+
+      const btnSave = document.getElementById("btn-save-modal");
+      btnSave.disabled = true;
+      btnSave.textContent = "⏳ Enregistrement…";
+
+      try {
+        const res = await apiFetch("/api/planning/item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          toast(`✅ Créneau « ${payload.groupe} » enregistré !`);
+          closeModal();
+          await loadPlanning();
+        } else {
+          const d = await res.json();
+          toast(`❌ Échec : ${d.message || res.statusText}`);
+        }
+      } catch (err) {
+        toast(`❌ Erreur réseau : ${err.message}`);
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = "💾 Enregistrer le créneau";
+      }
+    });
+
+    async function deleteSlot(id) {
+      try {
+        const res = await apiFetch(`/api/planning/item/${id}`, { method: "DELETE" });
+        if (res.ok) {
+          toast("🗑️ Créneau supprimé.");
+          await loadPlanning();
+        } else {
+          toast("❌ Impossible de supprimer ce créneau.");
+        }
+      } catch (err) {
+        toast(`❌ Erreur : ${err.message}`);
+      }
+    }
+
+    // Gestion des onglets Vue Semaine / Tableau
+    tabBtnVisual.addEventListener("click", () => {
+      activeTab = "visual";
+      tabBtnVisual.classList.add("active");
+      tabBtnTable.classList.remove("active");
+      paneVisual.style.display = "flex";
+      paneTable.style.display = "none";
+    });
+
+    tabBtnTable.addEventListener("click", () => {
+      activeTab = "table";
+      tabBtnTable.classList.add("active");
+      tabBtnVisual.classList.remove("active");
+      paneTable.style.display = "flex";
+      paneVisual.style.display = "none";
+      renderTable();
+    });
+
+    // Filtres du tableau
+    searchInput.addEventListener("input", renderTable);
+    document.querySelectorAll(".filter-type-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".filter-type-chip").forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        currentFilterType = chip.dataset.type;
+        renderTable();
+      });
+    });
+
+    // Menu déroulant Export
+    btnExportMenu.addEventListener("click", (e) => {
+      e.stopPropagation();
+      exportDropdown.style.display = exportDropdown.style.display === "block" ? "none" : "block";
+    });
+    document.addEventListener("click", () => {
+      exportDropdown.style.display = "none";
+    });
+
+    // Exports Excel
+    async function downloadPlanningExcel(mode) {
+      toast("⏳ Génération du fichier Excel en cours…");
+      try {
+        const res = await apiFetch(`/api/planning/export?mode=${mode}`);
+        if (!res.ok) {
+          toast("❌ Échec lors de la génération Excel.");
+          return;
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get("content-disposition");
+        let filename = mode === "list" ? "Planning_Liste.xlsx" : "Planning_Grille.xlsx";
+        if (disposition) {
+          const m = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+          if (m && m[1]) filename = m[1].replace(/['"]/g, '').trim();
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        toast(`✅ Fichier « ${filename} » téléchargé !`);
+      } catch (err) {
+        toast(`❌ Erreur export : ${err.message}`);
+      }
+    }
+
+    btnExportExcelGrid.addEventListener("click", (e) => {
+      e.preventDefault();
+      downloadPlanningExcel("grid");
+    });
+    btnExportExcelList.addEventListener("click", (e) => {
+      e.preventDefault();
+      downloadPlanningExcel("list");
+    });
+
+    // Impression
+    btnPrintGrid.addEventListener("click", () => {
+      // Passer sur la vue visuelle si ce n'est pas le cas
+      tabBtnVisual.click();
+      window.print();
+    });
+
+    btnCreateSlot.addEventListener("click", () => openEditSlotModal());
+    btnCloseModal.addEventListener("click", closeModal);
+    btnCancelModal.addEventListener("click", closeModal);
+    slotModal.addEventListener("click", e => {
+      if (e.target.id === "slot-modal") closeModal();
+    });
+
+    refreshBtn.addEventListener("click", () => {
+      loadPlanning();
+      toast("🔄 Planning réactualisé.");
+    });
+
+    // Chargement initial
+    loadPlanning();
+    loadTarifs();
+  }
+});
+</script>
+</body>
+</html>

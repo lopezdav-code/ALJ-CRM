@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="20">
-<title>ALJ Escalade — Annuaire des adhérents (v20)</title>
+<meta name="alj-web-version" content="21">
+<title>ALJ Escalade — Annuaire des adhérents (v21)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -139,7 +139,7 @@
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v20</span></b>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v21</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
@@ -438,6 +438,12 @@ function normalizeStatus(s) {
   const r = String(s || "").trim();
   return STATUS_MAP[r.toLowerCase()] || r;
 }
+function normalizeGender(val) {
+  const s = String(val || "").trim().toLowerCase();
+  if (s === "f" || s === "femme" || s === "féminin" || s === "feminin") return "Femme";
+  if (s === "h" || s === "m" || s === "homme" || s === "masculin") return "Homme";
+  return String(val || "").trim();
+}
 function alive(map) {
   const out = [];
   for (const [id, d] of map) if (d && d._deleted !== true) out.push(Object.assign({ _id: id }, d));
@@ -462,7 +468,7 @@ function buildData() {
     if (!s) continue;
     members.push({
       user_id: u.id, last_name: u.last_name || "", first_name: u.first_name || "",
-      birth_date: u.birth_date || "", gender: u.gender || "", address: u.address || "",
+      birth_date: u.birth_date || "", gender: normalizeGender(u.gender), address: u.address || "",
       zip_code: u.zip_code || "", city: u.city || "", phone: u.phone || "",
       email_primary: u.email_primary || "", email_secondary: u.email_secondary || "",
       emergency1_name: u.emergency1_name || "", emergency1_phone: u.emergency1_phone || "",

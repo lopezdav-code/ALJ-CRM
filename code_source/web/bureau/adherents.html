@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="20">
-<title>ALJ Escalade — Bureau · Adhérents (v20)</title>
+<meta name="alj-web-version" content="21">
+<title>ALJ Escalade — Bureau · Adhérents (v21)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -26,7 +26,8 @@ import {
   normKey,
   fmtDate,
   telHref,
-  STATUS_COLORS
+  STATUS_COLORS,
+  normalizeStatus
 } from "/static-web/alj-members.js";
 import {
   FILTER_KEY,
@@ -54,6 +55,8 @@ startBureau({
           <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher (nom, prénom, tarif, licence, e-mail, téléphone)…">
           <button class="btn btn-muted btn-mini" id="toggle-filter-box" title="Afficher ou masquer la sélection des créneaux">📂 Créneaux / Tarifs</button>
           <button class="btn btn-muted btn-mini" id="export-csv-btn" title="Télécharger la liste actuellement filtrée en fichier CSV">📥 Export CSV</button>
+          <a href="/bureau/outils?tab=ffme" class="btn btn-muted btn-mini" style="text-decoration:none;" title="Ouvrir l'outil d'exportation officiel FFME">🇫🇷 Export FFME</a>
+          <button class="btn btn-muted btn-mini" id="btn-sync-now" title="Forcer la synchronisation immédiate de la base de données avec Firestore">🔄 Synchroniser BDD</button>
         </div>
 
         <div class="filter-box" id="filter-box" hidden>
@@ -239,6 +242,19 @@ startBureau({
                 </div>
                 <div id="edit-member-badge"></div>
               </div>
+            </div>
+
+            <!-- Section Statut de l'adhésion -->
+            <div class="section-h" style="margin:4px 0 6px;">📋 Statut de l'adhésion (ligne)</div>
+            <div style="margin-bottom:12px;">
+              <label class="fld">Statut d'inscription</label>
+              <select id="edit-status" class="select-input" style="width:100%; font-weight:600;">
+                <option value="Validé">🟢 Validé</option>
+                <option value="Traité">🔵 Traité</option>
+                <option value="En cours">🟠 En cours / En attente</option>
+                <option value="Terminé">🟣 Terminé</option>
+                <option value="Annulé">🔴 Annulé</option>
+              </select>
             </div>
 
             <!-- Section 1 : Badges & Autonomie FFME -->
@@ -831,6 +847,22 @@ startBureau({
       document.getElementById("edit-member-badge").innerHTML = renderStatusBadge(member.status_norm);
 
       // Pré-remplir les champs
+      const currentSt = member.status_norm || member.status || "Validé";
+      const selStatus = document.getElementById("edit-status");
+      if (selStatus) {
+        let matched = false;
+        for (let opt of selStatus.options) {
+          if (normKey(opt.value) === normKey(currentSt)) {
+            opt.selected = true;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          selStatus.add(new Option(currentSt, currentSt, true, true));
+        }
+      }
+
       const br = String(member.badge_rouge || "").trim().toLowerCase();
       document.getElementById("edit-badge-rouge").value = (br === "oui" || br === "x") ? "Oui" : "Non";
 
@@ -903,15 +935,21 @@ startBureau({
       const newEmailPrimary = document.getElementById("edit-email-primary").value.trim();
       const newEmailSecondary = document.getElementById("edit-email-secondary").value.trim();
       const newPhone = document.getElementById("edit-phone").value.trim();
+      const newStatus = document.getElementById("edit-status") ? document.getElementById("edit-status").value.trim() : "";
       const selectedRadio = document.querySelector('input[name="edit-tarif-radio"]:checked');
       const newTarif = selectedRadio ? selectedRadio.value.trim() : (m.tarif_name || "");
 
       const origBadgeRouge = (String(m.badge_rouge || "").toLowerCase() === "oui" || String(m.badge_rouge || "").toLowerCase() === "x") ? "Oui" : "Non";
       const origAutonomieBloc = (String(m.autonomie_bloc || "").toLowerCase() === "oui" || String(m.autonomie_bloc || "").toLowerCase() === "x") ? "Oui" : "Non";
+      const origStatus = m.status_norm || m.status || "Validé";
 
       const fields = {};
       const changesDesc = [];
 
+      if (newStatus && normKey(newStatus) !== normKey(origStatus)) {
+        fields.status = newStatus;
+        changesDesc.push(`Statut : ${origStatus} ➔ ${newStatus}`);
+      }
       if (newBadgeRouge !== origBadgeRouge) {
         fields.badge_rouge = newBadgeRouge;
         changesDesc.push(`Badge rouge : ${origBadgeRouge} ➔ ${newBadgeRouge}`);
@@ -966,6 +1004,11 @@ startBureau({
         if (res.ok) {
           // Mise à jour réactive immédiate de l'objet local
           Object.assign(m, fields);
+
+          if (fields.status) {
+            m.status = fields.status;
+            m.status_norm = normalizeStatus(fields.status);
+          }
 
           if (fields.tarif_name) {
             const { tarifDetails } = getSeasonTarifsList();
@@ -1313,7 +1356,7 @@ startBureau({
 
     // Connexion Firestore et écoute temps réel
     const { db } = initFirebase();
-    startMembersListener(db, {
+    const activeSub = startMembersListener(db, {
       onData: data => {
         rawMembersData = data;
         itemsCache = buildCreneauItems(data.creneaux);
@@ -1355,6 +1398,29 @@ startBureau({
         console.error("Erreur de synchronisation des adhérents :", err);
       }
     });
+
+    const btnSyncNow = document.getElementById("btn-sync-now");
+    if (btnSyncNow) {
+      btnSyncNow.addEventListener("click", async () => {
+        btnSyncNow.disabled = true;
+        btnSyncNow.textContent = "⏳ Synchro…";
+        try {
+          const res = await apiFetch("/api/cloud-db/sync?force=true", { method: "POST" });
+          const d = await res.json();
+          if (res.ok && d.status === "success") {
+            toast("✅ Base de données locale synchronisée depuis Firestore !");
+            if (activeSub && activeSub.refresh) activeSub.refresh(true);
+          } else {
+            toast(`❌ Échec : ${d.message || 'Erreur de synchronisation'}`);
+          }
+        } catch (err) {
+          toast(`❌ Erreur réseau : ${err.message}`);
+        } finally {
+          btnSyncNow.disabled = false;
+          btnSyncNow.textContent = "🔄 Synchroniser BDD";
+        }
+      });
+    }
   }
 });
 </script>

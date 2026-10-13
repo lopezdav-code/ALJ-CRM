@@ -209,6 +209,16 @@ def clean_legacy_text(val):
     return str(val).strip()
 
 
+def normalize_gender(val):
+    """Harmonise le genre en 'Femme' ou 'Homme'."""
+    s = str(val or "").strip().lower()
+    if s in ("f", "femme", "féminin", "feminin"):
+        return "Femme"
+    if s in ("h", "m", "homme", "masculin"):
+        return "Homme"
+    return str(val or "").strip()
+
+
 def parse_iso_date(val):
     """Normalise une date legacy ('20/08/2012', '2012-08-20T00:00:00', ...) en ISO '2012-08-20'."""
     s = str(val or "").strip()
@@ -318,6 +328,8 @@ def upsert_user_v2(cur, rec, now_iso, field_map):
         for src_col, dst_col in field_map.items():
             new_val = clean_legacy_text(_get(rec, src_col))
             if new_val:
+                if dst_col == "gender":
+                    new_val = normalize_gender(new_val)
                 cur.execute(
                     f'UPDATE users SET "{dst_col}" = ?, updated_at = ? '
                     f'WHERE id = ? AND (("{dst_col}" IS NULL) OR (TRIM("{dst_col}") = ""))',
@@ -332,7 +344,7 @@ def upsert_user_v2(cur, rec, now_iso, field_map):
                 )
         return user_id, False
 
-    values = {dst: clean_legacy_text(_get(rec, src)) for src, dst in field_map.items()}
+    values = {dst: (normalize_gender(clean_legacy_text(_get(rec, src))) if dst == "gender" else clean_legacy_text(_get(rec, src))) for src, dst in field_map.items()}
     values["last_name"] = last
     values["first_name"] = first
     values["last_name_key"] = k_last
@@ -647,7 +659,11 @@ SELECT
     u.first_name AS "first_name",
     u.birth_date AS "birth_date",
     u.birth_date_raw AS "birth_date_raw",
-    u.gender AS "gender",
+    CASE 
+      WHEN LOWER(TRIM(u.gender)) IN ('f', 'femme', 'féminin', 'feminin') THEN 'Femme'
+      WHEN LOWER(TRIM(u.gender)) IN ('h', 'm', 'homme', 'masculin') THEN 'Homme'
+      ELSE u.gender 
+    END AS "gender",
     u.nationality AS "nationality",
     u.address AS "address",
     u.zip_code AS "zip_code",

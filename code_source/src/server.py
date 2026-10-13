@@ -746,11 +746,17 @@ def get_map(background_tasks: BackgroundTasks):
     return HTMLResponse(content=html_content)
 
 @app.get("/pivot", response_class=HTMLResponse)
-def get_pivot_table(season: str = "Toutes les saisons"):
+def get_pivot_table(season: str = "2026-2027"):
     """Renvoie la page du Tableau Croisé Dynamique interactif via PivotTable.js."""
     try:
         from infrastructure.sqlite_repository import SqliteRepository
-        raw_data = SqliteRepository.load_direct_data(season)
+        from domain.constants import get_active_season
+        
+        target_season = (season or "").strip()
+        if not target_season or target_season.lower() in ("default", "active"):
+            target_season = get_active_season()
+
+        raw_data = SqliteRepository.load_direct_data(target_season)
         
         # Préparer un tableau de données plat et épuré pour le TCD
         pivot_records = []
@@ -786,10 +792,11 @@ def get_pivot_table(season: str = "Toutes les saisons"):
                     date_iso = ""
             month_iso = date_iso[:7] if date_iso else ""
             
+            from domain.models import normalize_gender
             pivot_records.append({
                 "Nom": (row.get("last_name") or "").strip().upper(),
                 "Pr\u00e9nom": (row.get("first_name") or "").strip().title(),
-                "Sexe": (row.get("gender") or "Inconnu").strip().title() or "Inconnu",
+                "Sexe": normalize_gender(row.get("gender")) or "Inconnu",
                 "Ville": city_clean,
                 "Groupe / Tarif": str(row.get("tarif_name") or "").strip() or "Aucun",
                 "Statut": status_clean,
@@ -912,6 +919,9 @@ def get_pivot_table(season: str = "Toutes les saisons"):
             $("#output").pivotUI(pivotData, {
                 rows: ["Groupe / Tarif"],
                 cols: ["Statut"],
+                exclusions: {
+                    "Groupe / Tarif": ["Liste d'attente cours"]
+                },
                 aggregatorName: "Count",
                 rendererName: "Table"
             });
@@ -926,9 +936,73 @@ def get_pivot_table(season: str = "Toutes les saisons"):
 def get_planning():
     """Récupère le planning depuis la BDD SQLite."""
     try:
-        return SqliteRepository.load_planning_data()
+        from infrastructure.sqlite_repository import SqliteRepository
+        return SqliteRepository.load_planning_data(log_debug=False)
     except Exception as e:
         return {"error": internal_error(e, "get_planning")}
+
+
+@app.post("/api/planning/item")
+def save_planning_item_api(item: Dict[str, Any] = Body(...)):
+    """Crée ou met à jour un créneau unique dans la table planning."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        saved_item = SqliteRepository.save_planning_item(item)
+        return {"status": "success", "message": "Créneau enregistré avec succès.", "item": saved_item}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": internal_error(e, "save_planning_item_api")})
+
+
+@app.delete("/api/planning/item/{item_id}")
+def delete_planning_item_api(item_id: int):
+    """Supprime un créneau de planning par son ID."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        ok = SqliteRepository.delete_planning_item(item_id)
+        if not ok:
+            return JSONResponse(status_code=404, content={"status": "error", "message": f"Créneau #{item_id} introuvable."})
+        return {"status": "success", "message": f"Créneau #{item_id} supprimé avec succès."}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "delete_planning_item_api")})
+
+
+@app.get("/api/planning/export")
+def export_planning_api(mode: str = Query("grid"), season: Optional[str] = Query(None)):
+    """Exporte le planning au format Excel (grille visuelle hebdomadaire ou liste tabulaire)."""
+    import os
+    import tempfile
+    import shutil
+    from infrastructure.sqlite_repository import SqliteRepository
+    from infrastructure.planning_excel_export import export_planning_excel, export_planning_list_excel
+    from domain.constants import get_active_season
+
+    target_season = season or get_active_season()
+    planning_data = SqliteRepository.load_planning_data(log_debug=False)
+
+    tmp_dir = tempfile.mkdtemp(prefix="alj_plan_export_")
+    try:
+        if mode == "list":
+            filename = f"Planning_Liste_{target_season}.xlsx"
+            out_path = os.path.join(tmp_dir, filename)
+            export_planning_list_excel(planning_data, target_season, out_path)
+        else:
+            filename = f"Planning_Grille_{target_season}.xlsx"
+            out_path = os.path.join(tmp_dir, filename)
+            export_planning_excel(planning_data, target_season, out_path)
+
+        with open(out_path, "rb") as f:
+            content_bytes = f.read()
+
+        return Response(
+            content=content_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 # Fichiers web statiques (annuaire, logo...) également servis sous /annuaire/.
 # L'annuaire lit la base des adhérents dans Firestore (connexion Google du coach).
@@ -954,7 +1028,9 @@ _BUREAU_PAGES = {
     "adherents": "adherents.html",
     "communications": "communications.html",
     "competitions": "competitions.html",
-    "outils": "outils.html"
+    "planning": "planning.html",
+    "outils": "outils.html",
+    "parametres": "parametres.html"
 }
 
 
@@ -1563,6 +1639,348 @@ def send_attestation_api(data: Dict[str, Any] = Body(...)):
         return JSONResponse(status_code=400, content={"status": "error", "message": client_error(e, "send_attestation_api")})
 
 
+# --------------------------------------------------------------------------
+# Fiches de Présence Excel (Téléchargement direct dans le navigateur)
+# --------------------------------------------------------------------------
+@app.get("/api/presence/config")
+def get_presence_config():
+    """Renvoie les groupes disponibles (autonomes et cours) et leurs statistiques pour l'IHM."""
+    try:
+        import datetime
+        from infrastructure.sqlite_repository import SqliteRepository
+        from domain.planning_groups import is_autonome_creneau
+        from domain.constants import get_active_season
+        from presence_sheet_generator import SEASON_COURSE_START, SEASON_COURSE_END
+
+        season = get_active_season()
+        creneaux = SqliteRepository.load_creneaux_groups()
+        raw_data = SqliteRepository.load_direct_data(season_filter=season)
+
+        # 1. Groupes autonomes
+        aut_creneaux = [c for c in creneaux if is_autonome_creneau(c)]
+        aut_tarifs = set()
+        for c in aut_creneaux:
+            for t in (c.get("tarifs") or []):
+                aut_tarifs.add(str(t).strip())
+
+        today = datetime.date.today()
+        def _dob_of(p):
+            s = str(p.get("birth_date") or p.get("champ_Date de naissance de l'adhérent") or "").strip()
+            for fmt, sliced in (("%Y-%m-%d", True), ("%d/%m/%Y", False)):
+                try:
+                    return datetime.datetime.strptime(s[:10] if sliced else s, fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        # Comptage autonome
+        aut_adultes = 0
+        aut_mineurs = 0
+        counted_keys = set()
+        for p in raw_data:
+            tarif = str(p.get("tarif_name") or "").strip()
+            if tarif not in aut_tarifs or "annul" in str(p.get("status") or "").lower():
+                continue
+            dob = _dob_of(p)
+            ikey = (str(p.get("first_name") or "").strip().lower(), str(p.get("last_name") or "").strip().lower(), dob.isoformat() if dob else "")
+            if ikey in counted_keys:
+                continue
+            counted_keys.add(ikey)
+            if dob:
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                if age < 18:
+                    aut_mineurs += 1
+                else:
+                    aut_adultes += 1
+            else:
+                aut_adultes += 1
+
+        # Mineurs autorisés ajoutés d'autres groupes
+        added_minors = 0
+        added_seen = set()
+        for p in raw_data:
+            if "annul" in str(p.get("status") or "").lower():
+                continue
+            if not (str(p.get("parental_auth_autonomous") or "").strip() == "Oui" or str(p.get("parental_auth_family") or "").strip() == "Oui"):
+                continue
+            dob = _dob_of(p)
+            ikey = (str(p.get("first_name") or "").strip().lower(), str(p.get("last_name") or "").strip().lower(), dob.isoformat() if dob else "")
+            if ikey in counted_keys or ikey in added_seen:
+                continue
+            if dob:
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                if age >= 18:
+                    continue
+            added_seen.add(ikey)
+            added_minors += 1
+
+        # 2. Groupes de cours
+        cours_creneaux = [c for c in creneaux if not is_autonome_creneau(c)]
+        cours_list = []
+        for c in cours_creneaux:
+            c_tarifs = set(str(t).strip() for t in (c.get("tarifs") or []))
+            count = 0
+            c_seen = set()
+            for p in raw_data:
+                if "annul" in str(p.get("status") or "").lower():
+                    continue
+                if str(p.get("tarif_name") or "").strip() in c_tarifs:
+                    dob = _dob_of(p)
+                    ikey = (str(p.get("first_name") or "").strip().lower(), str(p.get("last_name") or "").strip().lower(), dob.isoformat() if dob else "")
+                    if ikey not in c_seen:
+                        c_seen.add(ikey)
+                        count += 1
+            slots_str = " · ".join(f"{j} {h}".strip() for j, h in c["slots"] if j or h)
+            cours_list.append({
+                "groupe": c["groupe"],
+                "slots": slots_str,
+                "tarifs": c["tarifs"],
+                "count": count,
+            })
+
+        return {
+            "status": "success",
+            "season": season,
+            "default_dates": {
+                "start": SEASON_COURSE_START.strftime("%d/%m/%Y"),
+                "end": SEASON_COURSE_END.strftime("%d/%m/%Y")
+            },
+            "autonome": {
+                "adultes": aut_adultes,
+                "mineurs": aut_mineurs,
+                "mineurs_autorises": added_minors,
+                "total": aut_adultes + aut_mineurs + added_minors,
+                "groups": [c["groupe"] for c in aut_creneaux],
+            },
+            "cours": cours_list
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Erreur chargement config présence : {e}"})
+
+
+@app.post("/api/presence/export")
+def export_presence_api(data: Dict[str, Any] = Body(...)):
+    """Génère les fiches de présence au format Excel et les renvoie directement en téléchargement."""
+    import os
+    import shutil
+    import tempfile
+    import zipfile
+    from presence_sheet_generator import generate_presence_sheets
+    from infrastructure.sqlite_repository import SqliteRepository
+    from domain.planning_groups import is_autonome_creneau
+    from domain.constants import get_active_season
+
+    try:
+        season = data.get("season") or get_active_season()
+        raw_data = SqliteRepository.load_direct_data(season_filter=season)
+        creneaux = SqliteRepository.load_creneaux_groups()
+
+        variant = (data.get("variant") or "cours").strip().lower()
+        start_date = (data.get("start_date") or "").strip() or None
+        end_date = (data.get("end_date") or "").strip() or None
+        show_health_col = bool(data.get("show_health_col", False))
+
+        if variant == "autonome":
+            aut_creneaux = [c for c in creneaux if is_autonome_creneau(c)]
+            selected_groups = [c["groupe"] for c in aut_creneaux]
+            group_tarifs_map = {c["groupe"]: c["tarifs"] for c in aut_creneaux}
+            merge_groups = True
+            auth_only = True
+            hide_badge_cols = False
+            same_sheet = False
+        else:
+            cours_creneaux = [c for c in creneaux if not is_autonome_creneau(c)]
+            user_groups = data.get("selected_groups") or []
+            if user_groups:
+                selected_groups = [c["groupe"] for c in cours_creneaux if c["groupe"] in user_groups]
+            else:
+                selected_groups = [c["groupe"] for c in cours_creneaux]
+            group_tarifs_map = {c["groupe"]: c["tarifs"] for c in cours_creneaux if c["groupe"] in selected_groups}
+            merge_groups = False
+            auth_only = False
+            hide_badge_cols = True
+            same_sheet = bool(data.get("same_sheet", True))
+
+        if not selected_groups:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Aucun groupe sélectionné pour l'export."})
+
+        tmp_dir = tempfile.mkdtemp(prefix="alj_presence_")
+        try:
+            ok, files = generate_presence_sheets(
+                selected_groups=selected_groups,
+                participants_data=raw_data,
+                start_date_str=start_date,
+                end_date_str=end_date,
+                merge_groups=merge_groups,
+                auth_only=auth_only,
+                hide_badge_cols=hide_badge_cols,
+                same_sheet=same_sheet,
+                group_tarifs_map=group_tarifs_map,
+                show_health_col=show_health_col,
+                output_dir=tmp_dir,
+            )
+            if not ok or not files:
+                return JSONResponse(status_code=400, content={"status": "error", "message": f"Erreur de génération : {files}"})
+
+            if len(files) == 1:
+                filename = files[0]
+                file_path = os.path.join(tmp_dir, filename)
+                with open(file_path, "rb") as f:
+                    content_bytes = f.read()
+                return Response(
+                    content=content_bytes,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{filename}"',
+                        "Access-Control-Expose-Headers": "Content-Disposition"
+                    }
+                )
+            else:
+                zip_filename = f"Fiches_Presence_{variant.capitalize()}_{season}.zip"
+                zip_path = os.path.join(tmp_dir, zip_filename)
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for fname in files:
+                        fpath = os.path.join(tmp_dir, fname)
+                        if os.path.exists(fpath):
+                            zf.write(fpath, arcname=fname)
+                with open(zip_path, "rb") as f:
+                    zip_bytes = f.read()
+                return Response(
+                    content=zip_bytes,
+                    media_type="application/zip",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{zip_filename}"',
+                        "Access-Control-Expose-Headers": "Content-Disposition"
+                    }
+                )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Erreur serveur lors de la génération : {e}"})
+
+
+# --------------------------------------------------------------------------
+# Export Fédéral FFME (CSV)
+# --------------------------------------------------------------------------
+@app.get("/api/ffme/stats")
+def get_ffme_stats_api(season: Optional[str] = None):
+    """Calcule et renvoie les statistiques de l'export fédéral FFME."""
+    try:
+        import datetime
+        from infrastructure.sqlite_repository import SqliteRepository
+        from domain.constants import get_active_season
+        from create_excel import parse_date_to_datetime, clean_digits_only
+
+        target_season = season or get_active_season()
+        participants = SqliteRepository.load_direct_data(season_filter=target_season)
+
+        produced_count = 0
+        ignored_count = 0
+        termine_count = 0
+        renewals_count = 0
+        new_licences_count = 0
+        ignored_details = []
+
+        now = datetime.datetime.now()
+
+        for p in participants:
+            tarif_name = str(p.get("tarif_name") or "").lower()
+            amount = p.get("amount", 0.0)
+            status = str(p.get("status") or "").lower()
+            commentaires = str(p.get("commentaires_correctif") or "").lower()
+            is_manual = "ajout manuel" in commentaires
+
+            # 1. Ignoré (liste d'attente, montant nul non manuel, annulé)
+            if "attente" in tarif_name or (amount == 0.0 and not is_manual) or "annul" in status or "cancel" in status:
+                ignored_count += 1
+                continue
+
+            # 2. Date de naissance manquante ou invalide
+            dob_val = p.get("birth_date") or p.get("champ_Date de naissance de l'adhérent") or ""
+            dob_date = None
+            if isinstance(dob_val, (datetime.datetime, datetime.date)):
+                dob_date = dob_val
+            else:
+                parsed_dt = parse_date_to_datetime(str(dob_val).strip())
+                if isinstance(parsed_dt, (datetime.datetime, datetime.date)):
+                    dob_date = parsed_dt
+
+            if not dob_date or dob_date >= now:
+                ignored_count += 1
+                nom = str(p.get("last_name") or "Inconnu").strip().upper()
+                prenom = str(p.get("first_name") or "Inconnu").strip()
+                ignored_details.append(f"{nom} {prenom} (date de naissance manquante/invalide)")
+                continue
+
+            # 3. Terminé ou à produire
+            lic = clean_digits_only(p.get("licence_ffme") or "")
+            is_renewal = 5 <= len(lic) <= 10
+
+            if "termin" in status:
+                termine_count += 1
+            else:
+                produced_count += 1
+
+            if is_renewal:
+                renewals_count += 1
+            else:
+                new_licences_count += 1
+
+        return {
+            "status": "success",
+            "season": target_season,
+            "produced_count": produced_count,
+            "termine_count": termine_count,
+            "ignored_count": ignored_count,
+            "estimated_total": produced_count + termine_count,
+            "renewals_count": renewals_count,
+            "new_licences_count": new_licences_count,
+            "ignored_details": ignored_details[:20]
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "get_ffme_stats_api")})
+
+
+@app.get("/api/ffme/export")
+def export_ffme_api(season: Optional[str] = None, include_termine: bool = Query(True)):
+    """Génère le fichier CSV d'import FFME et le renvoie directement en téléchargement."""
+    import os
+    import tempfile
+    import datetime
+    from infrastructure.sqlite_repository import SqliteRepository
+    from domain.constants import get_active_season
+    from create_excel import generate_ffme_csv
+
+    try:
+        target_season = season or get_active_season()
+        raw_data = SqliteRepository.load_direct_data(season_filter=target_season)
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"import_ffme_{timestamp}.csv"
+        
+        tmp_dir = tempfile.mkdtemp(prefix="alj_ffme_export_")
+        tmp_csv = os.path.join(tmp_dir, filename)
+
+        try:
+            ignored = generate_ffme_csv(raw_data, output_path=tmp_csv, include_termine=include_termine)
+            with open(tmp_csv, "rb") as f:
+                content_bytes = f.read()
+
+            return Response(
+                content=content_bytes,
+                media_type="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Access-Control-Expose-Headers": "Content-Disposition"
+                }
+            )
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "export_ffme_api")})
+
+
 @app.get("/api/season-tarifs")
 def get_season_tarifs_api(season: Optional[str] = None):
     """Retourne la liste des tarifs HelloAsso (groupes disponibles) d'une saison pour l'édition de créneau."""
@@ -1656,7 +2074,7 @@ def get_google_auth_status():
 
 
 @app.get("/api/auth/google/login")
-def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/outils", redirect_uri: Optional[str] = None):
+def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/parametres", redirect_uri: Optional[str] = None):
     """Initie le flux d'autorisation OAuth2 Google pour renouveler le refresh token."""
     import base64
     import urllib.parse
@@ -1667,7 +2085,7 @@ def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/outi
         return HTMLResponse(
             "<h2>❌ Erreur de configuration Google OAuth2</h2>"
             "<p>Aucun identifiant client Google (GMAIL_CLIENT_ID ou client_secret_*.json) n'a été trouvé sur le serveur.</p>"
-            "<p><a href='/bureau/outils'>Retour au bureau</a></p>",
+            "<p><a href='/bureau/parametres'>Retour aux paramètres</a></p>",
             status_code=500
         )
 
@@ -1684,7 +2102,7 @@ def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/outi
     # Construire le state
     state_payload = {
         "redirect_uri": redirect_uri,
-        "return_to": return_to or "/bureau/outils",
+        "return_to": return_to or "/bureau/parametres",
         "ts": time.time(),
     }
     state = base64.urlsafe_b64encode(json.dumps(state_payload).encode("utf-8")).decode("utf-8")
@@ -1723,7 +2141,7 @@ def google_auth_callback(
     from infrastructure.google_drive_client import GoogleDriveClient
     from infrastructure.cloud_database import CloudDatabase
 
-    def _render_page(title: str, body_html: str, return_url: str = "/bureau/outils", auto_redirect: bool = False):
+    def _render_page(title: str, body_html: str, return_url: str = "/bureau/parametres", auto_redirect: bool = False):
         redirect_script = f"<script>setTimeout(function() {{ window.location.href = '{return_url}'; }}, 3500);</script>" if auto_redirect else ""
         return f"""<!DOCTYPE html>
 <html lang="fr">
@@ -1769,7 +2187,7 @@ def google_auth_callback(
             f"""<h2>❌ Autorisation Google refusée</h2>
             <div class="badge badge-error">Erreur : {error}</div>
             <p>La connexion au compte Google a été annulée ou refusée.</p>
-            <p><a href="/bureau/outils" class="btn">Retour au bureau</a></p>"""
+            <p><a href="/bureau/parametres" class="btn">Retour aux paramètres</a></p>"""
         )
 
     if not code:
@@ -1778,17 +2196,17 @@ def google_auth_callback(
             """<h2>❌ Code d'autorisation manquant</h2>
             <div class="badge badge-error">Requête incomplète</div>
             <p>Google n'a pas transmis de code de validation.</p>
-            <p><a href="/bureau/outils" class="btn">Retour au bureau</a></p>"""
+            <p><a href="/bureau/parametres" class="btn">Retour aux paramètres</a></p>"""
         )
 
     # Récupérer return_to et redirect_uri depuis le state
-    return_to = "/bureau/outils"
+    return_to = "/bureau/parametres"
     redirect_uri = ""
     if state:
         try:
             raw_state = base64.urlsafe_b64decode(state.encode("utf-8")).decode("utf-8")
             state_data = json.loads(raw_state)
-            return_to = state_data.get("return_to", "/bureau/outils")
+            return_to = state_data.get("return_to", "/bureau/parametres")
             redirect_uri = state_data.get("redirect_uri", "")
         except Exception:
             pass
@@ -1809,7 +2227,7 @@ def google_auth_callback(
             """<h2>❌ Identifiants Google manquants</h2>
             <div class="badge badge-error">GMAIL_CLIENT_ID ou SECRET introuvable</div>
             <p>Impossible d'échanger le code : le client_secret est manquant sur le serveur.</p>
-            <p><a href="/bureau/outils" class="btn">Retour au bureau</a></p>"""
+            <p><a href="/bureau/parametres" class="btn">Retour aux paramètres</a></p>"""
         )
 
     token_url = "https://oauth2.googleapis.com/token"
@@ -2060,6 +2478,28 @@ def update_google_token(data: Dict[str, Any] = Body(...)):
         "message": "Jeton Google mis à jour et validé avec succès.",
         "user_email": user_email
     }
+
+
+@app.post("/api/cloud-db/sync")
+def sync_cloud_db_api(force: bool = Query(False)):
+    """Force la synchronisation bilatérale entre Firestore et la base SQLite locale."""
+    try:
+        from infrastructure.cloud_database import CloudDatabase
+        if not CloudDatabase.is_enabled():
+            return {"status": "skipped", "message": "Mode Firestore non activé (MEMBER_BACKEND != firestore)."}
+
+        result = CloudDatabase.sync(force_pull_all=force)
+        errors = result.get("errors") if isinstance(result, dict) else []
+        if errors:
+            return JSONResponse(status_code=500, content={"status": "error", "message": f"Erreur de synchronisation : {'; '.join(errors)}", "result": result})
+
+        return {
+            "status": "success",
+            "message": "Base de données synchronisée avec succès avec Firestore.",
+            "result": result
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "sync_cloud_db_api")})
 
 
 if __name__ == "__main__":

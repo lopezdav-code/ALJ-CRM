@@ -11,7 +11,9 @@ const NAV = [
   { id: "adherents", label: "👥 Adhérents", href: "/bureau/adherents" },
   { id: "communications", label: "✉️ Communications", href: "/bureau/communications" },
   { id: "competitions", label: "🏆 Compétitions", href: "/bureau/competitions" },
-  { id: "outils", label: "🛠️ Outils", href: "/bureau/outils" }
+  { id: "planning", label: "📅 Planning", href: "/bureau/planning" },
+  { id: "outils", label: "🛠️ Outils", href: "/bureau/outils" },
+  { id: "parametres", label: "⚙️ Paramètres", href: "/bureau/parametres" }
 ];
 const ROLE_LABEL = {
   admin: "🛡️ Administrateur", coach: "🏃 Coach", lecture: "👁️ Lecture seule", aucun: "⛔ Non autorisé"

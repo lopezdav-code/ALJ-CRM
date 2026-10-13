@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="20">
-<title>ALJ Escalade — Bureau · Outils (v20)</title>
+<meta name="alj-web-version" content="21">
+<title>ALJ Escalade — Bureau · Outils (v21)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -34,14 +34,15 @@ startBureau({
       <div class="card" style="margin-bottom:12px; padding:12px 16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
           <div>
-            <div class="m-name" style="font-size:16px;">🛠️ Outils d'analyse & cartographie</div>
-            <div class="m-sub">Visualisation spatiale des adhérents et tableau croisé dynamique des inscriptions.</div>
+            <div class="m-name" style="font-size:16px;">🛠️ Outils d'analyse & exports</div>
+            <div class="m-sub">Cartographie, analyse des effectifs et fiches de présence d'activité (format Excel A3).</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <div class="filter-chips">
               <span class="filter-chip active" id="tab-btn-map" style="font-size:13px; padding:6px 14px;">📍 Carte géographique</span>
               <span class="filter-chip" id="tab-btn-pivot" style="font-size:13px; padding:6px 14px;">📊 Analyse des effectifs (TCD)</span>
-              <span class="filter-chip" id="tab-btn-google" style="font-size:13px; padding:6px 14px;">🔐 Connexion Google & BDD</span>
+              <span class="filter-chip" id="tab-btn-presence" style="font-size:13px; padding:6px 14px;">📋 Fiches de présence</span>
+              <span class="filter-chip" id="tab-btn-ffme" style="font-size:13px; padding:6px 14px;">🇫🇷 Export CSV FFME</span>
             </div>
             <button class="btn btn-muted btn-mini" id="tools-refresh-btn" title="Recharger l'outil actif">🔄 Recharger</button>
           </div>
@@ -61,6 +62,7 @@ startBureau({
         <div style="display:flex; gap:8px; align-items:center; margin-bottom:2px;">
           <label class="muted" style="font-size:12.5px; font-weight:600;">Saison à analyser :</label>
           <select id="pivot-season-select" class="select-input" style="padding:4px 8px; font-size:12.5px;">
+            <option value="2026-2027" selected>2026-2027</option>
             <option value="Toutes les saisons">Toutes les saisons</option>
           </select>
         </div>
@@ -70,66 +72,173 @@ startBureau({
         <iframe id="iframe-pivot" class="tools-frame" style="display:none;" sandbox="allow-scripts allow-popups allow-modals" title="Tableau Croisé Dynamique"></iframe>
       </div>
 
-      <!-- Onglet 3 : Connexion Google & BDD (/api/auth/google) -->
-      <div class="tools-wrap" id="pane-google" style="display:none; flex-direction:column; gap:14px;">
-        <div class="card" style="margin-bottom:0;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+      <!-- Onglet 3 : Fiches de Présence (Export Excel A3) -->
+      <div id="pane-presence" style="display:none; flex-direction:column; gap:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+          <!-- Carte A : Fiche de Présence Autonome -->
+          <div class="card" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:space-between;">
             <div>
-              <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 4px;">
-                <span>🔐 État de la connexion Google & BDD</span>
-                <span id="google-status-badge" class="badge" style="background:#94A3B8; font-size:11.5px; padding:3px 9px;">Vérification…</span>
-              </h2>
-              <p class="muted" id="google-status-desc" style="font-size:13px; margin:4px 0 0;">Vérification de la validité du jeton Google OAuth2 en cours…</p>
-            </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <a href="/api/auth/google/login?return_to=/bureau/outils" class="btn btn-primary" id="btn-google-reconnect">🔄 Renouveler la connexion Google</a>
-              <button class="btn btn-muted" id="btn-google-test">🔍 Tester l'accès</button>
-            </div>
-          </div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                <h2 style="font-size:16px; margin:0; display:flex; align-items:center; gap:8px;">
+                  <span>🧗 Fiche Autonome</span>
+                  <span class="badge" style="background:#E0F2FE; color:#0369A1; font-size:11px; padding:2px 8px;">A3 Paysage</span>
+                </h2>
+              </div>
+              <p class="muted" style="font-size:13px; line-height:1.45; margin:0 0 12px;">
+                Fusionne l'ensemble des créneaux autonomes en <b>un seul tableau Excel</b>. Intègre automatiquement les jeunes mineurs avec autorisation parentale (Autonomes / Famille) issus des autres cours.
+              </p>
 
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-top:16px;">
-            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
-              <div class="muted" style="font-size:11.5px; font-weight:600;">COMPTE GOOGLE DU CLUB</div>
-              <div id="google-account-email" style="font-weight:700; margin-top:2px;">—</div>
-            </div>
-            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
-              <div class="muted" style="font-size:11.5px; font-weight:600;">MODE BASE DE DONNÉES</div>
-              <div id="google-db-mode" style="font-weight:700; margin-top:2px;">Firestore (Cloud)</div>
-            </div>
-            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
-              <div class="muted" style="font-size:11.5px; font-weight:600;">SERVICES ASSOCIÉS</div>
-              <div style="font-weight:600; font-size:12px; margin-top:2px; color:var(--ink);">BDD, Google Drive & Gmail API</div>
-            </div>
-          </div>
+              <div id="presence-autonome-summary" style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:12.5px;">
+                <span>⏳ Chargement de l'effectif autonome…</span>
+              </div>
 
-          <div id="google-test-results" style="display:none; margin-top:14px; background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
-            <div style="font-weight:700; margin-bottom:8px; font-size:13px;">Résultat du diagnostic en direct :</div>
-            <div id="google-test-details" style="display:flex; flex-direction:column; gap:6px; font-size:12.5px;"></div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-bottom:0;">
-          <h2 style="font-size:15px; margin:0 0 6px;">ℹ️ Pourquoi renouveler le jeton ?</h2>
-          <p style="font-size:13px; color:var(--muted); margin:0 0 10px;">
-            Le serveur backend utilise ce jeton Google pour synchroniser la base de données des adhérents, accéder au Drive et expédier les e-mails et attestations.
-            Si le statut indique <b>« Jeton expiré »</b>, cliquez simplement sur le bouton bleu ci-dessus pour vous reconnecter avec le compte Google de l'association.
-          </p>
-          <div style="font-size:12px; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px; padding:10px 12px; color:#1E3A8A;">
-            💡 <b>Conseil Google Cloud :</b> Si vous devez renouveler le jeton tous les 7 jours, c'est que votre projet Google Cloud est en statut <i>« En test »</i>. Rendez-vous sur la <b>Google Cloud Console → Écran de consentement OAuth</b> et cliquez sur <b>« Publier l'application »</b> pour passer en production et rendre le jeton permanent.
-          </div>
-        </div>
-
-        <div class="card" id="admin-manual-token-card" style="margin-bottom:0;">
-          <details style="cursor:pointer;">
-            <summary style="font-weight:700; font-size:13px; color:var(--muted);">⚙️ Option de secours : Saisie manuelle du Refresh Token (Admin)</summary>
-            <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
-              <p style="font-size:12.5px; color:var(--muted); margin:0;">Permet de coller manuellement un nouveau <code>refresh_token</code> si la redirection Google automatique n'est pas configurée dans votre console.</p>
-              <input type="text" id="manual-refresh-token" placeholder="Coller le nouveau refresh_token Google ici (1//...)" class="search-input" style="font-family:monospace; font-size:12px;">
-              <div style="display:flex; gap:8px; justify-content:flex-end;">
-                <button class="btn btn-muted btn-mini" id="btn-save-manual-token">Enregistrer et tester le jeton</button>
+              <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                  <div style="flex:1; min-width:130px;">
+                    <label class="muted" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:3px;">Date début (facultatif)</label>
+                    <input type="text" id="autonome-start-date" placeholder="JJ/MM/AAAA" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid var(--line); border-radius:6px;">
+                  </div>
+                  <div style="flex:1; min-width:130px;">
+                    <label class="muted" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:3px;">Date fin (facultatif)</label>
+                    <input type="text" id="autonome-end-date" placeholder="JJ/MM/AAAA" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid var(--line); border-radius:6px;">
+                  </div>
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; color:var(--ink);">
+                  <input type="checkbox" id="autonome-health-chk" style="cursor:pointer;">
+                  <span>Afficher la colonne « Santé » (✗ si document en attente)</span>
+                </label>
               </div>
             </div>
-          </details>
+
+            <button class="btn btn-primary" id="btn-download-autonome" style="width:100%; padding:10px; font-size:13.5px; margin-top:10px;">
+              📥 Télécharger la fiche Autonome (.xlsx)
+            </button>
+          </div>
+
+          <!-- Carte B : Fiches de Présence Cours -->
+          <div class="card" style="margin-bottom:0; display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                <h2 style="font-size:16px; margin:0; display:flex; align-items:center; gap:8px;">
+                  <span>📚 Fiches des Cours</span>
+                  <span class="badge" id="cours-badge-count" style="background:#FEF3C7; color:#92400E; font-size:11px; padding:2px 8px;">Cours encadrés</span>
+                </h2>
+              </div>
+              <p class="muted" style="font-size:13px; line-height:1.45; margin:0 0 12px;">
+                Génère les fiches de présence pour les cours encadrés. Les badges sont masqués pour offrir un espace d'émargement maximal.
+              </p>
+
+              <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:12.5px;">
+                <div style="font-weight:600; margin-bottom:6px; font-size:12px; color:var(--muted);">FORMAT DU TÉLÉCHARGEMENT</div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="radio" name="cours-format" value="single" checked style="cursor:pointer;">
+                    <span><b>Un seul classeur Excel</b> (tous les cours empilés, 1 page A3 par créneau)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="radio" name="cours-format" value="zip" style="cursor:pointer;">
+                    <span><b>Un fichier Excel distinct par créneau</b> (archive ZIP)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:12px;">
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                  <div style="flex:1; min-width:130px;">
+                    <label class="muted" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:3px;">Date début (facultatif)</label>
+                    <input type="text" id="cours-start-date" placeholder="JJ/MM/AAAA" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid var(--line); border-radius:6px;">
+                  </div>
+                  <div style="flex:1; min-width:130px;">
+                    <label class="muted" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:3px;">Date fin (facultatif)</label>
+                    <input type="text" id="cours-end-date" placeholder="JJ/MM/AAAA" class="search-input" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid var(--line); border-radius:6px;">
+                  </div>
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; color:var(--ink);">
+                  <input type="checkbox" id="cours-health-chk" style="cursor:pointer;">
+                  <span>Afficher la colonne « Santé » (✗ si document en attente)</span>
+                </label>
+              </div>
+
+              <div style="margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span class="muted" style="font-size:12px; font-weight:600;">CHOIX DES GROUPES DE COURS</span>
+                  <div style="display:flex; gap:6px;">
+                    <button class="btn btn-muted btn-mini" id="btn-select-all-cours" type="button" style="padding:2px 8px; font-size:11px;">Tout cocher</button>
+                    <button class="btn btn-muted btn-mini" id="btn-deselect-all-cours" type="button" style="padding:2px 8px; font-size:11px;">Tout décocher</button>
+                  </div>
+                </div>
+                <div id="cours-groups-list" style="max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px 10px; display:flex; flex-direction:column; gap:4px; background:#FFF;">
+                  <span class="muted" style="font-size:12px;">⏳ Chargement des cours…</span>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" id="btn-download-cours" style="width:100%; padding:10px; font-size:13.5px; margin-top:10px;">
+              📥 Télécharger les fiches de cours (.xlsx)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Onglet 4 : Export Fédéral FFME (CSV) -->
+      <div id="pane-ffme" style="display:none; flex-direction:column; gap:14px;">
+        <div class="card" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+            <div>
+              <h2 style="font-size:16px; margin:0 0 4px; display:flex; align-items:center; gap:8px;">
+                <span>🇫🇷 Export Intranet Fédéral FFME (CSV Officiel)</span>
+                <span class="badge" style="background:#EFF6FF; color:#1D4ED8; font-size:11px; padding:2px 8px;">Format Fédéral</span>
+              </h2>
+              <p class="muted" style="font-size:13px; margin:0; line-height:1.45;">
+                Génère le fichier CSV normalisé prêt à être importé dans l'intranet fédéral FFME (séparateur point-virgule, codification automatique des assurances, options ski/vtt/trail et numéros de licence existants).
+              </p>
+            </div>
+            <a href="https://myffme.fr/federal/gestion-des-licences/saisir-les-licences-via-csv/2027" target="_blank" class="btn btn-muted btn-mini" style="text-decoration:none; display:flex; align-items:center; gap:6px;">
+              <span>🌐 Ouvrir MyFFME (Import CSV)</span>
+            </a>
+          </div>
+
+          <!-- Grille des statistiques d'export -->
+          <div id="ffme-stats-cards" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11px; font-weight:600;">TOTAL ÉLIGIBLES</div>
+              <div id="ffme-stat-total" style="font-size:18px; font-weight:700; color:var(--ink); margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11px; font-weight:600;">RENOUVELLEMENTS</div>
+              <div id="ffme-stat-renewals" style="font-size:18px; font-weight:700; color:#16A34A; margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11px; font-weight:600;">NOUVELLES LICENCES</div>
+              <div id="ffme-stat-new" style="font-size:18px; font-weight:700; color:#2563EB; margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11px; font-weight:600;">LIGNES IGNORÉES</div>
+              <div id="ffme-stat-ignored" style="font-size:18px; font-weight:700; color:#EA580C; margin-top:2px;">—</div>
+            </div>
+          </div>
+
+          <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:16px;">
+            <div style="font-weight:600; font-size:12.5px; margin-bottom:8px;">OPTIONS D'EXPORTATION</div>
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+              <input type="checkbox" id="ffme-include-termine" checked style="cursor:pointer;">
+              <span><b>Inclure les adhérents dont le statut est « Terminé »</b> (permet d'exporter l'intégralité des adhérents validés de la saison)</span>
+            </label>
+            <p class="muted" style="font-size:11.5px; margin:4px 0 0 24px;">
+              Décochez cette option si vous souhaitez exporter uniquement les nouveaux inscrits non encore traités.
+            </p>
+          </div>
+
+          <div id="ffme-ignored-box" style="display:none; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:12px; color:#92400E;">
+            <b>⚠️ Adhérents ignorés (données incomplètes) :</b>
+            <ul id="ffme-ignored-list" style="margin:4px 0 0; padding-left:18px;"></ul>
+          </div>
+
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="btn btn-primary" id="btn-download-ffme" style="padding:10px 20px; font-size:13.5px;">
+              📥 Télécharger le fichier CSV FFME
+            </button>
+          </div>
         </div>
       </div>
 
@@ -145,29 +254,50 @@ startBureau({
       t._h = setTimeout(() => t.classList.remove("show"), ms);
     }
 
-    let activeTab = "map"; // 'map' | 'pivot' | 'google'
+    let activeTab = "map"; // 'map' | 'pivot' | 'presence' | 'ffme'
     let mapLoaded = false;
     let pivotLoaded = false;
-    let currentPivotSeason = "Toutes les saisons";
+    let presenceLoaded = false;
+    let ffmeLoaded = false;
+    let currentPivotSeason = "2026-2027";
+    let presenceConfigData = null;
 
     const tabBtnMap = document.getElementById("tab-btn-map");
     const tabBtnPivot = document.getElementById("tab-btn-pivot");
-    const tabBtnGoogle = document.getElementById("tab-btn-google");
+    const tabBtnPresence = document.getElementById("tab-btn-presence");
+    const tabBtnFfme = document.getElementById("tab-btn-ffme");
     const paneMap = document.getElementById("pane-map");
     const panePivot = document.getElementById("pane-pivot");
-    const paneGoogle = document.getElementById("pane-google");
+    const panePresence = document.getElementById("pane-presence");
+    const paneFfme = document.getElementById("pane-ffme");
     const refreshBtn = document.getElementById("tools-refresh-btn");
     const seasonSelect = document.getElementById("pivot-season-select");
 
-    const googleStatusBadge = document.getElementById("google-status-badge");
-    const googleStatusDesc = document.getElementById("google-status-desc");
-    const googleAccountEmail = document.getElementById("google-account-email");
-    const googleDbMode = document.getElementById("google-db-mode");
-    const googleTestBtn = document.getElementById("btn-google-test");
-    const googleTestResults = document.getElementById("google-test-results");
-    const googleTestDetails = document.getElementById("google-test-details");
-    const btnSaveManualToken = document.getElementById("btn-save-manual-token");
-    const manualTokenInput = document.getElementById("manual-refresh-token");
+    // Éléments présence
+    const presenceAutonomeSummary = document.getElementById("presence-autonome-summary");
+    const autonomeStartDate = document.getElementById("autonome-start-date");
+    const autonomeEndDate = document.getElementById("autonome-end-date");
+    const autonomeHealthChk = document.getElementById("autonome-health-chk");
+    const btnDownloadAutonome = document.getElementById("btn-download-autonome");
+
+    const coursBadgeCount = document.getElementById("cours-badge-count");
+    const coursStartDate = document.getElementById("cours-start-date");
+    const coursEndDate = document.getElementById("cours-end-date");
+    const coursHealthChk = document.getElementById("cours-health-chk");
+    const coursGroupsList = document.getElementById("cours-groups-list");
+    const btnSelectAllCours = document.getElementById("btn-select-all-cours");
+    const btnDeselectAllCours = document.getElementById("btn-deselect-all-cours");
+    const btnDownloadCours = document.getElementById("btn-download-cours");
+
+    // Éléments FFME
+    const ffmeStatTotal = document.getElementById("ffme-stat-total");
+    const ffmeStatRenewals = document.getElementById("ffme-stat-renewals");
+    const ffmeStatNew = document.getElementById("ffme-stat-new");
+    const ffmeStatIgnored = document.getElementById("ffme-stat-ignored");
+    const ffmeIncludeTermine = document.getElementById("ffme-include-termine");
+    const ffmeIgnoredBox = document.getElementById("ffme-ignored-box");
+    const ffmeIgnoredList = document.getElementById("ffme-ignored-list");
+    const btnDownloadFfme = document.getElementById("btn-download-ffme");
 
     async function loadMap(force = false) {
       if (mapLoaded && !force) return;
@@ -194,7 +324,7 @@ startBureau({
       }
     }
 
-    async function loadPivot(season = "Toutes les saisons", force = false) {
+    async function loadPivot(season = "2026-2027", force = false) {
       if (pivotLoaded && !force && season === currentPivotSeason) return;
       currentPivotSeason = season;
       const loading = document.getElementById("loading-pivot");
@@ -221,136 +351,266 @@ startBureau({
       }
     }
 
-    async function loadGoogleStatus() {
-      try {
-        googleStatusBadge.style.background = "#94A3B8";
-        googleStatusBadge.textContent = "Vérification…";
-        const res = await apiFetch("/api/auth/google/status");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "connected") {
-            googleStatusBadge.style.background = "var(--green)";
-            googleStatusBadge.textContent = "🟢 Connecté & Opérationnel";
-            googleStatusDesc.textContent = "Le jeton Google OAuth2 est valide. L'accès à la BDD et aux envois d'e-mails est pleinement fonctionnel.";
-          } else if (data.status === "expired") {
-            googleStatusBadge.style.background = "var(--red)";
-            googleStatusBadge.textContent = "🔴 Jeton expiré ou révoqué";
-            googleStatusDesc.textContent = "Le jeton de connexion Google a expiré. Cliquez sur « Renouveler la connexion Google » pour rétablir les accès.";
-          } else {
-            googleStatusBadge.style.background = "var(--amber)";
-            googleStatusBadge.textContent = "🟡 Non connecté";
-            googleStatusDesc.textContent = "Aucun jeton Google n'est configuré. Connectez le compte de l'association.";
-          }
+    async function loadPresenceConfig(force = false) {
+      if (presenceLoaded && !force) return;
+      presenceAutonomeSummary.innerHTML = "<span>⏳ Chargement des effectifs…</span>";
+      coursGroupsList.innerHTML = "<span class=\"muted\" style=\"font-size:12px;\">⏳ Chargement des cours…</span>";
 
-          googleAccountEmail.textContent = data.user_email || "Non configuré";
-          googleDbMode.textContent = data.backend === "drive" ? "Google Drive (mode secours)" : "Firestore (Google Cloud)";
-        } else {
-          googleStatusBadge.style.background = "var(--red)";
-          googleStatusBadge.textContent = "Erreur vérification";
+      try {
+        const res = await apiFetch("/api/presence/config");
+        if (!res.ok) {
+          presenceAutonomeSummary.innerHTML = `<span style="color:var(--red)">❌ Erreur HTTP ${res.status}</span>`;
+          return;
         }
-      } catch (err) {
-        console.warn("Vérification statut Google :", err);
-        googleStatusBadge.style.background = "#94A3B8";
-        googleStatusBadge.textContent = "Indisponible";
-      }
-    }
-
-    async function testGoogleServices() {
-      googleTestBtn.disabled = true;
-      googleTestBtn.textContent = "⏳ Test en cours…";
-      googleTestResults.style.display = "block";
-      googleTestDetails.innerHTML = "<div>Test des accès Google en cours…</div>";
-
-      try {
-        const res = await apiFetch("/api/auth/google/test", { method: "POST" });
         const data = await res.json();
-        const r = data.results || {};
+        presenceConfigData = data;
 
-        const tokenBadge = r.oauth_token && r.oauth_token.ok ? "🟢" : "🔴";
-        const dbBadge = r.database && r.database.ok ? "🟢" : "🔴";
-        const gmailBadge = r.gmail && r.gmail.ok ? "🟢" : "🔴";
-
-        googleTestDetails.innerHTML = `
-          <div><b>${tokenBadge} Jeton OAuth2 :</b> ${esc(r.oauth_token ? r.oauth_token.message : 'Inconnu')}</div>
-          <div><b>${dbBadge} Base de Données :</b> ${esc(r.database ? r.database.message : 'Inconnu')}</div>
-          <div><b>${gmailBadge} Service Gmail API :</b> ${esc(r.gmail ? r.gmail.message : 'Inconnu')}</div>
-        `;
-        if (data.all_ok) {
-          toast("✅ Tous les services Google sont fonctionnels !");
-        } else {
-          toast("⚠️ Un ou plusieurs services Google ont échoué.");
+        // 1. Remplir dates par défaut
+        if (data.default_dates) {
+          if (!autonomeStartDate.value) autonomeStartDate.value = data.default_dates.start || "";
+          if (!autonomeEndDate.value) autonomeEndDate.value = data.default_dates.end || "";
+          if (!coursStartDate.value) coursStartDate.value = data.default_dates.start || "";
+          if (!coursEndDate.value) coursEndDate.value = data.default_dates.end || "";
         }
-        loadGoogleStatus();
+
+        // 2. Remplir résumé autonome
+        const aut = data.autonome || {};
+        presenceAutonomeSummary.innerHTML = `
+          <div style="font-weight:700; color:var(--ink); margin-bottom:4px;">
+            Total adhérents : ${aut.total || 0}
+          </div>
+          <div style="color:var(--muted); line-height:1.4;">
+            • ${aut.adultes || 0} adulte(s) & ${aut.mineurs || 0} mineur(s) inscrits en autonome<br>
+            • <b>+ ${aut.mineurs_autorises || 0} jeune(s) mineur(s) autorisés</b> ajoutés d'autres groupes
+          </div>
+        `;
+
+        // 3. Remplir liste des cours
+        const cours = data.cours || [];
+        coursBadgeCount.textContent = `${cours.length} créneau(x)`;
+        if (cours.length === 0) {
+          coursGroupsList.innerHTML = "<span class=\"muted\" style=\"font-size:12px;\">Aucun groupe de cours trouvé.</span>";
+        } else {
+          coursGroupsList.innerHTML = cours.map(c => `
+            <label style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12.5px; padding:3px 0; border-bottom:1px solid #F1F5F9; cursor:pointer;">
+              <span style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" class="cours-cb" value="${esc(c.groupe)}" checked style="cursor:pointer;">
+                <span><b>${esc(c.groupe)}</b> <span class="muted" style="font-size:11.5px;">(${esc(c.slots || '-')})</span></span>
+              </span>
+              <span class="badge" style="background:#F1F5F9; color:#475569; font-size:11px; padding:1px 6px;">${c.count || 0} inscrit(s)</span>
+            </label>
+          `).join("");
+        }
+
+        presenceLoaded = true;
       } catch (err) {
-        googleTestDetails.innerHTML = `<div style="color:var(--red)">❌ Erreur lors du diagnostic : ${esc(err.message)}</div>`;
-      } finally {
-        googleTestBtn.disabled = false;
-        googleTestBtn.textContent = "🔍 Tester l'accès";
+        console.error("Erreur chargement /api/presence/config :", err);
+        presenceAutonomeSummary.innerHTML = `<span style="color:var(--red)">❌ Erreur : ${esc(err.message)}</span>`;
       }
     }
+
+    async function triggerPresenceDownload(payload, defaultFilename, btn) {
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Génération en cours…";
+
+      try {
+        const res = await apiFetch("/api/presence/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          let errText = "Échec du téléchargement";
+          try {
+            const errJson = await res.json();
+            errText = errJson.message || errText;
+          } catch (_) {
+            errText = await res.text();
+          }
+          toast(`❌ ${errText}`);
+          return;
+        }
+
+        let filename = defaultFilename;
+        const disposition = res.headers.get("content-disposition");
+        if (disposition) {
+          const m = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+          if (m && m[1]) {
+            filename = m[1].replace(/['"]/g, '').trim();
+          }
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        toast(`✅ Fichier « ${filename} » téléchargé !`);
+      } catch (err) {
+        console.error("Erreur export présence :", err);
+        toast(`❌ Erreur réseau lors du téléchargement : ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+
+    // Téléchargement Autonome
+    btnDownloadAutonome.addEventListener("click", () => {
+      const payload = {
+        variant: "autonome",
+        start_date: (autonomeStartDate.value || "").trim(),
+        end_date: (autonomeEndDate.value || "").trim(),
+        show_health_col: autonomeHealthChk.checked
+      };
+      triggerPresenceDownload(payload, "Feuille_Presence_Adultes_Autonomes.xlsx", btnDownloadAutonome);
+    });
+
+    // Téléchargement Cours
+    btnDownloadCours.addEventListener("click", () => {
+      const cbs = document.querySelectorAll(".cours-cb:checked");
+      const selected = Array.from(cbs).map(cb => cb.value);
+      if (selected.length === 0) {
+        toast("⚠️ Veuillez cocher au moins un groupe de cours.");
+        return;
+      }
+
+      const formatVal = (document.querySelector('input[name="cours-format"]:checked') || {}).value || "single";
+      const sameSheet = (formatVal === "single");
+
+      const payload = {
+        variant: "cours",
+        selected_groups: selected,
+        start_date: (coursStartDate.value || "").trim(),
+        end_date: (coursEndDate.value || "").trim(),
+        same_sheet: sameSheet,
+        show_health_col: coursHealthChk.checked
+      };
+
+      const defaultName = sameSheet ? "Feuilles_Presence_Toutes_Activites.xlsx" : "Fiches_Presence_Cours.zip";
+      triggerPresenceDownload(payload, defaultName, btnDownloadCours);
+    });
+
+    // Cocher / Décocher tout
+    btnSelectAllCours.addEventListener("click", () => {
+      document.querySelectorAll(".cours-cb").forEach(cb => cb.checked = true);
+    });
+    btnDeselectAllCours.addEventListener("click", () => {
+      document.querySelectorAll(".cours-cb").forEach(cb => cb.checked = false);
+    });
+
+    // Chargement des statistiques FFME
+    async function loadFfmeStats(force = false) {
+      if (ffmeLoaded && !force) return;
+      ffmeStatTotal.textContent = "…";
+      ffmeStatRenewals.textContent = "…";
+      ffmeStatNew.textContent = "…";
+      ffmeStatIgnored.textContent = "…";
+
+      try {
+        const res = await apiFetch("/api/ffme/stats");
+        if (res.ok) {
+          const d = await res.json();
+          ffmeStatTotal.textContent = d.estimated_total || 0;
+          ffmeStatRenewals.textContent = d.renewals_count || 0;
+          ffmeStatNew.textContent = d.new_licences_count || 0;
+          ffmeStatIgnored.textContent = d.ignored_count || 0;
+
+          if (d.ignored_details && d.ignored_details.length > 0) {
+            ffmeIgnoredBox.style.display = "block";
+            ffmeIgnoredList.innerHTML = d.ignored_details.map(item => `<li>${esc(item)}</li>`).join("");
+          } else {
+            ffmeIgnoredBox.style.display = "none";
+          }
+          ffmeLoaded = true;
+        } else {
+          toast("❌ Impossible de charger les statistiques FFME.");
+        }
+      } catch (err) {
+        console.error("Erreur stats FFME :", err);
+      }
+    }
+
+    // Téléchargement CSV FFME
+    btnDownloadFfme.addEventListener("click", async () => {
+      const includeTermine = ffmeIncludeTermine.checked;
+      const origText = btnDownloadFfme.innerHTML;
+      btnDownloadFfme.disabled = true;
+      btnDownloadFfme.innerHTML = "⏳ Génération du CSV FFME…";
+
+      try {
+        const res = await apiFetch(`/api/ffme/export?include_termine=${includeTermine}`);
+        if (!res.ok) {
+          toast("❌ Échec de génération du CSV FFME.");
+          return;
+        }
+        let filename = "import_ffme.csv";
+        const disposition = res.headers.get("content-disposition");
+        if (disposition) {
+          const m = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+          if (m && m[1]) filename = m[1].replace(/['"]/g, '').trim();
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        toast(`✅ Fichier FFME « ${filename} » téléchargé !`);
+      } catch (err) {
+        toast(`❌ Erreur export FFME : ${err.message}`);
+      } finally {
+        btnDownloadFfme.disabled = false;
+        btnDownloadFfme.innerHTML = origText;
+      }
+    });
 
     function switchTab(tab) {
       activeTab = tab;
       tabBtnMap.classList.toggle("active", tab === "map");
       tabBtnPivot.classList.toggle("active", tab === "pivot");
-      tabBtnGoogle.classList.toggle("active", tab === "google");
+      tabBtnPresence.classList.toggle("active", tab === "presence");
+      tabBtnFfme.classList.toggle("active", tab === "ffme");
 
       paneMap.style.display = tab === "map" ? "flex" : "none";
       panePivot.style.display = tab === "pivot" ? "flex" : "none";
-      paneGoogle.style.display = tab === "google" ? "flex" : "none";
+      panePresence.style.display = tab === "presence" ? "flex" : "none";
+      paneFfme.style.display = tab === "ffme" ? "flex" : "none";
 
       if (tab === "map") loadMap();
-      else if (tab === "pivot") loadPivot(seasonSelect.value || "Toutes les saisons");
-      else if (tab === "google") loadGoogleStatus();
+      else if (tab === "pivot") loadPivot(seasonSelect.value || "2026-2027");
+      else if (tab === "presence") loadPresenceConfig();
+      else if (tab === "ffme") loadFfmeStats();
     }
 
     tabBtnMap.addEventListener("click", () => switchTab("map"));
     tabBtnPivot.addEventListener("click", () => switchTab("pivot"));
-    tabBtnGoogle.addEventListener("click", () => switchTab("google"));
-    googleTestBtn.addEventListener("click", testGoogleServices);
-
-    if (btnSaveManualToken) {
-      btnSaveManualToken.addEventListener("click", async () => {
-        const val = (manualTokenInput.value || "").trim();
-        if (!val) {
-          toast("⚠️ Veuillez coller un refresh_token valide.");
-          return;
-        }
-        btnSaveManualToken.disabled = true;
-        btnSaveManualToken.textContent = "⏳ Validation…";
-        try {
-          const res = await apiFetch("/api/auth/google/update-token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: val })
-          });
-          const d = await res.json();
-          if (res.ok && d.status === "success") {
-            toast("✅ Jeton Google mis à jour et validé !");
-            manualTokenInput.value = "";
-            loadGoogleStatus();
-          } else {
-            toast(`❌ Échec : ${d.message || 'Jeton invalide'}`);
-          }
-        } catch (err) {
-          toast(`❌ Erreur réseau : ${err.message}`);
-        } finally {
-          btnSaveManualToken.disabled = false;
-          btnSaveManualToken.textContent = "Enregistrer et tester le jeton";
-        }
-      });
-    }
+    tabBtnPresence.addEventListener("click", () => switchTab("presence"));
+    tabBtnFfme.addEventListener("click", () => switchTab("ffme"));
 
     refreshBtn.addEventListener("click", () => {
       if (activeTab === "map") {
         loadMap(true);
         toast("🔄 Carte réactualisée.");
       } else if (activeTab === "pivot") {
-        loadPivot(seasonSelect.value || "Toutes les saisons", true);
+        loadPivot(seasonSelect.value || "2026-2027", true);
         toast("🔄 Tableau croisé dynamique réactualisé.");
-      } else if (activeTab === "google") {
-        loadGoogleStatus();
-        toast("🔄 Statut Google réactualisé.");
+      } else if (activeTab === "presence") {
+        loadPresenceConfig(true);
+        toast("🔄 Effectifs et créneaux réactualisés.");
+      } else if (activeTab === "ffme") {
+        loadFfmeStats(true);
+        toast("🔄 Statistiques FFME réactualisées.");
       }
     });
 
@@ -369,16 +629,24 @@ startBureau({
         });
         seasons.sort().reverse();
         if (seasons.length) {
-          seasonSelect.innerHTML = '<option value="Toutes les saisons">Toutes les saisons</option>' +
-            seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+          const defaultSeason = seasons.includes("2026-2027") ? "2026-2027" : seasons[0];
+          seasonSelect.innerHTML =
+            seasons.map(s => `<option value="${esc(s)}" ${s === defaultSeason ? "selected" : ""}>${esc(s)}</option>`).join("") +
+            '<option value="Toutes les saisons">Toutes les saisons</option>';
+          currentPivotSeason = defaultSeason;
         }
       }).catch(err => {
         console.warn("Impossible de lister crm_seasons pour les outils :", err);
       });
     } catch (e) {}
 
-    // Chargement initial de la carte
-    loadMap();
+    // Vérifier si un onglet est passé dans l'URL (?tab=ffme, ?tab=presence, ?tab=pivot)
+    const urlTab = new URLSearchParams(window.location.search).get("tab");
+    if (urlTab && ["map", "pivot", "presence", "ffme"].includes(urlTab)) {
+      switchTab(urlTab);
+    } else {
+      loadMap();
+    }
   }
 });
 </script>

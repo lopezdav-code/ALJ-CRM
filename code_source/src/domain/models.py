@@ -1,6 +1,15 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any
 
+def normalize_gender(val: Any) -> str:
+    """Harmonise le genre en 'Femme' ou 'Homme'."""
+    s = str(val or "").strip().lower()
+    if s in ("f", "femme", "féminin", "feminin"):
+        return "Femme"
+    if s in ("h", "m", "homme", "masculin"):
+        return "Homme"
+    return str(val or "").strip()
+
 @dataclass
 class InsuranceOptions:
     has_base: bool = False
@@ -135,7 +144,7 @@ class Member:
             payer_last_name=str(pick("payer_last_name", "payer_lastName")).strip(),
             payer_email=str(pick("payer_email", "payer_email_order")).strip(),
             birth_date=str(pick("champ_Date de naissance de l'adhérent", "birth_date", "birth_date_raw")).strip(),
-            gender=str(pick("champ_Sexe", "gender")).strip(),
+            gender=normalize_gender(pick("champ_Sexe", "gender")),
             nationality=str(pick("champ_Nationalité", "nationality")).strip(),
             address=str(pick("champ_Adresse : numéro et nom de rue", "address")).strip(),
             zip_code=clean_float_str(pick("champ_Code postal", "zip_code")),

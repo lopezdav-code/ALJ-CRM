@@ -70,7 +70,7 @@ class TestBureauFiles(unittest.TestCase):
     def test_bureau_pages_share_web_version(self):
         version = _current_version()
         self.assertRegex(version, r"^\d+$")
-        for name in ("index.html", "adherents.html", "communications.html", "competitions.html", "outils.html"):
+        for name in ("index.html", "adherents.html", "communications.html", "competitions.html", "planning.html", "outils.html", "parametres.html"):
             html = _read(os.path.join(BUREAU, name))
             self.assertIn(f'<meta name="alj-web-version" content="{version}">', html, name)
             self.assertRegex(html, rf"<title>[^<]*\(v{version}\)</title>", name)
@@ -79,11 +79,61 @@ class TestBureauFiles(unittest.TestCase):
         sw = _read(get_sw().path)
         version = _current_version()
         self.assertIn(f'CACHE_NAME = "alj-escalade-v{version}"', sw)
-        for asset in ("/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/outils",
+        for asset in ("/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/planning", "/bureau/outils", "/bureau/parametres",
                       "/static-web/alj.css", "/static-web/alj-core.js",
                       "/static-web/alj-shell.js", "/static-web/alj-vue.js",
                       "/static-web/alj-members.js", "/static-web/alj-filters.js"):
             self.assertIn(f'"{asset}"', sw)
+
+    def test_planning_file_structure(self):
+        """La nouvelle page planning.html doit contenir la grille visuelle, le tableau, la modale et les exports."""
+        html = _read(os.path.join(BUREAU, "planning.html"))
+        self.assertIn("alj-shell.js", html)
+        self.assertIn("pane-visual", html)
+        self.assertIn("pane-table", html)
+        self.assertIn("btn-create-slot", html)
+        self.assertIn("btn-print-grid", html)
+        self.assertIn("btn-export-excel-grid", html)
+        self.assertIn("slot-modal", html)
+
+    def test_parametres_file_structure(self):
+        """La nouvelle page parametres.html doit contenir l'outil de connexion Google."""
+        html = _read(os.path.join(BUREAU, "parametres.html"))
+        self.assertIn("alj-shell.js", html)
+        self.assertIn("alj-firebase.js", html)
+        self.assertIn("google-status-badge", html)
+        self.assertIn("btn-google-reconnect", html)
+        self.assertIn("btn-google-test", html)
+
+    def test_outils_no_longer_has_google_reconnect(self):
+        """L'onglet Google a été déplacé vers parametres.html : outils contient map, pivot, fiches de présence et FFME."""
+        html = _read(os.path.join(BUREAU, "outils.html"))
+        self.assertNotIn("btn-google-reconnect", html)
+        self.assertIn("pane-map", html)
+        self.assertIn("pane-pivot", html)
+        self.assertIn("pane-presence", html)
+        self.assertIn("pane-ffme", html)
+        self.assertIn("btn-download-autonome", html)
+        self.assertIn("btn-download-cours", html)
+        self.assertIn("btn-download-ffme", html)
+
+    def test_ffme_api_stats_and_export(self):
+        """Vérifie le calcul des statistiques et le téléchargement du fichier CSV FFME."""
+        from server import get_ffme_stats_api, export_ffme_api
+
+        # 1. Statistiques
+        stats = get_ffme_stats_api("2026-2027")
+        self.assertEqual(stats.get("status"), "success")
+        self.assertIn("estimated_total", stats)
+        self.assertIn("renewals_count", stats)
+        self.assertIn("new_licences_count", stats)
+
+        # 2. Export CSV avec include_termine=True
+        resp = export_ffme_api(season="2026-2027", include_termine=True)
+        self.assertEqual(resp.headers.get("content-type"), "text/csv; charset=utf-8")
+        self.assertIn("attachment", resp.headers.get("content-disposition", ""))
+        self.assertIn("numero de licence;nom;prenom", resp.body.decode("utf-8"))
+        self.assertGreater(len(resp.body), 1000)
 
     def test_adherents_page_imports_exist_in_modules(self):
         """Chaque symbole importé par adherents.html doit être exporté par alj-members.js et alj-filters.js."""
@@ -299,7 +349,8 @@ class TestBureauFiles(unittest.TestCase):
                     "email_primary": "luc.bernard@nouveau.fr",
                     "email_secondary": "parent.luc@example.com",
                     "phone": "06 99 88 77 66",
-                    "tarif_name": "Cours Ados 1 (Lundi)"
+                    "tarif_name": "Cours Ados 1 (Lundi)",
+                    "status": "Annulé"
                 }
             }
 
@@ -315,14 +366,29 @@ class TestBureauFiles(unittest.TestCase):
             self.assertEqual(u["email_secondary"], "parent.luc@example.com")
             self.assertEqual(u["phone"], "06 99 88 77 66")
 
-            # Vérification dans la table purchases (créneau)
+            # Vérification dans la table purchases (créneau & statut)
             p = conn.execute("SELECT * FROM purchases WHERE id = 70").fetchone()
             self.assertEqual(p["tarif_name"], "Cours Ados 1 (Lundi)")
+            self.assertEqual(p["status"], "Annulé")
+            self.assertEqual(p["status_normalized"], "Annulé")
             self.assertEqual(p["is_modified"], "Oui")
+
+            # Vérification dans la table orders (statut de commande)
+            o = conn.execute("SELECT * FROM orders WHERE id = 60").fetchone()
+            self.assertEqual(o["status"], "Annulé")
+            self.assertEqual(o["status_normalized"], "Annulé")
             conn.close()
         finally:
             SqliteRepository.set_db_path(orig_db_path)
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_sync_cloud_db_endpoint(self):
+        """Vérifie l'endpoint POST /api/cloud-db/sync."""
+        from server import sync_cloud_db_api
+        with patch("infrastructure.cloud_database.CloudDatabase.is_enabled", return_value=True):
+            with patch("infrastructure.cloud_database.CloudDatabase.sync", return_value={"status": "ok", "errors": []}):
+                res = sync_cloud_db_api(force=True)
+                self.assertEqual(res.get("status"), "success")
 
     def test_season_tarifs_endpoint(self):
         """GET /api/season-tarifs retourne les tarifs disponibles de la saison active."""
@@ -332,6 +398,52 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("tarifs", res)
         self.assertIsInstance(res["tarifs"], list)
         self.assertIn("Licence sèche", res["tarifs"])
+
+    def test_planning_item_crud_and_export(self):
+        """Vérifie la création, modification, suppression et export Excel des créneaux de planning."""
+        from server import save_planning_item_api, delete_planning_item_api, export_planning_api, get_planning
+        
+        # 1. Création d'un nouveau créneau
+        new_slot = {
+            "id": 0,
+            "groupe": "Test Nouveau Créneau Web",
+            "jour": "Mardi",
+            "horaires": "19:00 - 20:30",
+            "type": "cours",
+            "categorie_age": "Adultes",
+            "encadrants": ["Test Coach"],
+            "helloasso_tarifs": ["Licence sèche"]
+        }
+        res_create = save_planning_item_api(new_slot)
+        self.assertEqual(res_create.get("status"), "success")
+        saved_id = res_create["item"]["id"]
+        self.assertGreater(saved_id, 0)
+
+        # 2. Modification du créneau
+        new_slot["id"] = saved_id
+        new_slot["groupe"] = "Test Créneau Modifié Web"
+        res_update = save_planning_item_api(new_slot)
+        self.assertEqual(res_update.get("status"), "success")
+
+        # Vérification dans la liste
+        planning = get_planning()
+        found = next((x for x in planning if x.get("id") == saved_id), None)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["groupe"], "Test Créneau Modifié Web")
+
+        # 3. Export Excel (grille et liste)
+        resp_export_grid = export_planning_api(mode="grid", season="2026-2027")
+        self.assertEqual(resp_export_grid.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn("attachment", resp_export_grid.headers.get("content-disposition", ""))
+        self.assertGreater(len(resp_export_grid.body), 1000)
+
+        resp_export_list = export_planning_api(mode="list", season="2026-2027")
+        self.assertEqual(resp_export_list.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertGreater(len(resp_export_list.body), 1000)
+
+        # 4. Suppression
+        res_del = delete_planning_item_api(saved_id)
+        self.assertEqual(res_del.get("status"), "success")
 
     def test_outils_page_tabs_and_iframes_wiring(self):
         """La page outils.html contient les onglets Carte et TCD."""
@@ -597,7 +709,7 @@ class TestBureauAccess(unittest.TestCase):
         self.env.stop()
 
     def test_portal_public_api_protected(self):
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/outils",
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/planning", "/bureau/outils", "/bureau/parametres",
                      "/static-web/alj.css", "/static-web/alj-shell.js"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
         self.assertEqual(self.client.get("/bureau/inconnue").status_code, 404)
@@ -606,12 +718,13 @@ class TestBureauAccess(unittest.TestCase):
 
     def test_portal_content_types(self):
         self.assertIn("text/html", self.client.get("/bureau/").headers["content-type"])
+        self.assertIn("text/html", self.client.get("/bureau/planning").headers["content-type"])
         self.assertIn("javascript", self.client.get("/static-web/alj-shell.js").headers["content-type"])
         self.assertIn("text/css", self.client.get("/static-web/alj.css").headers["content-type"])
 
     def test_required_role_for_portal(self):
         r = api_auth.required_role
-        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/static-web/alj-core.js"):
+        for path in ("/bureau", "/bureau/", "/bureau/adherents", "/bureau/communications", "/bureau/competitions", "/bureau/planning", "/bureau/outils", "/bureau/parametres", "/static-web/alj-core.js"):
             self.assertIsNone(r("GET", path), path)
         self.assertEqual(r("GET", "/api/email-status"), "coach")
 

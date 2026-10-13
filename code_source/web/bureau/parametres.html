@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
+<meta name="alj-web-version" content="21">
+<title>ALJ Escalade — Bureau · Paramètres (v21)</title>
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
+<link rel="stylesheet" href="/static-web/alj.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/runtime-config.js"></script>
+<script src="/static-web/alj-firebase.js"></script>
+</head>
+<body>
+<div id="shell"></div>
+
+<script type="module">
+import { startBureau } from "/static-web/alj-shell.js";
+import { apiFetch } from "/static-web/alj-core.js";
+
+const esc = s => (s == null ? "" : String(s))
+  .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+startBureau({
+  page: "parametres",
+  title: "Paramètres",
+  onReady: ({ user, role, isAdmin }) => {
+    const content = document.getElementById("content");
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:12px; padding:12px 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div class="m-name" style="font-size:16px;">⚙️ Paramètres du Club & Services</div>
+            <div class="m-sub">Configuration des accès Google, état de la base de données Firestore et services d'envoi.</div>
+          </div>
+          <button class="btn btn-muted btn-mini" id="settings-refresh-btn" title="Recharger le statut">🔄 Recharger</button>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <!-- Carte 1 : État de la connexion Google & BDD -->
+        <div class="card" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 4px;">
+                <span>🔐 État de la connexion Google & BDD</span>
+                <span id="google-status-badge" class="badge" style="background:#94A3B8; font-size:11.5px; padding:3px 9px;">Vérification…</span>
+              </h2>
+              <p class="muted" id="google-status-desc" style="font-size:13px; margin:4px 0 0;">Vérification de la validité du jeton Google OAuth2 en cours…</p>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <a href="/api/auth/google/login?return_to=/bureau/parametres" class="btn btn-primary" id="btn-google-reconnect">🔄 Renouveler la connexion Google</a>
+              <button class="btn btn-muted" id="btn-google-test">🔍 Tester l'accès</button>
+              <button class="btn btn-muted" id="btn-force-sync-db">🔄 Synchroniser BDD (Firestore)</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-top:16px;">
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">COMPTE GOOGLE DU CLUB</div>
+              <div id="google-account-email" style="font-weight:700; margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">MODE BASE DE DONNÉES</div>
+              <div id="google-db-mode" style="font-weight:700; margin-top:2px;">Firestore (Google Cloud)</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">SERVICES ASSOCIÉS</div>
+              <div style="font-weight:600; font-size:12px; margin-top:2px; color:var(--ink);">BDD, Google Drive & Gmail API</div>
+            </div>
+          </div>
+
+          <div id="google-test-results" style="display:none; margin-top:14px; background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
+            <div style="font-weight:700; margin-bottom:8px; font-size:13px;">Résultat du diagnostic en direct :</div>
+            <div id="google-test-details" style="display:flex; flex-direction:column; gap:6px; font-size:12.5px;"></div>
+          </div>
+        </div>
+
+        <!-- Carte 2 : Explications et aide -->
+        <div class="card" style="margin-bottom:0;">
+          <h2 style="font-size:15px; margin:0 0 6px;">ℹ️ Pourquoi renouveler le jeton ?</h2>
+          <p style="font-size:13px; color:var(--muted); margin:0 0 10px;">
+            Le serveur backend utilise ce jeton Google pour synchroniser la base de données des adhérents, accéder au Drive et expédier les e-mails et attestations.
+            Si le statut indique <b>« Jeton expiré »</b>, cliquez simplement sur le bouton bleu ci-dessus pour vous reconnecter avec le compte Google de l'association.
+          </p>
+          <div style="font-size:12px; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px; padding:10px 12px; color:#1E3A8A;">
+            💡 <b>Conseil Google Cloud :</b> Si vous devez renouveler le jeton tous les 7 jours, c'est que votre projet Google Cloud est en statut <i>« En test »</i>. Rendez-vous sur la <b>Google Cloud Console → Écran de consentement OAuth</b> et cliquez sur <b>« Publier l'application »</b> pour passer en production et rendre le jeton permanent.
+          </div>
+        </div>
+
+        <!-- Carte 3 : Saisie manuelle de secours (Admin) -->
+        <div class="card" id="admin-manual-token-card" style="margin-bottom:0;">
+          <details style="cursor:pointer;">
+            <summary style="font-weight:700; font-size:13px; color:var(--muted);">⚙️ Option de secours : Saisie manuelle du Refresh Token (Admin)</summary>
+            <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+              <p style="font-size:12.5px; color:var(--muted); margin:0;">Permet de coller manuellement un nouveau <code>refresh_token</code> si la redirection Google automatique n'est pas configurée dans votre console.</p>
+              <input type="text" id="manual-refresh-token" placeholder="Coller le nouveau refresh_token Google ici (1//...)" class="search-input" style="font-family:monospace; font-size:12px; width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line); border-radius:8px;">
+              <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px;">
+                <button class="btn btn-muted btn-mini" id="btn-save-manual-token">Enregistrer et tester le jeton</button>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div id="toast"></div>
+    `;
+
+    function toast(msg, ms = 4000) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove("show"), ms);
+    }
+
+    const refreshBtn = document.getElementById("settings-refresh-btn");
+    const googleStatusBadge = document.getElementById("google-status-badge");
+    const googleStatusDesc = document.getElementById("google-status-desc");
+    const googleAccountEmail = document.getElementById("google-account-email");
+    const googleDbMode = document.getElementById("google-db-mode");
+    const googleTestBtn = document.getElementById("btn-google-test");
+    const btnSyncDb = document.getElementById("btn-force-sync-db");
+    const googleTestResults = document.getElementById("google-test-results");
+    const googleTestDetails = document.getElementById("google-test-details");
+    const btnSaveManualToken = document.getElementById("btn-save-manual-token");
+    const manualTokenInput = document.getElementById("manual-refresh-token");
+
+    async function loadGoogleStatus() {
+      try {
+        googleStatusBadge.style.background = "#94A3B8";
+        googleStatusBadge.textContent = "Vérification…";
+        const res = await apiFetch("/api/auth/google/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "connected") {
+            googleStatusBadge.style.background = "var(--green)";
+            googleStatusBadge.textContent = "🟢 Connecté & Opérationnel";
+            googleStatusDesc.textContent = "Le jeton Google OAuth2 est valide. L'accès à la BDD et aux envois d'e-mails est pleinement fonctionnel.";
+          } else if (data.status === "expired") {
+            googleStatusBadge.style.background = "var(--red)";
+            googleStatusBadge.textContent = "🔴 Jeton expiré ou révoqué";
+            googleStatusDesc.textContent = "Le jeton de connexion Google a expiré. Cliquez sur « Renouveler la connexion Google » pour rétablir les accès.";
+          } else {
+            googleStatusBadge.style.background = "var(--amber)";
+            googleStatusBadge.textContent = "🟡 Non connecté";
+            googleStatusDesc.textContent = "Aucun jeton Google n'est configuré. Connectez le compte de l'association.";
+          }
+
+          googleAccountEmail.textContent = data.user_email || "Non configuré";
+          googleDbMode.textContent = data.backend === "drive" ? "Google Drive (mode secours)" : "Firestore (Google Cloud)";
+        } else {
+          googleStatusBadge.style.background = "var(--red)";
+          googleStatusBadge.textContent = "Erreur vérification";
+        }
+      } catch (err) {
+        console.warn("Vérification statut Google :", err);
+        googleStatusBadge.style.background = "#94A3B8";
+        googleStatusBadge.textContent = "Indisponible";
+      }
+    }
+
+    async function testGoogleServices() {
+      googleTestBtn.disabled = true;
+      googleTestBtn.textContent = "⏳ Test en cours…";
+      googleTestResults.style.display = "block";
+      googleTestDetails.innerHTML = "<div>Test des accès Google en cours…</div>";
+
+      try {
+        const res = await apiFetch("/api/auth/google/test", { method: "POST" });
+        const data = await res.json();
+        const r = data.results || {};
+
+        const tokenBadge = r.oauth_token && r.oauth_token.ok ? "🟢" : "🔴";
+        const dbBadge = r.database && r.database.ok ? "🟢" : "🔴";
+        const gmailBadge = r.gmail && r.gmail.ok ? "🟢" : "🔴";
+
+        googleTestDetails.innerHTML = `
+          <div><b>${tokenBadge} Jeton OAuth2 :</b> ${esc(r.oauth_token ? r.oauth_token.message : 'Inconnu')}</div>
+          <div><b>${dbBadge} Base de Données :</b> ${esc(r.database ? r.database.message : 'Inconnu')}</div>
+          <div><b>${gmailBadge} Service Gmail API :</b> ${esc(r.gmail ? r.gmail.message : 'Inconnu')}</div>
+        `;
+        if (data.all_ok) {
+          toast("✅ Tous les services Google sont fonctionnels !");
+        } else {
+          toast("⚠️ Un ou plusieurs services Google ont échoué.");
+        }
+        loadGoogleStatus();
+      } catch (err) {
+        googleTestDetails.innerHTML = `<div style="color:var(--red)">❌ Erreur lors du diagnostic : ${esc(err.message)}</div>`;
+      } finally {
+        googleTestBtn.disabled = false;
+        googleTestBtn.textContent = "🔍 Tester l'accès";
+      }
+    }
+
+    googleTestBtn.addEventListener("click", testGoogleServices);
+
+    if (btnSaveManualToken) {
+      btnSaveManualToken.addEventListener("click", async () => {
+        const val = (manualTokenInput.value || "").trim();
+        if (!val) {
+          toast("⚠️ Veuillez coller un refresh_token valide.");
+          return;
+        }
+        btnSaveManualToken.disabled = true;
+        btnSaveManualToken.textContent = "⏳ Validation…";
+        try {
+          const res = await apiFetch("/api/auth/google/update-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: val })
+          });
+          const d = await res.json();
+          if (res.ok && d.status === "success") {
+            toast("✅ Jeton Google mis à jour et validé !");
+            manualTokenInput.value = "";
+            loadGoogleStatus();
+          } else {
+            toast(`❌ Échec : ${d.message || 'Jeton invalide'}`);
+          }
+        } catch (err) {
+          toast(`❌ Erreur réseau : ${err.message}`);
+        } finally {
+          btnSaveManualToken.disabled = false;
+          btnSaveManualToken.textContent = "Enregistrer et tester le jeton";
+        }
+      });
+    }
+
+    if (btnSyncDb) {
+      btnSyncDb.addEventListener("click", async () => {
+        btnSyncDb.disabled = true;
+        btnSyncDb.textContent = "⏳ Synchronisation en cours…";
+        try {
+          const res = await apiFetch("/api/cloud-db/sync?force=true", { method: "POST" });
+          const d = await res.json();
+          if (res.ok && d.status === "success") {
+            toast("✅ Base locale synchronisée avec succès depuis Firestore !");
+            loadGoogleStatus();
+          } else {
+            toast(`❌ Échec de la synchronisation : ${d.message || 'Erreur inconnue'}`);
+          }
+        } catch (err) {
+          toast(`❌ Erreur réseau : ${err.message}`);
+        } finally {
+          btnSyncDb.disabled = false;
+          btnSyncDb.textContent = "🔄 Synchroniser BDD (Firestore)";
+        }
+      });
+    }
+
+    refreshBtn.addEventListener("click", () => {
+      loadGoogleStatus();
+      toast("🔄 Statut Google réactualisé.");
+    });
+
+    // Chargement initial du statut
+    loadGoogleStatus();
+  }
+});
+</script>
+</body>
+</html>

@@ -350,7 +350,7 @@ def find_planning_match_dynamically(tarif_name, planning_data):
         
     return None
 
-def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False, group_tarifs_map=None, show_health_col=False):
+def generate_presence_sheets(selected_groups, participants_data, start_date_str=None, end_date_str=None, merge_groups=False, auth_only=False, hide_badge_cols=False, same_sheet=False, group_tarifs_map=None, show_health_col=False, output_dir=None):
     """
     Génère des feuilles de présence au format Excel pour les groupes spécifiés.
     Les groupes sont des créneaux du planning : `group_tarifs_map` (optionnel) associe
@@ -363,7 +363,8 @@ def generate_presence_sheets(selected_groups, participants_data, start_date_str=
     """
     root_dir = ROOT_DIR
     template_path = find_doc_template("Template Export liste adhérents à imprimer.xlsx")
-    output_dir = os.path.join(root_dir, "exports", "fiches_presence")
+    if output_dir is None:
+        output_dir = os.path.join(root_dir, "exports", "fiches_presence")
     
     os.makedirs(output_dir, exist_ok=True)
     

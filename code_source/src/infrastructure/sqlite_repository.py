@@ -318,6 +318,21 @@ class SqliteRepository:
         schema_v2.recreate_compat_view(cursor)
         print("🔗 [SQLITE] Vue de compatibilité v_adherents_legacy vérifiée.")
 
+        # Harmonisation du genre (Femme / Homme) dans la table users
+        try:
+            cursor.execute("""
+                UPDATE users
+                SET gender = 'Femme'
+                WHERE LOWER(TRIM(gender)) IN ('f', 'femme', 'féminin', 'feminin')
+            """)
+            cursor.execute("""
+                UPDATE users
+                SET gender = 'Homme'
+                WHERE LOWER(TRIM(gender)) IN ('h', 'm', 'homme', 'masculin')
+            """)
+        except Exception:
+            pass
+
         conn.commit()
         conn.close()
         print("✅ [SQLITE] Initialisation et vérification du schéma d'adhérents accomplies.")
@@ -993,6 +1008,43 @@ class SqliteRepository:
                             SET tarif_name = ?, updated_at = ?, is_modified = 'Oui'
                             WHERE user_id = ?
                         """, (new_tarif, now_iso, int(resolved_uid)))
+
+            # 3. Mise à jour du statut de l'adhésion (purchases & orders)
+            if "status" in fields:
+                new_status = str(fields["status"] or "").strip()
+                if new_status:
+                    norm = "Validé" if new_status.lower() in ("processed", "validated", "validé", "valide") else ("Annulé" if new_status.lower() in ("annulé", "annule", "canceled", "cancelled") else new_status.title())
+                    if purchase_id:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET status = ?, status_normalized = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE id = ?
+                        """, (new_status, norm, now_iso, int(purchase_id)))
+                    elif order_ref and resolved_uid:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET status = ?, status_normalized = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE user_id = ? AND order_id IN (SELECT id FROM orders WHERE order_ref = ?)
+                        """, (new_status, norm, now_iso, int(resolved_uid), str(order_ref).strip()))
+                    elif resolved_uid:
+                        cursor.execute("""
+                            UPDATE purchases
+                            SET status = ?, status_normalized = ?, updated_at = ?, is_modified = 'Oui'
+                            WHERE user_id = ?
+                        """, (new_status, norm, now_iso, int(resolved_uid)))
+
+                    if order_ref:
+                        cursor.execute("""
+                            UPDATE orders
+                            SET status = ?, status_normalized = ?, updated_at = ?
+                            WHERE order_ref = ?
+                        """, (new_status, norm, now_iso, str(order_ref).strip()))
+                    elif purchase_id:
+                        cursor.execute("""
+                            UPDATE orders
+                            SET status = ?, status_normalized = ?, updated_at = ?
+                            WHERE id = (SELECT order_id FROM purchases WHERE id = ?)
+                        """, (new_status, norm, now_iso, int(purchase_id)))
 
             conn.commit()
             print(f"[SQLITE] Adhérent #{resolved_uid} mis à jour avec succès : {list(fields.keys())}")
@@ -1755,6 +1807,68 @@ class SqliteRepository:
 
         except Exception as e:
             print(f"❌ [SQLITE] Erreur lors de la sauvegarde du planning : {e}")
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    @classmethod
+    def save_planning_item(cls, item: dict) -> dict:
+        """Crée ou met à jour un créneau unique dans la table planning."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            item_id = item.get("id")
+            if not item_id or int(item_id) <= 0:
+                cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM planning")
+                item_id = cursor.fetchone()[0]
+                item["id"] = item_id
+
+            enc_json = json.dumps(item.get("encadrants", []), ensure_ascii=False)
+            tarifs_json = json.dumps(item.get("helloasso_tarifs", []), ensure_ascii=False)
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO planning (id, groupe, type, categorie_age, whatsapp_link, jour, horaires, encadrants, helloasso_tarifs, naissance_min, naissance_max)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                int(item_id),
+                str(item.get("groupe") or "").strip(),
+                str(item.get("type") or "cours").strip(),
+                str(item.get("categorie_age") or "").strip(),
+                str(item.get("whatsapp_link") or "").strip(),
+                str(item.get("jour") or "Lundi").strip(),
+                str(item.get("horaires") or "").strip(),
+                enc_json,
+                tarifs_json,
+                str(item.get("naissance_min") or "").strip(),
+                str(item.get("naissance_max") or "").strip()
+            ))
+            conn.commit()
+            print(f"💾 [SQLITE] Créneau #{item_id} ({item.get('groupe')}) enregistré avec succès.")
+            return item
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de l'enregistrement du créneau : {e}")
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    @classmethod
+    def delete_planning_item(cls, item_id: int) -> bool:
+        """Supprime un créneau par son ID."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM planning WHERE id = ?", (int(item_id),))
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            if deleted:
+                print(f"🗑️ [SQLITE] Créneau #{item_id} supprimé avec succès.")
+            return deleted
+        except Exception as e:
+            print(f"❌ [SQLITE] Erreur lors de la suppression du créneau #{item_id} : {e}")
             conn.rollback()
             raise e
         finally:

@@ -33,6 +33,13 @@ export function normalizeStatus(s) {
   return STATUS_MAP[r.toLowerCase()] || r;
 }
 
+export function normalizeGender(val) {
+  const s = String(val || "").trim().toLowerCase();
+  if (s === "f" || s === "femme" || s === "féminin" || s === "feminin") return "Femme";
+  if (s === "h" || s === "m" || s === "homme" || s === "masculin") return "Homme";
+  return String(val || "").trim();
+}
+
 export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -167,7 +174,7 @@ export function buildMembersData(raw) {
       first_name: u.first_name || "",
       birth_date: birthDate,
       age: age,
-      gender: u.gender || "",
+      gender: normalizeGender(u.gender),
       address: u.address || "",
       zip_code: u.zip_code || "",
       city: u.city || "",

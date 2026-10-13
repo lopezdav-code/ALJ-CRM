@@ -356,12 +356,13 @@ def update_membership_excel():
 
 
 
-def generate_ffme_csv(participants_data, output_path=None):
+def generate_ffme_csv(participants_data, output_path=None, include_termine=False):
     """
     Génère le CSV d'import FFME.
     Si output_path est fourni (tests de non-régression), écrit à cet emplacement exact
     sans horodatage ni archivage. Sinon, comportement historique : fichier horodaté
     dans exports/ffme/ avec archivage des anciens CSV.
+    Si include_termine est True, inclut également les adhérents dont le statut est 'Terminé'.
     """
     print("\nGénération simultanée du fichier CSV FFME...")
     if output_path:
@@ -407,14 +408,16 @@ def generate_ffme_csv(participants_data, output_path=None):
         # historiques ('NO' pays, 'none' courriel 2, 'NONE' pap, 'None' adresse/ville).
         p = {k: (v if v is not None else "") for k, v in p.items()}
 
-        # Exclure les listes d'attente, montants nuls (sauf les ajouts manuels), commandes annulées/canceled ou déjà validées (terminé)
+        # Exclure les listes d'attente, montants nuls (sauf les ajouts manuels), commandes annulées/canceled ou déjà validées (terminé si non demandé)
         tarif_name = str(p.get("tarif_name", "")).lower()
         amount = p.get("amount", 0.0)
         status = str(p.get("status", "")).lower()
         commentaires = str(p.get("commentaires_correctif", "")).lower()
         is_manual = "ajout manuel" in commentaires
         
-        if "attente" in tarif_name or (amount == 0.0 and not is_manual) or "annul" in status or "cancel" in status or "termin" in status:
+        if "attente" in tarif_name or (amount == 0.0 and not is_manual) or "annul" in status or "cancel" in status:
+            continue
+        if not include_termine and "termin" in status:
             continue
 
         nom = str(p.get("last_name", "")).strip().upper()
