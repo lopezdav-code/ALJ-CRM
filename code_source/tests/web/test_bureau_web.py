@@ -97,13 +97,25 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("slot-modal", html)
 
     def test_parametres_file_structure(self):
-        """La nouvelle page parametres.html doit contenir l'outil de connexion Google."""
+        """La nouvelle page parametres.html doit contenir l'outil de connexion Google et la gestion SQLite."""
         html = _read(os.path.join(BUREAU, "parametres.html"))
         self.assertIn("alj-shell.js", html)
         self.assertIn("alj-firebase.js", html)
         self.assertIn("google-status-badge", html)
         self.assertIn("btn-google-reconnect", html)
         self.assertIn("btn-google-test", html)
+        self.assertIn("btn-force-update-sqlite", html)
+        self.assertIn("btn-full-rebuild-sqlite", html)
+        self.assertIn("sqlite-status-badge", html)
+        self.assertIn("sqlite-file-info", html)
+
+    def test_cloud_db_status_endpoint(self):
+        """Vérifie l'endpoint GET /api/cloud-db/status."""
+        from server import get_cloud_db_status_api
+        res = get_cloud_db_status_api()
+        self.assertEqual(res.get("status"), "success")
+        self.assertIn("db_exists", res)
+        self.assertIn("pending", res)
 
     def test_outils_no_longer_has_google_reconnect(self):
         """L'onglet Google a été déplacé vers parametres.html : outils contient map, pivot, fiches de présence et FFME."""

@@ -873,8 +873,11 @@ class CloudDatabase:
             return False
 
     @classmethod
-    def sync(cls, full: bool = False, progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    def sync(cls, full: bool = False, progress: Optional[Callable[[str], None]] = None,
+             force_pull_all: bool = False) -> Dict[str, Any]:
         """Met le cache à jour : reconstruction si besoin, puis réception et envoi."""
+        if force_pull_all:
+            full = True
         with cls._lock:
             path = cls.db_path()
             store = cls.store()

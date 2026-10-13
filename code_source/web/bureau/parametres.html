@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="21">
-<title>ALJ Escalade — Bureau · Paramètres (v21)</title>
+<meta name="alj-web-version" content="22">
+<title>ALJ Escalade — Bureau · Paramètres (v22)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -37,7 +37,7 @@ startBureau({
             <div class="m-name" style="font-size:16px;">⚙️ Paramètres du Club & Services</div>
             <div class="m-sub">Configuration des accès Google, état de la base de données Firestore et services d'envoi.</div>
           </div>
-          <button class="btn btn-muted btn-mini" id="settings-refresh-btn" title="Recharger le statut">🔄 Recharger</button>
+          <button class="btn btn-muted btn-mini" id="settings-refresh-btn" title="Réactualiser les indicateurs à l'écran">👁️ Actualiser l'affichage</button>
         </div>
       </div>
 
@@ -47,7 +47,7 @@ startBureau({
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 4px;">
-                <span>🔐 État de la connexion Google & BDD</span>
+                <span>🔐 Connexion Google & Accès Cloud</span>
                 <span id="google-status-badge" class="badge" style="background:#94A3B8; font-size:11.5px; padding:3px 9px;">Vérification…</span>
               </h2>
               <p class="muted" id="google-status-desc" style="font-size:13px; margin:4px 0 0;">Vérification de la validité du jeton Google OAuth2 en cours…</p>
@@ -55,7 +55,6 @@ startBureau({
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <a href="/api/auth/google/login?return_to=/bureau/parametres" class="btn btn-primary" id="btn-google-reconnect">🔄 Renouveler la connexion Google</a>
               <button class="btn btn-muted" id="btn-google-test">🔍 Tester l'accès</button>
-              <button class="btn btn-muted" id="btn-force-sync-db">🔄 Synchroniser BDD (Firestore)</button>
             </div>
           </div>
 
@@ -80,7 +79,62 @@ startBureau({
           </div>
         </div>
 
-        <!-- Carte 2 : Explications et aide -->
+        <!-- Carte 2 : Base de données locale SQLite & Synchronisation -->
+        <div class="card" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+            <div style="flex:1; min-width:280px;">
+              <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 4px;">
+                <span>🗄️ Base de Données (SQLite ↔ Firestore)</span>
+                <span id="sqlite-status-badge" class="badge" style="background:#94A3B8; font-size:11.5px; padding:3px 9px;">Vérification…</span>
+              </h2>
+              <p class="muted" id="sqlite-status-desc" style="font-size:13px; margin:4px 0 0;">
+                Le cache local <code>database.db</code> stocke vos données sur cet ordinateur. La synchronisation échange les nouveautés avec Firestore de manière sécurisée.
+              </p>
+            </div>
+            <div>
+              <button class="btn btn-primary" id="btn-force-update-sqlite" style="display:flex; align-items:center; gap:6px; font-size:13.5px; padding:8px 16px;">
+                <span>🔄 Synchroniser la BDD (Envoi & Réception)</span>
+              </button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-top:16px;">
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">FICHIER LOCAL SUR CE PC</div>
+              <div id="sqlite-file-info" style="font-weight:700; margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">DERNIÈRE SYNCHRO CLOUD</div>
+              <div id="sqlite-last-sync" style="font-weight:700; margin-top:2px;">—</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">MODIFICATIONS LOCALES EN ATTENTE D'ENVOI</div>
+              <div id="sqlite-pending-info" style="font-weight:700; margin-top:2px;">0</div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">SOURCE CLOUD</div>
+              <div id="sqlite-cloud-source" style="font-weight:700; margin-top:2px; font-size:12.5px;">Firestore (smart-amplifier)</div>
+            </div>
+          </div>
+
+          <div id="sqlite-sync-report" style="display:none; margin-top:14px; background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
+            <div style="font-weight:700; margin-bottom:6px; font-size:13px;" id="sqlite-sync-report-title">Résultat de la synchronisation :</div>
+            <div id="sqlite-sync-report-details" style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;"></div>
+          </div>
+
+          <!-- Option avancée de secours (isolée pour éviter tout clic accidentel) -->
+          <div style="margin-top:16px; border-top:1px dashed #E2E8F0; padding-top:10px;">
+            <details style="font-size:12px; color:var(--muted); cursor:pointer;">
+              <summary style="font-weight:600;">🛠️ Zone de dépannage avancée (Reconstruction intégrale)</summary>
+              <div style="margin-top:8px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:6px; padding:10px; color:#92400E;">
+                <p style="margin:0 0 8px;"><b>Attention :</b> Cette opération télécharge à blanc l'ensemble des collections Firestore pour remplacer le cache local. Ne l'utilisez que si votre fichier local est corrompu et après avoir envoyé vos modifications locales.</p>
+                <button class="btn btn-muted btn-mini" id="btn-full-rebuild-sqlite" style="color:#B45309; border-color:#FCD34D;">⚠️ Forcer la reconstruction complète depuis Firestore</button>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Carte 3 : Explications et aide -->
         <div class="card" style="margin-bottom:0;">
           <h2 style="font-size:15px; margin:0 0 6px;">ℹ️ Pourquoi renouveler le jeton ?</h2>
           <p style="font-size:13px; color:var(--muted); margin:0 0 10px;">
@@ -233,35 +287,139 @@ startBureau({
       });
     }
 
-    if (btnSyncDb) {
-      btnSyncDb.addEventListener("click", async () => {
-        btnSyncDb.disabled = true;
-        btnSyncDb.textContent = "⏳ Synchronisation en cours…";
-        try {
-          const res = await apiFetch("/api/cloud-db/sync?force=true", { method: "POST" });
-          const d = await res.json();
-          if (res.ok && d.status === "success") {
-            toast("✅ Base locale synchronisée avec succès depuis Firestore !");
-            loadGoogleStatus();
+    const btnForceUpdateSqlite = document.getElementById("btn-force-update-sqlite");
+    const btnFullRebuildSqlite = document.getElementById("btn-full-rebuild-sqlite");
+    const sqliteStatusBadge = document.getElementById("sqlite-status-badge");
+    const sqliteStatusDesc = document.getElementById("sqlite-status-desc");
+    const sqliteFileInfo = document.getElementById("sqlite-file-info");
+    const sqliteLastSync = document.getElementById("sqlite-last-sync");
+    const sqlitePendingInfo = document.getElementById("sqlite-pending-info");
+    const sqliteCloudSource = document.getElementById("sqlite-cloud-source");
+    const sqliteSyncReport = document.getElementById("sqlite-sync-report");
+    const sqliteSyncReportDetails = document.getElementById("sqlite-sync-report-details");
+
+    async function loadSqliteStatus() {
+      try {
+        if (sqliteStatusBadge) {
+          sqliteStatusBadge.style.background = "#94A3B8";
+          sqliteStatusBadge.textContent = "Vérification…";
+        }
+        const res = await apiFetch("/api/cloud-db/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.db_exists) {
+            sqliteStatusBadge.style.background = "var(--green)";
+            sqliteStatusBadge.textContent = "🟢 Cache opérationnel";
+            sqliteStatusDesc.textContent = "Le cache local SQLite est initialisé et actif pour les requêtes rapides et les exports.";
+            sqliteFileInfo.textContent = `${data.db_filename || "database.db"} (${data.db_size_kb || 0} Ko · ${data.member_count || 0} adhérents)`;
           } else {
-            toast(`❌ Échec de la synchronisation : ${d.message || 'Erreur inconnue'}`);
+            sqliteStatusBadge.style.background = "var(--amber)";
+            sqliteStatusBadge.textContent = "🟡 Cache non trouvé";
+            sqliteStatusDesc.textContent = "Le fichier local database.db n'est pas encore créé. Cliquez sur « Forcer la mise à jour ».";
+            sqliteFileInfo.textContent = "Non initialisé";
           }
-        } catch (err) {
-          toast(`❌ Erreur réseau : ${err.message}`);
-        } finally {
-          btnSyncDb.disabled = false;
-          btnSyncDb.textContent = "🔄 Synchroniser BDD (Firestore)";
+
+          if (data.last_sync) {
+            const d = new Date(data.last_sync * 1000);
+            sqliteLastSync.textContent = d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          } else {
+            sqliteLastSync.textContent = "Non renseignée";
+          }
+
+          const pending = Number(data.pending || 0);
+          sqlitePendingInfo.textContent = pending > 0 ? `⏳ ${pending} en attente` : "0 (à jour)";
+          sqlitePendingInfo.style.color = pending > 0 ? "var(--amber)" : "var(--ink)";
+        }
+      } catch (err) {
+        console.warn("Vérification statut SQLite :", err);
+        if (sqliteStatusBadge) {
+          sqliteStatusBadge.style.background = "#94A3B8";
+          sqliteStatusBadge.textContent = "Indisponible";
+        }
+      }
+    }
+
+    async function performSqliteSync(forceFull = false) {
+      const syncButtons = [btnSyncDb, btnForceUpdateSqlite, btnFullRebuildSqlite].filter(Boolean);
+      syncButtons.forEach(b => {
+        b.disabled = true;
+        b._origText = b.innerHTML;
+      });
+      if (btnForceUpdateSqlite) btnForceUpdateSqlite.innerHTML = "<span>⏳ Mise à jour…</span>";
+      if (btnSyncDb) btnSyncDb.textContent = "⏳ Synchro…";
+      if (btnFullRebuildSqlite && forceFull) btnFullRebuildSqlite.innerHTML = "<span>⏳ Reconstruction…</span>";
+
+      if (sqliteSyncReport) sqliteSyncReport.style.display = "block";
+      if (sqliteSyncReportDetails) {
+        sqliteSyncReportDetails.innerHTML = `<div>⏳ Synchronisation avec Firestore en cours (${forceFull ? "reconstruction complète" : "mode incrémental"})…</div>`;
+      }
+
+      try {
+        const url = "/api/cloud-db/sync" + (forceFull ? "?force=true" : "");
+        const res = await apiFetch(url, { method: "POST" });
+        const d = await res.json();
+
+        if (res.ok && d.status === "success") {
+          const report = d.result || {};
+          const pulled = report.pulled != null ? report.pulled : 0;
+          const pushed = report.pushed != null ? report.pushed : 0;
+          const isFull = report.full ? " (reconstruction complète)" : "";
+
+          toast(`✅ Base SQLite synchronisée avec succès depuis Firestore !`);
+          if (sqliteSyncReportDetails) {
+            sqliteSyncReportDetails.innerHTML = `
+              <div><b>🟢 Synchronisation réussie à ${new Date().toLocaleTimeString('fr-FR')}</b>${isFull}</div>
+              <div>• Documents reçus depuis Firestore : <b>${esc(pulled)}</b></div>
+              <div>• Modifications locales envoyées au Cloud : <b>${esc(pushed)}</b></div>
+            `;
+          }
+          await loadSqliteStatus();
+          await loadGoogleStatus();
+        } else {
+          const err = d.message || "Erreur inconnue lors de la synchronisation.";
+          toast(`❌ Échec de la mise à jour : ${err}`, 7000);
+          if (sqliteSyncReportDetails) {
+            sqliteSyncReportDetails.innerHTML = `<div style="color:var(--red)"><b>🔴 Échec de synchronisation :</b> ${esc(err)}</div>`;
+          }
+        }
+      } catch (err) {
+        toast(`❌ Erreur réseau ou serveur : ${err.message}`, 7000);
+        if (sqliteSyncReportDetails) {
+          sqliteSyncReportDetails.innerHTML = `<div style="color:var(--red)"><b>🔴 Erreur réseau :</b> ${esc(err.message)}</div>`;
+        }
+      } finally {
+        syncButtons.forEach(b => {
+          b.disabled = false;
+          if (b._origText) b.innerHTML = b._origText;
+        });
+      }
+    }
+
+    if (btnForceUpdateSqlite) {
+      btnForceUpdateSqlite.addEventListener("click", () => performSqliteSync(false));
+    }
+
+    if (btnFullRebuildSqlite) {
+      btnFullRebuildSqlite.addEventListener("click", () => {
+        if (confirm("Voulez-vous forcer la reconstruction intégrale du cache SQLite ?\n\nCette opération va télécharger à nouveau tous les documents de Firestore pour reconstruire database.db à neuf.")) {
+          performSqliteSync(true);
         }
       });
     }
 
+    if (btnSyncDb) {
+      btnSyncDb.addEventListener("click", () => performSqliteSync(false));
+    }
+
     refreshBtn.addEventListener("click", () => {
       loadGoogleStatus();
-      toast("🔄 Statut Google réactualisé.");
+      loadSqliteStatus();
+      toast("🔄 Statuts réactualisés.");
     });
 
-    // Chargement initial du statut
+    // Chargement initial des statuts
     loadGoogleStatus();
+    loadSqliteStatus();
   }
 });
 </script>
