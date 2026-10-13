@@ -517,6 +517,8 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/api/helloasso/sync"', html)
         self.assertIn('apiFetch("/api/send-email"', html)
         self.assertIn("/fetch-results", html)
+        self.assertIn("hasResults", html)
+        self.assertIn("🏆 Résultats", html)
 
     @patch("mycompet_scraper.fetch_and_parse_mycompet_results")
     @patch("infrastructure.firestore_client.FirestoreClient.get_document")

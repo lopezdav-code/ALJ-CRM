@@ -757,11 +757,12 @@ startBureau({
         const discColor = DISCIPLINE_COLORS[c.type] || "#2563EB";
         const cCoaches = getCompCoachNames(c, allCoaches);
         const hasDiscipline = c.type && String(c.type).trim().toLowerCase() !== "escalade";
+        const hasResults = Boolean(c.resultats_synced_at || parts.some(p => p.resultat_ffme || p.classement));
 
         return `
           <div class="comp-card${isSel ? " active" : ""}" data-id="${esc(c.id || c.docId)}">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
-              <div class="comp-card-title">${esc(c.nom || "Épreuve sans nom")}</div>
+              <div class="comp-card-title">${hasResults ? '<span title="Résultats officiels récupérés" style="cursor:help; margin-right:4px;">🏆</span>' : ""}${esc(c.nom || "Épreuve sans nom")}</div>
               ${hasDiscipline ? `<span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type)}</span>` : ""}
             </div>
             <div class="comp-card-sub" style="margin-top:4px;">
@@ -773,10 +774,11 @@ startBureau({
                 <span>🏃 ${esc(cCoaches.join(", "))}</span>
               </div>
             ` : ""}
-            <div style="display:flex; gap:8px; margin-top:6px; font-size:11px; font-weight:600;">
+            <div style="display:flex; gap:8px; margin-top:6px; font-size:11px; font-weight:600; align-items:center; flex-wrap:wrap;">
               <span style="color:var(--blue);">👥 ${nbSel} inscrit${nbSel > 1 ? "s" : ""}</span>
               <span style="color:#16A34A;">💶 ${nbPayes} réglé${nbPayes > 1 ? "s" : ""}</span>
               ${nbAttente > 0 ? `<span style="color:#D97706;">⏳ ${nbAttente} attente</span>` : ""}
+              ${hasResults ? `<span class="badge" style="background:#FEF3C7; color:#92400E; border:1px solid #FCD34D; font-size:10px; padding:1px 6px;" title="Résultats officiels récupérés">🏆 Résultats</span>` : ""}
             </div>
           </div>
         `;
@@ -1017,8 +1019,36 @@ startBureau({
               </button>
             </div>
           </div>
-          <div style="font-size:12px; color:#64748B;">
-            Astuce : cochez la case <b>Présent</b> pour pointer l'arrivée sur place en direct.
+        </div>
+
+        <!-- Guide explicatif des 3 actions sur les compétiteurs -->
+        <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:12px; line-height:1.5;">
+          <div style="font-weight:700; color:#1E293B; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <span>ℹ️ Guide des actions sur les compétiteurs (Quand les utiliser & Conséquences) :</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px;">
+            <div style="background:#fff; border:1px solid #DBEAFE; border-left:3px solid var(--blue); border-radius:6px; padding:8px 10px;">
+              <b style="color:var(--blue);">1. ☑️ Participe (Sélection / Convocation) :</b>
+              <div style="color:#475569; margin-top:2px;">
+                <b>• Quand l'utiliser :</b> Pour convoquer un athlète à l'épreuve lors de la composition de l'équipe.<br>
+                <b>• Conséquences :</b> L'athlète entre dans le quota des inscrits, passe en <i>En attente</i> de règlement HelloAsso, devient éligible aux e-mails de convocation et le tarif de l'épreuve s'ajoute à son dû dans la balance financière.
+              </div>
+            </div>
+            <div style="background:#fff; border:1px solid #DCFCE7; border-left:3px solid var(--green); border-radius:6px; padding:8px 10px;">
+              <b style="color:var(--green);">2. ☑️ Présent (Pointage Jour J) :</b>
+              <div style="color:#475569; margin-top:2px;">
+                <b>• Quand l'utiliser :</b> Sur place, le jour de la compétition, lors de l'arrivée de l'athlète au gymnase/mur.<br>
+                <b>• Conséquences :</b> Valide en temps réel la présence physique. <b>Une fois pointé présent, les actions de retrait et de désistement sont automatiquement verrouillées</b> (badge <i>✓ Sur place</i>). Décochez la case en cas d'erreur de pointage pour réactiver les actions.
+              </div>
+            </div>
+            <div style="background:#fff; border:1px solid #FEE2E2; border-left:3px solid var(--red); border-radius:6px; padding:8px 10px;">
+              <b style="color:var(--red);">3. ✕ Action (Retirer de l'épreuve) :</b>
+              <div style="color:#475569; margin-top:2px;">
+                <b>• Quand l'utiliser :</b> En cas d'erreur de saisie (athlète ajouté par inadvertance à la liste).<br>
+                <b>• Conséquences :</b> Supprime la ligne de cette compétition.<br>
+                <i>⚠️ Si l'athlète a déjà payé : ne cliquez pas sur ✕ ! Modifiez plutôt son paiement en « Annulé — report » ou « Annulé — perdu » pour conserver la trace comptable.</i>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1031,11 +1061,11 @@ startBureau({
                 <th>Catégorie</th>
                 <th>Créneau</th>
                 <th style="text-align:center;">Résultat FFME</th>
-                <th style="text-align:center;">Participe</th>
+                <th style="text-align:center;" title="Sélection de l'athlète : valide sa convocation et enclenche le suivi de paiement">Participe</th>
                 <th>Paiement HelloAsso</th>
-                <th style="text-align:center;">Présent</th>
+                <th style="text-align:center;" title="Pointage de présence sur place le jour de l'épreuve">Présent</th>
                 <th>Contact</th>
-                ${isAdmin ? `<th style="text-align:center;">Action</th>` : ""}
+                ${isAdmin ? `<th style="text-align:center;" title="Retirer définitivement l'athlète de la compétition">Action</th>` : ""}
               </tr>
             </thead>
             <tbody id="parts-tbody">
@@ -1083,8 +1113,8 @@ startBureau({
 
       return parts.map(p => {
         const stP = p.statut_paiement || "non_invite";
-        const colorP = PAIEMENT_COLORS[stP] || "#94A3B8";
-        const labelP = PAIEMENT_LABELS[stP] || stP;
+        const isPaid = stP === "paye" || Number(p.montant_paye || 0) > 0 || Boolean(p.commande_helloasso);
+        const isCanceled = stP === "annule_reporte" || stP === "annule_perdu" || stP === "annule";
 
         let rankBadge = `<span class="muted" style="font-size:11.5px;">—</span>`;
         if (p.classement) {
@@ -1109,6 +1139,83 @@ startBureau({
           `;
         }
 
+        // 1. Colonne Paiement HelloAsso (Fixe et informative)
+        let paymentBadge = "";
+        if (stP === "paye" || (isPaid && !isCanceled)) {
+          paymentBadge = `
+            <span class="tag-badge" style="background:#DCFCE7; color:#166534; border:1px solid #BBF7D0; font-weight:700;">
+              ✅ Payé${p.montant_paye ? ` (${p.montant_paye} €)` : ""}
+            </span>
+            ${p.commande_helloasso ? `<div class="muted" style="font-size:10px; margin-top:2px;" title="Commande HelloAsso">🧾 ${esc(p.commande_helloasso)}</div>` : ""}
+          `;
+        } else if (stP === "annule_reporte") {
+          paymentBadge = `
+            <span class="tag-badge" style="background:#F3E8FF; color:#7C3AED; border:1px solid #D8B4FE; font-weight:700;" title="Avoir conservé pour une prochaine compétition">
+              🔄 Report${p.montant_paye ? ` (${p.montant_paye} €)` : ""}
+            </span>
+            ${p.commande_helloasso ? `<div class="muted" style="font-size:10px; margin-top:2px;">🧾 ${esc(p.commande_helloasso)}</div>` : ""}
+          `;
+        } else if (stP === "annule_perdu") {
+          paymentBadge = `
+            <span class="tag-badge" style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; font-weight:700;" title="Désistement sans report (frais conservés)">
+              🚫 Annulé — perdu${p.montant_paye ? ` (${p.montant_paye} €)` : ""}
+            </span>
+            ${p.commande_helloasso ? `<div class="muted" style="font-size:10px; margin-top:2px;">🧾 ${esc(p.commande_helloasso)}</div>` : ""}
+          `;
+        } else if (stP === "en_attente") {
+          paymentBadge = `
+            <span class="tag-badge" style="background:#FEF3C7; color:#B45309; border:1px solid #FDE68A; font-weight:700;">
+              ⏳ En attente
+            </span>
+          `;
+        } else {
+          paymentBadge = `
+            <span class="tag-badge" style="background:#F1F5F9; color:#64748B; border:1px solid #CBD5E1;">
+              Non invité
+            </span>
+          `;
+        }
+
+        // 2. Colonne Action (Workflow décisionnel sécurisé selon paiement et présence)
+        let actionCell = "";
+        if (isAdmin) {
+          if (p.present) {
+            // Pointé présent sur place : aucune action de retrait ou désistement possible
+            actionCell = `
+              <span class="tag-badge" style="background:#DCFCE7; color:#166534; border:1px solid #BBF7D0; font-size:11px; padding:3px 8px;" title="Athlète pointé présent sur place le jour J : aucune action requise. (Décochez la case Présent pour réactiver les actions en cas d'erreur de pointage).">
+                ✓ Sur place
+              </span>
+            `;
+          } else if (stP === "paye" || (isPaid && !isCanceled)) {
+            // Déjà payé : croix verrouillée, workflow de désistement
+            actionCell = `
+              <div style="display:inline-flex; align-items:center; gap:5px;" title="Paiement enregistré : suppression directe verrouillée pour protéger la comptabilité">
+                <span style="font-size:12.5px; cursor:help;">🔒</span>
+                <select class="select-input part-action-select part-status-select" style="padding:2px 6px; font-size:11px; font-weight:700; background:#F8FAFC; border:1px solid #CBD5E1; border-radius:4px; max-width:130px; cursor:pointer;">
+                  <option value="" selected>⚠️ Désister…</option>
+                  <option value="annule_reporte">🔄 Déclarer Report</option>
+                  <option value="annule_perdu">🚫 Déclarer Annulé perdu</option>
+                </select>
+              </div>
+            `;
+          } else if (isCanceled) {
+            // Déjà en Report ou Perdu : possibilité de rétablir
+            actionCell = `
+              <div style="display:inline-flex; align-items:center; gap:4px;">
+                <button class="btn btn-muted btn-mini part-restore-paid-btn" title="Rétablir l'athlète en statut Payé actif" style="color:var(--blue); border-color:#BFDBFE; font-size:11px; padding:2px 7px;">↩️ Rétablir</button>
+              </div>
+            `;
+          } else {
+            // Non payé : croix rouge disponible + option règlement manuel
+            actionCell = `
+              <div style="display:inline-flex; align-items:center; gap:4px;">
+                <button class="btn btn-muted btn-mini part-remove-btn" title="Retirer l'athlète de l'épreuve (aucun paiement enregistré)" style="color:var(--red); border-color:#FECACA; font-size:11px; padding:2px 7px;">✕ Retirer</button>
+                <button class="btn btn-muted btn-mini part-mark-paid-btn" title="Enregistrer un paiement manuel (chèque ou espèces)" style="color:#16A34A; border-color:#BBF7D0; font-size:11px; padding:2px 6px;">💶</button>
+              </div>
+            `;
+          }
+        }
+
         return `
           <tr data-aid="${esc(p.adherent_id)}">
             <td class="cell-name">${esc(String(p.nom || "").toUpperCase())} ${esc(p.prenom || "")}</td>
@@ -1120,21 +1227,7 @@ startBureau({
               <input type="checkbox" class="part-select-chk" ${p.selectionne ? "checked" : ""} style="accent-color:var(--blue); width:auto; cursor:pointer;" ${isAdmin ? "" : "disabled"}>
             </td>
             <td>
-              ${isAdmin ? `
-                <select class="select-input part-status-select" style="padding:2px 6px; font-size:11.5px; font-weight:700; background:${colorP}15; color:${colorP}; border-color:${colorP}55; border-radius:4px; max-width:145px; cursor:pointer;">
-                  <option value="paye" ${stP === 'paye' ? 'selected' : ''}>✅ Payé</option>
-                  <option value="en_attente" ${stP === 'en_attente' ? 'selected' : ''}>⏳ En attente</option>
-                  <option value="annule_reporte" ${stP === 'annule_reporte' ? 'selected' : ''}>🔄 Annulé — report</option>
-                  <option value="annule_perdu" ${stP === 'annule_perdu' ? 'selected' : ''}>🚫 Annulé — perdu</option>
-                  <option value="non_invite" ${stP === 'non_invite' ? 'selected' : ''}>Non invité</option>
-                </select>
-              ` : `
-                <span class="tag-badge" style="background:${colorP}22; color:${colorP}; border:1px solid ${colorP}55;">
-                  ${labelP}${p.montant_paye ? ` (${p.montant_paye} €)` : ""}
-                </span>
-              `}
-              ${p.montant_paye && isAdmin ? `<div class="muted" style="font-size:10.5px; margin-top:2px;">Règlement : <b>${p.montant_paye} €</b></div>` : ""}
-              ${p.commande_helloasso ? `<div class="muted" style="font-size:10px; margin-top:2px;">🧾 ${esc(p.commande_helloasso)}</div>` : ""}
+              ${paymentBadge}
             </td>
             <td style="text-align:center;">
               <input type="checkbox" class="part-present-chk" ${p.present ? "checked" : ""} style="accent-color:#16A34A; width:18px; height:18px; cursor:pointer;">
@@ -1142,11 +1235,7 @@ startBureau({
             <td>
               ${p.phone ? `<a href="tel:${esc(p.phone)}" style="font-size:11.5px; text-decoration:none; color:var(--blue);">📞 ${esc(p.phone)}</a>` : "—"}
             </td>
-            ${isAdmin ? `
-              <td style="text-align:center;">
-                <button class="btn btn-muted btn-mini part-remove-btn" title="Détacher de l'épreuve" style="color:var(--red); border-color:#FECACA;">✕</button>
-              </td>
-            ` : ""}
+            ${isAdmin ? `<td style="text-align:center;">${actionCell}</td>` : ""}
           </tr>
         `;
       }).join("");
@@ -1165,24 +1254,83 @@ startBureau({
           part.selectionne = e.target.checked;
           if (part.selectionne && part.statut_paiement === "non_invite") part.statut_paiement = "en_attente";
           await saveCompParticipants(comp);
+          renderActiveCompWorkspace();
+          renderCompsList();
         });
 
         row.querySelector(".part-present-chk")?.addEventListener("change", async (e) => {
           part.present = e.target.checked;
           await saveCompParticipants(comp);
+          renderActiveCompWorkspace();
+          renderCompsList();
         });
 
-        row.querySelector(".part-status-select")?.addEventListener("change", async (e) => {
-          part.statut_paiement = e.target.value;
-          await saveCompParticipants(comp);
-          toast(`Statut de paiement mis à jour pour ${part.prenom}.`);
-        });
-
+        // 1. Bouton ✕ Retirer (réservé aux athlètes non payés)
         row.querySelector(".part-remove-btn")?.addEventListener("click", async () => {
           if (!confirm(`Retirer ${part.prenom} ${part.nom} de cette compétition ?`)) return;
           comp.participants = (comp.participants || []).filter(p => String(p.adherent_id) !== String(aid));
           await saveCompParticipants(comp);
+          renderActiveCompWorkspace();
+          renderCompsList();
           toast(`Athlète retiré de la compétition.`);
+        });
+
+        // 2. Bouton 💶 Règlement manuel (pour les athlètes non payés)
+        row.querySelector(".part-mark-paid-btn")?.addEventListener("click", async () => {
+          const prixDefaut = Number(comp.prix || 15);
+          const saisie = prompt(`Enregistrer un paiement manuel pour ${part.prenom} ${part.nom}.\nMontant réglé en € :`, String(prixDefaut));
+          if (saisie === null) return;
+          const montant = parseFloat(saisie.replace(",", ".")) || prixDefaut;
+          part.statut_paiement = "paye";
+          part.montant_paye = montant;
+          part.commande_helloasso = "Règlement manuel";
+          part.selectionne = true;
+          await saveCompParticipants(comp);
+          renderActiveCompWorkspace();
+          renderCompsList();
+          toast(`✅ Paiement manuel de ${montant} € enregistré pour ${part.prenom}.`);
+        });
+
+        // 3. Sélecteur de désistement (pour les athlètes ayant déjà payé)
+        row.querySelector(".part-action-select")?.addEventListener("change", async (e) => {
+          const action = e.target.value;
+          if (!action) return;
+
+          if (action === "annule_reporte") {
+            const montant = part.montant_paye || comp.prix || 0;
+            if (!confirm(`Confirmer le désistement avec REPORT de l'avoir pour ${part.prenom} ${part.nom} ?\n\nLe montant réglé (${montant} €) restera en crédit sur le bilan de l'athlète.`)) {
+              e.target.value = "";
+              return;
+            }
+            part.statut_paiement = "annule_reporte";
+            part.selectionne = false;
+            await saveCompParticipants(comp);
+            renderActiveCompWorkspace();
+            renderCompsList();
+            toast(`🔄 Report d'avoir enregistré pour ${part.prenom}.`);
+          } else if (action === "annule_perdu") {
+            if (!confirm(`Confirmer le désistement ANNULÉ PERDU pour ${part.prenom} ${part.nom} ?\n\nLes frais d'inscription restent définitivement acquis au club/organisateur.`)) {
+              e.target.value = "";
+              return;
+            }
+            part.statut_paiement = "annule_perdu";
+            part.selectionne = false;
+            await saveCompParticipants(comp);
+            renderActiveCompWorkspace();
+            renderCompsList();
+            toast(`🚫 Désistement (annulé perdu) enregistré pour ${part.prenom}.`);
+          }
+        });
+
+        // 4. Bouton ↩️ Rétablir en statut Payé actif (si annulé par erreur)
+        row.querySelector(".part-restore-paid-btn")?.addEventListener("click", async () => {
+          if (!confirm(`Rétablir ${part.prenom} ${part.nom} en compétiteur actif (statut Payé) ?`)) return;
+          part.statut_paiement = "paye";
+          part.selectionne = true;
+          await saveCompParticipants(comp);
+          renderActiveCompWorkspace();
+          renderCompsList();
+          toast(`✅ ${part.prenom} rétabli en compétiteur actif.`);
         });
       });
     }

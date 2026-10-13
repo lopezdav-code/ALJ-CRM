@@ -1092,12 +1092,13 @@ function compCardHtml(c) {
     const nbParticipe = parts.filter(p => p.selectionne).length;
     const nbEnAttente = parts.filter(p => p.statut_paiement === "en_attente").length;
     const nbPaye = parts.filter(p => p.statut_paiement === "paye").length;
+    const hasResults = Boolean(c.resultats_synced_at || parts.some(p => p.resultat_ffme || p.classement));
 
     return `
     <div class="card" onclick="openParticipants('${esc(String(c.id))}')" style="cursor:pointer" title="Voir les compétiteurs">
       <div class="row-flex">
         <div style="flex:1;min-width:0">
-          <div class="m-name">${esc(c.nom)}</div>
+          <div class="m-name">${hasResults ? '<span title="Résultats officiels récupérés" style="margin-right:4px;">🏆</span>' : ""}${esc(c.nom)}</div>
           <div class="m-sub">🪪 ${esc(c.id_ffme || "—")} · 📅 ${esc(periodeTxt(c))} · 💶 ${Number(c.prix || 0).toFixed(2)} €</div>
           <div class="m-sub" style="margin-top:2px; color: #1E3A8A; font-weight: 600;">
             (${nbParticipe} participant${nbParticipe > 1 ? "s" : ""} · ${nbEnAttente} en attente · ${nbPaye} payé${nbPaye > 1 ? "s" : ""})
