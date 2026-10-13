@@ -195,6 +195,8 @@ const PAIEMENT_COLORS = {
   "paye": "#16A34A",
   "en_attente": "#D97706",
   "annule": "#DC2626",
+  "annule_reporte": "#7C3AED",
+  "annule_perdu": "#DC2626",
   "non_invite": "#94A3B8"
 };
 
@@ -202,6 +204,8 @@ const PAIEMENT_LABELS = {
   "paye": "Payé",
   "en_attente": "En attente",
   "annule": "Annulé",
+  "annule_reporte": "Annulé — report",
+  "annule_perdu": "Annulé — perdu",
   "non_invite": "Non invité"
 };
 
@@ -752,12 +756,13 @@ startBureau({
         const nbAttente = parts.filter(p => p.statut_paiement === "en_attente").length;
         const discColor = DISCIPLINE_COLORS[c.type] || "#2563EB";
         const cCoaches = getCompCoachNames(c, allCoaches);
+        const hasDiscipline = c.type && String(c.type).trim().toLowerCase() !== "escalade";
 
         return `
           <div class="comp-card${isSel ? " active" : ""}" data-id="${esc(c.id || c.docId)}">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
               <div class="comp-card-title">${esc(c.nom || "Épreuve sans nom")}</div>
-              <span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type || "Escalade")}</span>
+              ${hasDiscipline ? `<span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type)}</span>` : ""}
             </div>
             <div class="comp-card-sub" style="margin-top:4px;">
               <span>📅 ${esc(fmtDay(c.date_competition) || "Date à définir")}</span>
@@ -1115,9 +1120,21 @@ startBureau({
               <input type="checkbox" class="part-select-chk" ${p.selectionne ? "checked" : ""} style="accent-color:var(--blue); width:auto; cursor:pointer;" ${isAdmin ? "" : "disabled"}>
             </td>
             <td>
-              <span class="tag-badge" style="background:${colorP}22; color:${colorP}; border:1px solid ${colorP}55;">
-                ${labelP}${p.montant_paye ? ` (${p.montant_paye} €)` : ""}${p.commande_helloasso ? ` · 🧾 ${esc(p.commande_helloasso)}` : ""}
-              </span>
+              ${isAdmin ? `
+                <select class="select-input part-status-select" style="padding:2px 6px; font-size:11.5px; font-weight:700; background:${colorP}15; color:${colorP}; border-color:${colorP}55; border-radius:4px; max-width:145px; cursor:pointer;">
+                  <option value="paye" ${stP === 'paye' ? 'selected' : ''}>✅ Payé</option>
+                  <option value="en_attente" ${stP === 'en_attente' ? 'selected' : ''}>⏳ En attente</option>
+                  <option value="annule_reporte" ${stP === 'annule_reporte' ? 'selected' : ''}>🔄 Annulé — report</option>
+                  <option value="annule_perdu" ${stP === 'annule_perdu' ? 'selected' : ''}>🚫 Annulé — perdu</option>
+                  <option value="non_invite" ${stP === 'non_invite' ? 'selected' : ''}>Non invité</option>
+                </select>
+              ` : `
+                <span class="tag-badge" style="background:${colorP}22; color:${colorP}; border:1px solid ${colorP}55;">
+                  ${labelP}${p.montant_paye ? ` (${p.montant_paye} €)` : ""}
+                </span>
+              `}
+              ${p.montant_paye && isAdmin ? `<div class="muted" style="font-size:10.5px; margin-top:2px;">Règlement : <b>${p.montant_paye} €</b></div>` : ""}
+              ${p.commande_helloasso ? `<div class="muted" style="font-size:10px; margin-top:2px;">🧾 ${esc(p.commande_helloasso)}</div>` : ""}
             </td>
             <td style="text-align:center;">
               <input type="checkbox" class="part-present-chk" ${p.present ? "checked" : ""} style="accent-color:#16A34A; width:18px; height:18px; cursor:pointer;">
@@ -1153,6 +1170,12 @@ startBureau({
         row.querySelector(".part-present-chk")?.addEventListener("change", async (e) => {
           part.present = e.target.checked;
           await saveCompParticipants(comp);
+        });
+
+        row.querySelector(".part-status-select")?.addEventListener("change", async (e) => {
+          part.statut_paiement = e.target.value;
+          await saveCompParticipants(comp);
+          toast(`Statut de paiement mis à jour pour ${part.prenom}.`);
         });
 
         row.querySelector(".part-remove-btn")?.addEventListener("click", async () => {
@@ -1683,6 +1706,7 @@ startBureau({
 
       const search = ($("bilan-search-input")?.value || "").toLowerCase().trim();
       const seasonComps = allComps.filter(c => seasonOfDate(c.date_competition) === currentBilanSeason);
+      const today = new Date().toISOString().slice(0, 10);
 
       // Calcul par adhérent
       const athleteStats = {};
@@ -1690,7 +1714,11 @@ startBureau({
       seasonComps.forEach(comp => {
         const prix = Number(comp.prix || 0);
         (comp.participants || []).forEach(p => {
-          if (!p.selectionne && p.statut_paiement !== "paye") return;
+          const isReport = p.statut_paiement === "annule_reporte" || Boolean(p.report) || String(p.note_paiement || "").toLowerCase().includes("report");
+          const isAnnulePerdu = p.statut_paiement === "annule_perdu";
+          const isPaid = p.statut_paiement === "paye" || Number(p.montant_paye || 0) > 0 || isReport || isAnnulePerdu;
+          if (!p.selectionne && !isPaid) return;
+
           const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
           if (!athleteStats[aid]) {
             const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
@@ -1709,9 +1737,13 @@ startBureau({
             };
           }
 
+          // Règle comptable :
+          // Si report : le montant n'est plus dû pour cette épreuve (0 € dû), mais ce qui a été payé reste en crédit
+          const montantDu = isReport ? 0 : prix;
+          const paye = Number(p.montant_paye || (isPaid ? prix : 0));
+
           athleteStats[aid].nb_comps += 1;
-          athleteStats[aid].total_du += prix;
-          const paye = Number(p.montant_paye || (p.statut_paiement === "paye" ? prix : 0));
+          athleteStats[aid].total_du += montantDu;
           athleteStats[aid].total_paye += paye;
           athleteStats[aid].competitions.push({
             comp_id: comp.id || comp.docId,
@@ -1723,7 +1755,14 @@ startBureau({
             statut: p.statut_paiement,
             montant_paye: paye,
             commande_helloasso: p.commande_helloasso,
-            selectionne: p.selectionne
+            selectionne: p.selectionne,
+            present: Boolean(p.present),
+            is_report: isReport,
+            is_paid: isPaid,
+            classement: p.classement || "",
+            total_categorie: p.total_categorie || 0,
+            resultat_ffme: p.resultat_ffme || "",
+            categorie_ffme: p.categorie_ffme || ""
           });
         });
       });
@@ -1760,6 +1799,9 @@ startBureau({
       listContainer.innerHTML = list.map(a => {
         const isSel = String(a.id) === String(activeBilanAthleteId);
         const solde = a.total_du - a.total_paye;
+        const hasReport = a.competitions.some(c => c.is_report);
+        const hasAbsent = a.competitions.some(c => c.is_paid && !c.present && (c.date ? String(c.date).slice(0, 10) <= today : false));
+
         return `
           <div class="comp-card${isSel ? " active" : ""}" data-athlete-id="${esc(a.id)}">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
@@ -1773,6 +1815,8 @@ startBureau({
               <span>🪪 ${esc(a.licence)}</span>
               <span>·</span>
               <span>🏃 ${a.nb_comps} épreuve${a.nb_comps > 1 ? 's' : ''}</span>
+              ${hasReport ? `<span class="tag-badge" style="background:#F3E8FF; color:#7C3AED; font-size:10px; padding:1px 5px;">🔄 Report</span>` : ""}
+              ${hasAbsent ? `<span class="tag-badge" style="background:#FEE2E2; color:#DC2626; font-size:10px; padding:1px 5px;">⚠️ Absent</span>` : ""}
             </div>
           </div>
         `;
@@ -1839,26 +1883,72 @@ startBureau({
             <div style="display:flex; flex-direction:column; gap:10px;">
               ${athlete.competitions.map(c => {
                 const discColor = DISCIPLINE_COLORS[c.type] || "#2563EB";
-                const isPaid = c.statut === "paye";
+                const isPaid = c.is_paid || c.statut === "paye";
+                const isPast = c.date ? String(c.date).slice(0, 10) <= today : false;
+                const isAbsent = !c.present && isPast;
+                const isReport = c.is_report || c.statut === "annule_reporte";
+                const hasDiscipline = c.type && String(c.type).trim().toLowerCase() !== "escalade";
+
+                let icon = "🏅";
+                let colBg = "#FEF3C7";
+                let colTxt = "#B45309";
+                let border = "#FDE68A";
+                let r = "";
+                let tot = "";
+                let suffix = "";
+                if (c.classement) {
+                  r = String(c.classement).trim();
+                  tot = c.total_categorie ? ` / ${c.total_categorie}` : "";
+                  if (r === "1") { icon = "🥇"; colBg = "#FEF08A"; colTxt = "#854D0E"; border = "#FACC15"; }
+                  else if (r === "2") { icon = "🥈"; colBg = "#F1F5F9"; colTxt = "#334155"; border = "#CBD5E1"; }
+                  else if (r === "3") { icon = "🥉"; colBg = "#FFEDD5"; colTxt = "#9A3412"; border = "#FDBA74"; }
+                  suffix = (!tot && r === "1") ? "er" : (!tot ? "e" : "");
+                }
+
                 return `
-                  <div class="card" style="margin:0; padding:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                    <div>
-                      <div style="display:flex; align-items:center; gap:8px;">
+                  <div class="card" style="margin:0; padding:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                    <div style="flex:1; min-width:240px;">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                         <b style="font-size:14px; color:#1E293B;">${esc(c.nom)}</b>
-                        <span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type || "Escalade")}</span>
+                        ${hasDiscipline ? `<span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type)}</span>` : ""}
+                        ${isReport ? `
+                          <span class="tag-badge" style="background:#F3E8FF; color:#7C3AED; border:1px solid #D8B4FE; font-weight:700; font-size:11.5px; padding:2px 8px;">🔄 Report</span>
+                        ` : ""}
+                        ${(isPaid && isAbsent && !c.classement) ? `
+                          <span class="tag-badge" style="background:#FEE2E2; color:#DC2626; border:1px solid #FECACA; font-weight:700; font-size:11.5px; padding:2px 8px;">⚠️ Absent</span>
+                        ` : (!c.classement && c.present ? `
+                          <span class="tag-badge" style="background:#DCFCE7; color:#166534; font-size:10.5px; padding:2px 6px;">✓ Présent</span>
+                        ` : "")}
                       </div>
-                      <div class="muted" style="font-size:12px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
+                      <div class="muted" style="font-size:12px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
                         <span>📅 ${esc(fmtDay(c.date) || "Date non définie")}</span>
                         ${c.lieu ? `<span>📍 ${esc(c.lieu)}</span>` : ""}
-                        <span>💰 Tarif : <b>${c.prix.toFixed(2)} €</b></span>
+                        <span>💰 Tarif : ${isReport ? `<del style="color:#94A3B8; text-decoration:line-through; font-weight:bold;">${c.prix.toFixed(2)} €</del> <span style="color:#7C3AED; font-weight:700;">(0.00 € dû)</span>` : `<b>${c.prix.toFixed(2)} €</b>`}</span>
                       </div>
                     </div>
-                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                      <div>
-                        ${isPaid
-                          ? `<span class="tag-badge" style="background:#DCFCE7; color:#166534; font-weight:700;">✅ Payé (${c.montant_paye.toFixed(2)} €)</span>`
-                          : `<span class="tag-badge" style="background:#FEF3C7; color:#B45309; font-weight:700;">⏳ En attente (${c.prix.toFixed(2)} €)</span>`
-                        }
+                    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                      <!-- Colonne dédiée Résultat FFME -->
+                      <div style="min-width:115px; text-align:center;">
+                        ${c.classement ? `
+                          <div style="display:inline-flex; flex-direction:column; align-items:center;">
+                            <span class="tag-badge" style="background:${colBg}; color:${colTxt}; border:1px solid ${border}; font-weight:800; font-size:12px; padding:3px 10px;" title="${c.categorie_ffme ? `Catégorie FFME : ${c.categorie_ffme}` : 'Résultat officiel'}">
+                              ${icon} ${esc(r)}${suffix}${tot}
+                            </span>
+                            ${c.categorie_ffme ? `<span class="muted" style="font-size:10.5px; margin-top:2px; font-weight:600;">${esc(c.categorie_ffme)}</span>` : ""}
+                          </div>
+                        ` : `
+                          <span class="muted" style="font-size:12px; font-style:italic;">—</span>
+                        `}
+                      </div>
+
+                      <div style="min-width:125px; text-align:right;">
+                        ${isReport ? `
+                          <span class="tag-badge" style="background:#F3E8FF; color:#7C3AED; font-weight:700;">🔄 Reporté (Payé ${c.montant_paye.toFixed(2)} €)</span>
+                        ` : isPaid ? `
+                          <span class="tag-badge" style="background:#DCFCE7; color:#166534; font-weight:700;">✅ Payé (${c.montant_paye.toFixed(2)} €)</span>
+                        ` : `
+                          <span class="tag-badge" style="background:#FEF3C7; color:#B45309; font-weight:700;">⏳ En attente (${c.prix.toFixed(2)} €)</span>
+                        `}
                         ${c.commande_helloasso ? `<div class="muted" style="font-size:11px; margin-top:2px;">Cde : <code>${esc(c.commande_helloasso)}</code></div>` : ""}
                       </div>
                       <button class="btn btn-muted btn-mini btn-goto-comp" data-cid="${esc(c.comp_id)}">🔍 Voir l'épreuve</button>
@@ -1884,11 +1974,16 @@ startBureau({
     $("btn-export-bilan-csv")?.addEventListener("click", () => {
       const seasonComps = allComps.filter(c => seasonOfDate(c.date_competition) === currentBilanSeason);
       const athleteStats = {};
+      const today = new Date().toISOString().slice(0, 10);
 
       seasonComps.forEach(comp => {
         const prix = Number(comp.prix || 0);
+        const isPast = comp.date_competition ? String(comp.date_competition).slice(0, 10) <= today : false;
         (comp.participants || []).forEach(p => {
-          if (!p.selectionne && p.statut_paiement !== "paye") return;
+          const isReport = p.statut_paiement === "annule_reporte" || Boolean(p.report) || String(p.note_paiement || "").toLowerCase().includes("report");
+          const isPaid = p.statut_paiement === "paye" || Number(p.montant_paye || 0) > 0 || isReport;
+          if (!p.selectionne && !isPaid) return;
+
           const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
           if (!athleteStats[aid]) {
             const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
@@ -1898,17 +1993,22 @@ startBureau({
               licence: p.num_licence || adh.licence_ffme || "",
               nb_comps: 0,
               total_du: 0,
-              total_paye: 0
+              total_paye: 0,
+              remarques: []
             };
           }
+          const montantDu = isReport ? 0 : prix;
+          const paye = Number(p.montant_paye || (isPaid ? prix : 0));
           athleteStats[aid].nb_comps += 1;
-          athleteStats[aid].total_du += prix;
-          athleteStats[aid].total_paye += Number(p.montant_paye || (p.statut_paiement === "paye" ? prix : 0));
+          athleteStats[aid].total_du += montantDu;
+          athleteStats[aid].total_paye += paye;
+          if (isReport) athleteStats[aid].remarques.push(`${comp.nom || "Épreuve"} : Reporté`);
+          else if (isPaid && !p.present && isPast) athleteStats[aid].remarques.push(`${comp.nom || "Épreuve"} : Absent`);
         });
       });
 
       const rows = [
-        ["Nom", "Prénom", "N° Licence FFME", "Épreuves", "Total Dû (€)", "Total Payé (€)", "Solde Reste Dû (€)"]
+        ["Nom", "Prénom", "N° Licence FFME", "Épreuves", "Total Dû (€)", "Total Payé (€)", "Solde Reste Dû (€)", "Remarques (Reports / Absences)"]
       ];
 
       Object.values(athleteStats).sort((a,b) => a.nom.localeCompare(b.nom)).forEach(a => {
@@ -1919,7 +2019,8 @@ startBureau({
           a.nb_comps,
           a.total_du.toFixed(2),
           a.total_paye.toFixed(2),
-          (a.total_du - a.total_paye).toFixed(2)
+          (a.total_du - a.total_paye).toFixed(2),
+          a.remarques.join(" | ") || "—"
         ]);
       });
 
@@ -2010,12 +2111,13 @@ startBureau({
               ${assignedComps.map(c => {
                 const parts = c.participants || [];
                 const discColor = DISCIPLINE_COLORS[c.type] || "#2563EB";
+                const hasDiscipline = c.type && String(c.type).trim().toLowerCase() !== "escalade";
                 return `
                   <div class="card" style="margin:0; padding:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                     <div>
                       <div style="display:flex; align-items:center; gap:8px;">
                         <b style="font-size:14px; color:#1E293B;">${esc(c.nom)}</b>
-                        <span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type || "Escalade")}</span>
+                        ${hasDiscipline ? `<span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type)}</span>` : ""}
                       </div>
                       <div class="muted" style="font-size:12px; margin-top:4px;">
                         <span>📅 ${esc(fmtDay(c.date_competition) || "Non définie")}</span>
