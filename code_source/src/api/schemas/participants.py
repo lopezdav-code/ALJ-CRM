@@ -21,6 +21,11 @@ class ParticipantUpdate(RequestBody):
     present: Optional[bool] = None  # pass-through field (plan appendix B)
 
 
+class ManualPayment(RequestBody):
+    """Payment received outside HelloAsso (cheque, cash)."""
+    montant: float = Field(gt=0)
+
+
 class ParticipantCancel(RequestBody):
     mode: str
     note: str = Field(min_length=1)

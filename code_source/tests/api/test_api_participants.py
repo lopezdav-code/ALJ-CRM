@@ -64,6 +64,24 @@ class TestParticipants(ApiTestCase):
         self.assertEqual(Repo.get_competition_doc(self.comp)["participants"], [])
         self.assertEqual(self.client.delete(self.url("/1")).status_code, 404)
 
+    def test_manual_payment_and_restore(self):
+        Repo.add_participant(self.comp, 1, selectionne=False)
+        r = self.client.post(self.url("/1/manual-payment"), json={"montant": 12.5})
+        self.assertEqual(r.status_code, 200, r.text)
+        p = self.participant(self.comp, 1)
+        self.assertEqual((p["selectionne"], p["statut_paiement"], p["montant_paye"], p["commande_helloasso"]),
+                         (True, "paye", 12.5, "Règlement manuel"))
+        self.assertEqual(r.json()["total_collecte"], 12.5)
+        self.assertEqual(self.client.post(self.url("/2/manual-payment"), json={"montant": 10}).status_code, 404)
+        self.assertEqual(self.client.post(self.url("/1/manual-payment"), json={"montant": 0}).status_code, 422)
+
+        # Withdrawal, then restore: re-adding a cancelled participant makes them paid again
+        self.client.post(self.url("/1/cancel"), json={"mode": "reporte", "note": "blessure"})
+        self.assertEqual(self.participant(self.comp, 1)["statut_paiement"], "annule_reporte")
+        self.client.post(self.url(), json={"adherent_id": 1, "selectionne": True})
+        p = self.participant(self.comp, 1)
+        self.assertEqual((p["selectionne"], p["statut_paiement"], p["montant_paye"]), (True, "paye", 12.5))
+
     def test_load_group(self):
         r = self.client.post(f"/api/competitions/{self.comp}/load-group")
         self.assertEqual(r.json()["added"], 1)  # only the « Compétition » tariff member

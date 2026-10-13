@@ -2,7 +2,13 @@
 
 from fastapi import APIRouter
 
-from api.schemas.participants import CANCEL_MODES, ParticipantAdd, ParticipantCancel, ParticipantUpdate
+from api.schemas.participants import (
+    CANCEL_MODES,
+    ManualPayment,
+    ParticipantAdd,
+    ParticipantCancel,
+    ParticipantUpdate,
+)
 from services.participant_service import ParticipantService as Service
 
 router = APIRouter(prefix="/api/competitions/{competition_id}")
@@ -19,6 +25,11 @@ def update_participant(competition_id: int, adherent_id: int, body: ParticipantU
     coach whether the money is lost or carried over (cancel route)."""
     return Service.update_participant(competition_id, adherent_id,
                                       selectionne=body.selectionne, present=body.present)
+
+
+@router.post("/participants/{adherent_id}/manual-payment")
+def record_manual_payment(competition_id: int, adherent_id: int, body: ManualPayment):
+    return Service.record_manual_payment(competition_id, adherent_id, body.montant)
 
 
 @router.post("/participants/{adherent_id}/cancel")

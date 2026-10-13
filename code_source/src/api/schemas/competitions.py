@@ -33,6 +33,7 @@ class CompetitionCreate(RequestBody):
     statut: str = STATUT_EN_PREPARATION
     coach_ids: List[int] = Field(default_factory=list, max_length=MAX_COACHES)
     helloasso_ref: str = ""
+    url_resultats: str = ""  # MyCompet results page, also found by the fetch-results route
     # Pass-through fields of the bureau page, stored without validation (plan appendix B)
     lieu: Optional[str] = None
     type: Optional[str] = None
@@ -51,6 +52,7 @@ class CompetitionUpdate(RequestBody):
     statut: Optional[str] = None
     coach_ids: Optional[List[int]] = Field(None, max_length=MAX_COACHES)
     helloasso_ref: Optional[str] = None
+    url_resultats: Optional[str] = None
     lieu: Optional[str] = None
     type: Optional[str] = None
 

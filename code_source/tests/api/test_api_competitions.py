@@ -44,6 +44,12 @@ class TestCompetitions(ApiTestCase):
         self.assertEqual(updated["lieu"], "Lyon")
         self.assertEqual(self.client.patch("/api/competitions/123", json={"nom": "X"}).status_code, 404)
 
+    def test_results_url_kept_by_other_updates(self):
+        doc = self.create(url_resultats="https://mycompet.ffme.fr/resultat/resultat_13660")
+        self.assertEqual(doc["url_resultats"], "https://mycompet.ffme.fr/resultat/resultat_13660")
+        r = self.client.patch(f"/api/competitions/{doc['id']}", json={"prix": 20})
+        self.assertEqual(r.json()["url_resultats"], "https://mycompet.ffme.fr/resultat/resultat_13660")
+
     def test_update_keeps_participants(self):
         self.seed_adherent(1)
         doc = self.create()

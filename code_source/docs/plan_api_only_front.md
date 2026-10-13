@@ -94,6 +94,12 @@ Existing routes reused unchanged: `/api/helloasso/sync`, `/api/send-email`, `/ap
 - **Bureau page, paid participant.** Unticking « Participe » for someone who paid now asks for a comment and « report / perdu » (`prompt` + `confirm`, minimal UI), then calls the cancel route. Before, the bureau page silently overwrote the status.
 - **Bureau page field names fixed (A6).** It now reads the real fields (`nom/prenom/tarif/email`, mirror `montant/order_id/payer_*`, athlete from `raw_json`) and knows the statuses `annule_perdu/annule_reporte`. Admin-only controls are relaxed to coach (D5). It keeps no offline snapshot (desktop).
 - **Layers: controller → service → repository** (added during review). `src/api/competitions.py` only handles HTTP: it parses the body, calls the service, and shapes the response (ETag, `{status: success}`). `src/services/competition_service.py` holds the rules: existence checks, partial update, pass-through fields, `already_paid`/`already_linked`/`motif_required`, and the 5 s list cache with its invalidation on write. It raises `services.errors` (`NotFound`, `InvalidRequest`, `Conflict`, `StorageUnavailable`) and turns Firestore errors into them. It knows nothing about HTTP. One exception handler, `api.responses.service_error_handler` registered in `server.py`, maps each error class to 404/400/409/503 with the same `{status, message, code}` body. Phase 2 (`/api/members`) follows the same layout.
+- **Rebase on main (3ea9078): main's new bureau features ported to the API.**
+  - 💶 manual payment → `POST …/participants/{aid}/manual-payment {montant > 0}` (`record_manual_payment`, written under the optimistic lock).
+  - Withdrawal « report / perdu » → the cancel route; the bureau flow now asks for the required comment.
+  - ↩️ restore → `POST …/participants {selectionne: true}`, which already reactivates a cancelled participant as paid.
+  - `url_resultats` (now in the domain model) goes through the competition routes and the Firestore repository. A results fetch drops the competition cache, and the page reloads after it.
+  - main's admin-only checks on the new controls are relaxed to coach (D5).
 - **Repository additions** (`competition_firestore_repository.py`):
   - `ParticipantAlreadyPaid`, `ItemAlreadyLinked`;
   - `set_selection(refuse_unselect_paid=)`, `set_present`;
@@ -128,7 +134,7 @@ Existing member writes (`/api/members/update`, `/api/attestations/*`) are unchan
 3. `firestore.rules`: `match /{document=**} { allow read, write: if false; }`. Role functions and e-mail lists are removed from the rules.
 4. Tests: update `test_api_security.py:108` (role lists now in `api_auth.py` + display JS only), `test_firestore_rules_emulator.py` (assert deny for every role), `test_firestore_sync.py:160`.
 5. Docs: `ARCHITECTURE.md` §2/§4/§5, `docs/base_firestore.md`, `README.md` (rules deploy step).
-6. Web version bump to **v21** (`<meta alj-web-version>`, titles, badge, `CACHE_NAME`).
+6. Web version bump to the next version (**v23**; main is at v22 since ffdf6f3) (`<meta alj-web-version>`, titles, badge, `CACHE_NAME`).
 7. Deploy order (see S1): app first, rules last, after a waiting period.
 
 ### Phase 4 — Cleanup (after phase 3)
@@ -251,7 +257,7 @@ Consequences:
 
 - **S1 — Old clients after the rules lockdown.** Installed PWAs and open tabs still running old code would get `permission-denied`.
   - Handling: since the network-first `sw.js` change, clients load new pages on their next online visit.
-  - Lockdown is a separate, later deploy: rules go out ≥1 week after v21.
+  - Lockdown is a separate, later deploy: rules go out ≥1 week after that version.
   - Before deploying rules, check in the GCP console that Firestore requests evaluated by rules have dropped to about 0.
   - Rollback: `git checkout <prev> -- firestore.rules && firebase deploy --only firestore:rules`. This is manual; `deploy_cloud_run.sh` doesn't deploy rules.
 - **S2 — Desktop app.** Not affected: it uses the club OAuth token (IAM), not Firebase Auth, so rules don't apply. Verify the club account keeps its IAM role on the project. `firestore_sync.py` (legacy import tool) is also IAM-based and unaffected.
@@ -333,6 +339,8 @@ Consequences:
 | A24 | `web/competitions.html` | `snap.metadata.fromCache` is ignored: the status bar says "temps réel" even when showing cached data. | Moot (snapshot banner instead). |
 | A25 | repo `_new_id` (ms timestamp), PWA `Date.now()` | Two competitions or coaches created in the same millisecond get the same id; the second silently overwrites the first. Found while testing phase 1. | **Still present** (unlikely in practice). |
 | A26 | `FirestoreClient.update_fields` | Creates the document when it doesn't exist. A write racing a delete from another device (status change, link, comment) recreates a stub document with only the written fields. The routes check existence first, which narrows the window but doesn't close it. | **Still present.** |
+| A27 | `server.py` `POST /api/competitions/{id}/fetch-results` (main, 3ea9078 series) | Reads the competition, adds the MyCompet results to its participants, then rewrites the whole `participants` array with no precondition. A participant change made in between (coach, webhook payment) is lost. It also bypasses the service layer. | **Still present.** Fix: move it to `ParticipantService` and write per participant through `_update_participant` (optimistic lock). |
+| A28 | `api_auth.LOCAL_HOSTS` (main) | `"testserver"` (the FastAPI TestClient's host) was added to the hosts accepted by the local server without authentication. Production code is relaxed to suit tests: a local server then also accepts requests sent with `Host: testserver`. Tests should set `base_url="http://127.0.0.1"` instead. | **Still present.** Low risk (local server only), review with the author. |
 
 ## Appendix B — Fields to migrate later (D4)
 

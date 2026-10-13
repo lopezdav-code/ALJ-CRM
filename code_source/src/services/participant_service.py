@@ -43,6 +43,14 @@ class ParticipantService:
 
     @staticmethod
     @write
+    def record_manual_payment(competition_id: int, adherent_id: int, montant: float) -> dict:
+        """Cheque or cash: the participant becomes selected and paid."""
+        if not Repo.record_manual_payment(competition_id, adherent_id, montant):
+            raise NotFound("Compétition ou compétiteur introuvable.")
+        return Repo.get_competition_doc(competition_id)
+
+    @staticmethod
+    @write
     def cancel_participant(competition_id: int, adherent_id: int, payment_status: str,
                            note: str) -> dict:
         """`payment_status`: PAIEMENT_ANNULE_PERDU or PAIEMENT_ANNULE_REPORTE."""

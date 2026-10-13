@@ -1568,6 +1568,9 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
             })
         except Exception as e:
             print(f"⚠️ [MYCOMPET] Erreur mise à jour Firestore : {e}")
+        finally:
+            from services.competition_store import invalidate_cache
+            invalidate_cache()  # results visible on the next poll of the competition pages
 
     # Sauvegarde miroir dans la base SQLite locale si disponible
     try:

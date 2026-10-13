@@ -15,7 +15,7 @@ from services.competition_store import cached_competitions, competition_not_foun
 # Fields stored as given, outside the domain model (plan appendix B)
 PASS_THROUGH_FIELDS = ("lieu", "type")
 COMPETITION_FIELDS = ("nom", "id_ffme", "date_competition", "date_fin", "prix", "statut",
-                      "helloasso_ref")
+                      "helloasso_ref", "url_resultats")
 
 
 def _apply_coaches(comp: Competition, coach_ids):

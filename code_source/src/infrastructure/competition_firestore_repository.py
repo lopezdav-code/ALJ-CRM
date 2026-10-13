@@ -53,6 +53,9 @@ from infrastructure.sqlite_repository import SqliteRepository
 # participant ajouté explicitement (même sémantique que l'ancienne base SQLite).
 DEFAULT_STATUT_NOUVEAU_PARTICIPANT = PAIEMENT_EN_ATTENTE
 
+# Order reference of a payment recorded by hand on the bureau page (cheque, cash)
+MANUAL_PAYMENT_REF = "Règlement manuel"
+
 _ADHERENTS_CACHE_TTL = 30.0
 
 # Verrouillage optimiste des participants : nombre de tentatives (relecture +
@@ -186,6 +189,8 @@ class CompetitionFirestoreRepository:
             "prix": doc.get("prix"),
             "statut": doc.get("statut"),
             "helloasso_ref": doc.get("helloasso_ref"),
+            "url_resultats": doc.get("url_resultats"),
+            "resultats_synced_at": doc.get("resultats_synced_at"),
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "_doc_id": doc.get("_doc_id"),
@@ -211,6 +216,8 @@ class CompetitionFirestoreRepository:
             "prix": float(comp.prix or 0.0),
             "statut": comp.statut or "en_preparation",
             "helloasso_ref": comp.helloasso_ref or "",
+            "url_resultats": comp.url_resultats or "",
+            "resultats_synced_at": comp.resultats_synced_at or "",
             "coaches": coach_names,
             "coach_ids": coach_ids,
             "coach1_id": comp.coach1_id,
@@ -734,6 +741,15 @@ class CompetitionFirestoreRepository:
     def set_payment_status(cls, competition_id: int, adherent_id: int, statut_paiement: str) -> bool:
         return cls._update_participant(competition_id, adherent_id,
                                        lambda p: p.update(statut_paiement=statut_paiement)) is not None
+
+    @classmethod
+    def record_manual_payment(cls, competition_id: int, adherent_id: int, montant: float) -> bool:
+        """Payment received outside HelloAsso (cheque, cash): the participant is selected and
+        paid. Returns False when the member is not listed on the competition."""
+        def change(p):
+            p.update(selectionne=True, statut_paiement=PAIEMENT_PAYE,
+                     montant_paye=float(montant), commande_helloasso=MANUAL_PAYMENT_REF)
+        return cls._update_participant(competition_id, adherent_id, change) is not None
 
     @classmethod
     def mark_cancelled(cls, competition_id: int, adherent_id: int,
