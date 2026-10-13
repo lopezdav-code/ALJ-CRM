@@ -56,8 +56,8 @@ jobs:
         python -m pytest tests/presentation/test_presentation_lot5.py
 
   e2e:
-    # Browser tests (Playwright) against the local dev stack: Firebase emulator + Mailpit
-    # (code_source/dev/docker-compose.yml), fake data, server in dev mode.
+    # Browser tests (Playwright) against a throwaway stack started by the tests: Firebase emulator +
+    # Mailpit (code_source/e2e/docker-compose.yml), fake data, fake HelloAsso, server in dev mode.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -67,8 +67,9 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v7
 
-    - name: Start dev stack (Firebase emulator + Mailpit)
-      run: docker compose -f dev/docker-compose.yml up -d --build
+    - name: Prepare e2e stack images (Firebase emulator + Mailpit)
+      # Built/pulled up front so that a failure shows here; the tests start the stack themselves.
+      run: docker compose -f e2e/docker-compose.yml build && docker compose -f e2e/docker-compose.yml pull mailpit
 
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -96,21 +97,17 @@ jobs:
     - name: Lint (ruff)
       run: python -m ruff check e2e
 
-    - name: Wait for dev stack
-      run: |
-        for url in http://localhost:8081/ http://localhost:9099/ http://localhost:8025/; do
-          timeout 180 bash -c "until curl -s -o /dev/null $url; do sleep 2; done" || { echo "$url unreachable"; exit 1; }
-        done
-
     - name: Run e2e tests (pytest + Playwright)
+      env:
+        E2E_KEEP_STACK: '1' # kept for the logs below, removed by the last step
       run: >
         python -m pytest -c e2e/pytest.ini e2e
         --output e2e-results --tracing retain-on-failure
         --screenshot only-on-failure --video retain-on-failure
 
-    - name: Dev stack logs
+    - name: e2e stack logs
       if: failure()
-      run: mkdir -p e2e-results && docker compose -f dev/docker-compose.yml logs --no-color > e2e-results/docker-compose.log 2>&1
+      run: mkdir -p e2e-results && docker compose -f e2e/docker-compose.yml logs --no-color > e2e-results/docker-compose.log 2>&1
 
     - name: Upload e2e artifacts
       if: failure()
@@ -120,6 +117,6 @@ jobs:
         path: code_source/e2e-results/
         retention-days: 7
 
-    - name: Stop dev stack
+    - name: Stop e2e stack
       if: always()
-      run: docker compose -f dev/docker-compose.yml down
+      run: docker compose -f e2e/docker-compose.yml down

@@ -43,8 +43,8 @@ def test_mobile_page_loads(mobile_page, path):
 
 
 def test_dev_smtp_reaches_mailpit(mailpit):
-    """The SMTP settings of dev/dev.env deliver to Mailpit (what the server uses in every e-mail test)."""
-    smtp = stack.read_env_file(stack.DEV_ENV_FILE)
+    """The server's SMTP settings (dev/dev.env, port of the e2e stack) deliver to Mailpit."""
+    smtp = {**stack.read_env_file(stack.DEV_ENV_FILE), **stack.STACK_ENV}
     msg = EmailMessage()
     msg["From"] = smtp["SMTP_FROM_EMAIL"]
     msg["To"] = "harry.potter@hogwarts.example"

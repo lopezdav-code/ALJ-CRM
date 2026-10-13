@@ -1,10 +1,12 @@
 """
-Local dev stack used by the e2e tests: Firebase emulator + Mailpit (dev/docker-compose.yml),
-fake data (dev/seed/seed_emulator.py) and the FastAPI server started as a subprocess.
+Stack of the e2e tests: a throwaway Firebase emulator + Mailpit (e2e/docker-compose.yml, its own
+ports, nothing persisted), fake data (dev/seed/seed_emulator.py) and the FastAPI server started as
+a subprocess.
 
-The server always runs in its own process with an explicit environment built from dev/dev.env:
-the pytest process is never in dev mode, and nothing here can reach a real service
-(dev/check_env.py runs first, as in dev/run_server.sh).
+The server always runs in its own process with an explicit environment built from dev/dev.env and
+pointed at the e2e stack: the pytest process is never in dev mode, nothing here can reach a real
+service (dev/check_env.py runs first, as in dev/run_server.sh) and the developer's dev stack
+(dev/docker-compose.yml) is never touched.
 """
 import os
 import subprocess
@@ -16,11 +18,24 @@ from pathlib import Path
 
 CODE_SOURCE = Path(__file__).resolve().parents[2]
 DEV_ENV_FILE = CODE_SOURCE / "dev" / "dev.env"
+COMPOSE = ["docker", "compose", "-f", str(CODE_SOURCE / "e2e" / "docker-compose.yml")]
 
-FIRESTORE_URL = "http://localhost:8081/"
-AUTH_URL = "http://localhost:9099/"
-MAILPIT_URL = "http://localhost:8025"
-STACK_SERVICES = {"Firestore emulator": FIRESTORE_URL, "Auth emulator": AUTH_URL, "Mailpit": MAILPIT_URL + "/"}
+# Host ports of e2e/docker-compose.yml (the dev stack uses 8081 / 9099 / 1025 / 8025)
+FIRESTORE_HOST = "localhost:18081"
+AUTH_HOST = "localhost:19099"
+SMTP_PORT = 11025
+MAILPIT_URL = "http://localhost:18025"
+STACK_SERVICES = {"Firestore emulator": f"http://{FIRESTORE_HOST}/", "Auth emulator": f"http://{AUTH_HOST}/",
+                  "Mailpit": MAILPIT_URL + "/"}
+
+# dev/dev.env values redirected to the e2e stack (server, seed, browser through /runtime-config.js)
+STACK_ENV = {
+    "FIRESTORE_EMULATOR_HOST": FIRESTORE_HOST,
+    "FIREBASE_AUTH_EMULATOR_HOST": AUTH_HOST,
+    "ALJ_PUBLIC_FIRESTORE_EMULATOR": FIRESTORE_HOST,
+    "ALJ_PUBLIC_AUTH_EMULATOR": f"http://{AUTH_HOST}",
+    "SMTP_PORT": str(SMTP_PORT),
+}
 
 
 def is_up(url: str, timeout: float = 2) -> bool:
@@ -35,6 +50,25 @@ def is_up(url: str, timeout: float = 2) -> bool:
 
 def missing_services() -> list:
     return [name for name, url in STACK_SERVICES.items() if not is_up(url)]
+
+
+def start_stack(log_path: Path, timeout: float = 300) -> None:
+    """docker compose up (builds the emulator image on first use), then waits for every service."""
+    with open(log_path, "a", encoding="utf-8") as log:
+        result = subprocess.run([*COMPOSE, "up", "-d"], cwd=CODE_SOURCE, stdout=log, stderr=subprocess.STDOUT,
+                                timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(f"docker compose up failed (exit {result.returncode}):\n{tail(log_path)}")
+    deadline = time.monotonic() + timeout
+    for url in STACK_SERVICES.values():
+        wait_until_up(url, timeout=max(1.0, deadline - time.monotonic()))
+
+
+def stop_stack(log_path: Path) -> None:
+    """docker compose down: the emulator and its data are thrown away."""
+    with open(log_path, "a", encoding="utf-8") as log:
+        subprocess.run([*COMPOSE, "down", "--timeout", "5"], cwd=CODE_SOURCE, stdout=log,
+                       stderr=subprocess.STDOUT, timeout=120)
 
 
 def wait_until_up(url: str, timeout: float, process: subprocess.Popen = None) -> None:
@@ -61,12 +95,14 @@ def read_env_file(path: Path) -> dict:
 
 
 def dev_environment(data_dir: Path, **overrides: str) -> dict:
-    """Environment of the dev subprocesses (seed, server): dev/dev.env + a private SQLite cache.
+    """Environment of the dev subprocesses (seed, server): dev/dev.env pointed at the e2e stack,
+    with a private SQLite cache.
 
     PYTEST_* variables are dropped: with PYTEST_CURRENT_TEST set, the server would fall back
     to MEMBER_BACKEND=drive."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
     env.update(read_env_file(DEV_ENV_FILE))
+    env.update(STACK_ENV)
     env.update({"ALJ_DATA_DIR": str(data_dir), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
     env.update(overrides)
     return env

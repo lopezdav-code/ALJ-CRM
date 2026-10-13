@@ -49,19 +49,24 @@ Connexion : le bouton « Se connecter » ouvre le sélecteur de comptes de l'ém
 
 ## Tests e2e (Playwright)
 
-Tests navigateur de bout en bout dans `code_source/e2e/`, sur cette même pile (émulateur + Mailpit).
-Ils sont lancés par la CI (job `e2e` de `.github/workflows/tests.yml`, Ubuntu) à chaque PR et push sur `main`.
+Tests navigateur de bout en bout dans `code_source/e2e/`, sur leur **propre pile jetable** (émulateur + Mailpit,
+`e2e/docker-compose.yml`), que la suite démarre puis supprime elle-même : la pile de dev ci-dessus et ses données
+ne sont jamais touchées, et chaque exécution part d'un émulateur neuf. Ils sont lancés par la CI (job `e2e` de
+`.github/workflows/tests.yml`, Ubuntu) à chaque PR et push sur `main`.
 
 ```bash
 cd code_source
-docker compose -f dev/docker-compose.yml up -d
 pip install -r requirements-docker.txt -r requirements-e2e.txt
 python -m playwright install --with-deps chromium    # WSL/Linux : bibliothèques système (sudo)
 python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute la suite
 ```
 
-- ⚠️ **La suite réinitialise les données de l'émulateur** (elle relance le seed). Le serveur de test tourne
-  sur le port `8090` (`E2E_PORT`), avec son propre cache SQLite temporaire : `run_server.sh` (8080) peut rester lancé.
+- Ports de la pile e2e : Firestore `18081`, Auth `19099`, Mailpit `18025` (SMTP `11025`) ; serveur de test
+  `8090` (`E2E_PORT`), faux HelloAsso `8095`. La pile de dev (`8081`, `9099`, `8025`) et `run_server.sh` (`8080`)
+  peuvent rester lancés. Docker est requis.
+- `E2E_KEEP_STACK=1` garde la pile e2e après l'exécution (itérations rapides, ou lecture des journaux :
+  `docker compose -f e2e/docker-compose.yml logs`) ; la suite la réensemence à chaque exécution. La supprimer ensuite
+  (`docker compose -f e2e/docker-compose.yml down`) : la mémoire de l'émulateur grossit à chaque exécution.
 - **Sans installer les bibliothèques système de Chromium** (WSL sans sudo) : navigateur servi par l'image
   officielle Playwright (même version que `requirements-e2e.txt`), réseau de l'hôte pour joindre `localhost` :
   ```bash
@@ -79,12 +84,9 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
   `HELLOASSO_WEBHOOK_TOKEN`.
 - Bugs connus : tests marqués `xfail(strict=True)` avec la référence du bug (ex. A6 de
   `docs/plan_api_only_front.md`). Ils échouent (XPASS) dès que le bug est corrigé : retirer alors le marqueur.
-- L'émulateur Firestore grossit à chaque exécution (0,5 à 1,3 Go) et ne répond plus vers 2,5 Go : le redémarrer
-  entre deux séries d'exécutions, `docker restart alj-dev-firebase-emulator-1` (la suite réinitialise les données
-  de toute façon). La CI part d'un conteneur neuf à chaque exécution.
 - Déboguer : `--headed --slowmo 300`, ou `--tracing retain-on-failure` puis
-  `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux du serveur et du seed :
-  `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
+  `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux de la pile, du serveur et du seed :
+  `test-results/stack.log`, `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
 - En CI, en cas d'échec : artefact `e2e-results` (traces, captures, vidéos, journaux serveur et Docker).
 
 ## Fichiers

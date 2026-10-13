@@ -1,11 +1,13 @@
 """
 Fixtures of the e2e suite (Playwright, pytest-playwright).
 
-Session: check the dev stack (docker compose), seed the emulator, start the server in dev mode
-on E2E_PORT (default 8090). Every browser context blocks service workers: sw.js caches the
-emulator hosts (localhost:9099/8081) cache-first, which would leak state between tests.
+Session: start the throwaway e2e stack (e2e/docker-compose.yml: Firebase emulator + Mailpit on
+their own ports), seed it, start the fake HelloAsso and the server in dev mode on E2E_PORT
+(default 8090); the stack is removed at the end (E2E_KEEP_STACK=1 keeps it). The dev stack of
+dev/docker-compose.yml and its data are never touched.
 
-Running the suite RESETS the local emulator data (same as dev/seed/seed_emulator.py).
+Every browser context blocks service workers: sw.js caches the emulator hosts cache-first, which
+would leak state between tests.
 """
 import os
 from pathlib import Path
@@ -23,19 +25,25 @@ PHONE_DEVICE = "Pixel 7"
 
 
 @pytest.fixture(scope="session")
-def dev_stack():
-    missing = stack.missing_services()
-    if missing:
-        pytest.fail(f"dev stack not running ({', '.join(missing)}). From code_source/, run: "
-                    "docker compose -f dev/docker-compose.yml up -d", pytrace=False)
-
-
-@pytest.fixture(scope="session")
 def e2e_logs(pytestconfig) -> Path:
-    """Seed and server logs, next to the Playwright artifacts (uploaded by the CI on failure)."""
+    """Stack, seed and server logs, next to the Playwright artifacts (uploaded by the CI on failure)."""
     folder = Path(pytestconfig.getoption("--output")).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     return folder
+
+
+@pytest.fixture(scope="session")
+def e2e_stack(e2e_logs):
+    """Fresh emulator + Mailpit for the run: the emulator's memory grows with use, and a run
+    must not reset the developer's dev data."""
+    log_path = e2e_logs / "stack.log"
+    try:
+        stack.start_stack(log_path)
+    except (RuntimeError, TimeoutError, OSError) as e:
+        pytest.fail(f"e2e stack (e2e/docker-compose.yml) did not start: {e}", pytrace=False)
+    yield
+    if os.environ.get("E2E_KEEP_STACK") != "1":
+        stack.stop_stack(log_path)
 
 
 @pytest.fixture(scope="session")
@@ -50,7 +58,7 @@ def fake_helloasso_server(e2e_logs, tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def server(dev_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request):
+def server(e2e_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request):
     data_dir = tmp_path_factory.mktemp("alj-data")
     env = stack.dev_environment(data_dir, **helloasso.SERVER_ENV)
     log_path = e2e_logs / "server.log"
@@ -120,7 +128,7 @@ def login_as():
 
 
 @pytest.fixture
-def mailpit(dev_stack) -> Mailpit:
+def mailpit(e2e_stack) -> Mailpit:
     client = Mailpit()
     client.clear()
     return client

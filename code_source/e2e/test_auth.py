@@ -5,13 +5,14 @@ import pytest
 from playwright.sync_api import expect
 
 from helpers.auth import ACCOUNTS
+from helpers.stack import AUTH_HOST
 
 
 def test_emulator_account_picker(page):
     """Real flow: office gate → /competitions?login=1 → emulator picker → back to the office."""
     page.goto("/bureau/")
     page.locator("#gate-login").click()
-    page.wait_for_url(re.compile(r"localhost:9099/emulator/auth/handler"))
+    page.wait_for_url(re.compile(re.escape(AUTH_HOST) + "/emulator/auth/handler"))
     page.get_by_text(ACCOUNTS["coach"].email).click()
     page.wait_for_url(re.compile(r"/bureau/$"))
     expect(page.locator("#who")).to_contain_text(ACCOUNTS["coach"].email)
