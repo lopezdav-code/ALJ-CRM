@@ -1,6 +1,8 @@
 import unittest
 import os
+import shutil
 import sys
+import tempfile
 
 # Ajustement du chemin pour importer les modules depuis 'src'
 _test_dir = os.path.dirname(os.path.abspath(__file__))
@@ -8,9 +10,45 @@ _src_dir = os.path.join(os.path.dirname(_test_dir), "src") if os.path.basename(_
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+from infrastructure.sqlite_repository import SqliteRepository
 from presence_sheet_generator import clean_filename, format_encadrants
 
+
+def _member(order_ref, last, first, tarif):
+    """HelloAsso item in the pipeline's canonical format (legacy keys)."""
+    return {
+        "order_ref": order_ref,
+        "order_date": "2026-08-20T10:00:00",
+        "status": "Validated",
+        "tarif_name": tarif,
+        "amount": 150.0,
+        "user_lastName": last,
+        "user_firstName": first,
+        "champ_Date de naissance de l'adhérent": "1990-05-15",
+    }
+
+
 class TestPresenceSheetGenerator(unittest.TestCase):
+
+    def setUp(self):
+        # The export endpoints read the database: use a seeded temporary one, never data/database.db.
+        self._original_db_path = SqliteRepository.get_db_path()
+        self._tmpdir = tempfile.mkdtemp(prefix="alj_presence_test_")
+        SqliteRepository.set_db_path(os.path.join(self._tmpdir, "database.db"))
+        SqliteRepository.setup_database()
+        SqliteRepository.save_planning_item({"groupe": "Adultes autonomes", "type": "autonome", "jour": "Mardi",
+                                             "horaires": "19h-22h", "helloasso_tarifs": ["Adultes autonomes"]})
+        SqliteRepository.save_planning_item({"groupe": "Loisir cours", "jour": "Lundi", "horaires": "18h-20h",
+                                             "encadrants": ["Camille DIDIER"], "helloasso_tarifs": ["Loisir cours"]})
+        SqliteRepository.upsert_members([
+            _member("ORD-1", "MARTIN", "Leo", "Adultes autonomes"),
+            _member("ORD-2", "DURAND", "Lea", "Loisir cours"),
+        ], "2026-2027")
+
+    def tearDown(self):
+        SqliteRepository.set_db_path(self._original_db_path)
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
     def test_clean_filename(self):
         """Vérifie le nettoyage des noms de fichiers de présence."""
         self.assertEqual(clean_filename("Adultes autonomes"), "Adultes_autonomes")

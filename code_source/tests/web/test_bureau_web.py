@@ -131,7 +131,34 @@ class TestBureauFiles(unittest.TestCase):
 
     def test_ffme_api_stats_and_export(self):
         """Vérifie le calcul des statistiques et le téléchargement du fichier CSV FFME."""
+        import shutil
+        import tempfile
+        from infrastructure.sqlite_repository import SqliteRepository
         from server import get_ffme_stats_api, export_ffme_api
+
+        # Seeded temporary database: never read data/database.db (absent in CI, personal data locally).
+        original_db_path = SqliteRepository.get_db_path()
+        tmpdir = tempfile.mkdtemp(prefix="alj_ffme_test_")
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        self.addCleanup(SqliteRepository.set_db_path, original_db_path)
+        SqliteRepository.set_db_path(os.path.join(tmpdir, "database.db"))
+        SqliteRepository.setup_database()
+        SqliteRepository.upsert_members([{
+            "order_ref": "ORD-1",
+            "order_date": "2026-08-20T10:00:00",
+            "status": "Validated",
+            "tarif_name": "Adultes autonomes",
+            "amount": 150.0,
+            "user_lastName": "MARTIN",
+            "user_firstName": "Leo",
+            "payer_email": "leo.martin@test.fr",
+            "champ_Date de naissance de l'adhérent": "1990-05-15",
+            "champ_Sexe": "M",
+            "champ_Adresse : numéro et nom de rue": "10 Rue des Fleurs",
+            "champ_Code postal": "69000",
+            "champ_Ville": "Lyon",
+            "champ_Téléphone ": "0612345678",
+        }], "2026-2027")
 
         # 1. Statistiques
         stats = get_ffme_stats_api("2026-2027")
@@ -144,8 +171,9 @@ class TestBureauFiles(unittest.TestCase):
         resp = export_ffme_api(season="2026-2027", include_termine=True)
         self.assertEqual(resp.headers.get("content-type"), "text/csv; charset=utf-8")
         self.assertIn("attachment", resp.headers.get("content-disposition", ""))
-        self.assertIn("numero de licence;nom;prenom", resp.body.decode("utf-8"))
-        self.assertGreater(len(resp.body), 1000)
+        csv_text = resp.body.decode("utf-8")
+        self.assertIn("numero de licence;nom;prenom", csv_text)
+        self.assertIn("MARTIN", csv_text)
 
     def test_adherents_page_imports_exist_in_modules(self):
         """Chaque symbole importé par adherents.html doit être exporté par alj-members.js et alj-filters.js."""
