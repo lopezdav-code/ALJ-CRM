@@ -35,6 +35,24 @@ class GoogleDriveClient:
             return result
         return None
 
+    @classmethod
+    def _iter_credential_candidates(cls, env_paths: list = None) -> list:
+        """Construit les candidats d'identifiants (client_id, client_secret, refresh_token) :
+        1. Le SecretStore (trousseau Windows prioritaire, puis .env chargé en mémoire),
+        2. Les fichiers .env sur disque (fraîchement écrits par l'assistant OAuth2)."""
+        if env_paths is None:
+            from paths import CODE_ROOT, ROOT_DIR
+            env_paths = [os.path.join(ROOT_DIR, ".env"), os.path.join(CODE_ROOT, ".env")]
+
+        candidates = []
+        stored = (
+            SecretStore.get_secret("GMAIL_CLIENT_ID"),
+            SecretStore.get_secret("GMAIL_CLIENT_SECRET"),
+            SecretStore.get_secret("GMAIL_REFRESH_TOKEN"),
+        )
+        if all(stored):
+            candidates.append(stored)
+
         for env_path in env_paths:
             env_vals = cls._parse_env_credentials(env_path)
             if env_vals:
