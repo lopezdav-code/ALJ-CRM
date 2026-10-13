@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import BrowserContext
 
-from helpers import stack
+from helpers import helloasso, stack
 from helpers.auth import login_as as _login_as
 from helpers.data import TestData
 from helpers.mailpit import Mailpit
@@ -39,11 +39,23 @@ def e2e_logs(pytestconfig) -> Path:
 
 
 @pytest.fixture(scope="session")
-def server(dev_stack, e2e_logs, tmp_path_factory, request):
+def fake_helloasso_server(e2e_logs, tmp_path_factory):
+    """Fake HelloAsso API (e2e/fakes/helloasso_fake.py), reached by the server in dev mode only."""
+    env = stack.dev_environment(tmp_path_factory.mktemp("fake-helloasso"))
+    srv = stack.ServerProcess(env, helloasso.FAKE_PORT, e2e_logs / "fake-helloasso.log", app="helloasso_fake:app",
+                              app_dir="e2e/fakes", health_path="/docs", check_env=False)
+    srv.start()
+    yield srv
+    srv.stop()
+
+
+@pytest.fixture(scope="session")
+def server(dev_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request):
     data_dir = tmp_path_factory.mktemp("alj-data")
-    env = stack.dev_environment(data_dir)
+    env = stack.dev_environment(data_dir, **helloasso.SERVER_ENV)
     log_path = e2e_logs / "server.log"
     stack.seed(env, log_path)
+    TestData(env).save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
     srv = stack.ServerProcess(env, int(os.environ.get("E2E_PORT", "8090")), log_path)
     srv.start()
     yield srv
@@ -118,3 +130,11 @@ def mailpit(dev_stack) -> Mailpit:
 def test_data(server) -> TestData:
     """Creates and reads competitions through the application's repository (helpers/data.py)."""
     return TestData(server.env)
+
+
+@pytest.fixture
+def fake_helloasso(fake_helloasso_server) -> helloasso.FakeHelloAsso:
+    """Empty fake HelloAsso: each test loads the forms and items it needs (fake.set(items))."""
+    fake = helloasso.FakeHelloAsso()
+    fake.clear()
+    return fake

@@ -98,25 +98,29 @@ def tail(path: Path, lines: int = 60) -> str:
 
 class ServerProcess:
     """uvicorn server:app in dev mode, bound to 127.0.0.1 (local_guard_middleware only accepts
-    loopback Host headers, so tests use http://localhost:<port>)."""
+    loopback Host headers, so tests use http://localhost:<port>). Also runs the fake services
+    (app="helloasso_fake:app", app_dir="e2e/fakes", check_env=False)."""
 
-    def __init__(self, env: dict, port: int, log_path: Path):
+    def __init__(self, env: dict, port: int, log_path: Path, app: str = "server:app", app_dir: str = "src",
+                 health_path: str = "/health", check_env: bool = True):
         self.env = env
         self.port = port
         self.log_path = log_path
         self.url = f"http://localhost:{port}"
+        self.app, self.app_dir, self.health_path, self.check_env = app, app_dir, health_path, check_env
         self._process = None
         self._log = None
 
     def start(self) -> None:
-        run_python(["dev/check_env.py"], self.env, self.log_path, timeout=60)
+        if self.check_env:
+            run_python(["dev/check_env.py"], self.env, self.log_path, timeout=60)
         self._log = open(self.log_path, "a", encoding="utf-8")
         self._process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "server:app", "--app-dir", "src",
+            [sys.executable, "-m", "uvicorn", self.app, "--app-dir", self.app_dir,
              "--host", "127.0.0.1", "--port", str(self.port)],
             cwd=CODE_SOURCE, env=self.env, stdout=self._log, stderr=subprocess.STDOUT)
         try:
-            wait_until_up(self.url + "/health", timeout=60, process=self._process)
+            wait_until_up(self.url + self.health_path, timeout=60, process=self._process)
         except (RuntimeError, TimeoutError) as e:
             self.stop()
             raise RuntimeError(f"server did not start: {e}\n{tail(self.log_path)}") from e

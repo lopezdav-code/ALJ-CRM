@@ -40,8 +40,10 @@ Connexion : le bouton « Se connecter » ouvre le sélecteur de comptes de l'ém
   (`docker compose -f dev/docker-compose.yml down`) et les recharge au démarrage.
   Relancer le seed repart de zéro (et vide le cache `data-dev/` du serveur).
 - **Règles** : l'émulateur applique le vrai `firestore.rules` (monté en lecture seule).
-- **HelloAsso** : `/api/dashboard` et la synchro HelloAsso appellent toujours l'API HelloAsso
-  réelle (lecture) si des identifiants sont configurés ; sans eux, ces écrans sont en erreur.
+- **HelloAsso** : `/api/dashboard` et la synchro HelloAsso appellent l'API HelloAsso réelle (lecture)
+  si des identifiants sont configurés ; sans eux, ces écrans sont en erreur. En mode dev uniquement,
+  `HELLOASSO_API_BASE_URL` / `HELLOASSO_OAUTH_URL` les redirigent vers un faux HelloAsso local
+  (`e2e/fakes/helloasso_fake.py`, utilisé par les tests e2e) ; `check_env.py` refuse toute autre adresse.
 - **Service worker** : en cas de page figée après un changement, « Mettre à jour » sur le badge
   de version ou désenregistrer le SW (DevTools → Application).
 
@@ -72,10 +74,14 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
   (`e2e/helpers/auth.py`). E-mails : fixture `mailpit` (`e2e/helpers/mailpit.py`). Données de test : fixture
   `test_data` (`e2e/helpers/data.py`), qui passe par le dépôt de l'application ; chaque test crée ses propres
   compétitions sous un nom unique.
+- HelloAsso : fixture `fake_helloasso` (faux serveur sur le port `8095`, `e2e/helpers/helloasso.py`) ; chaque test
+  y charge ses propres paiements (`fake_helloasso.set([item(...)])`), le webhook est appelé avec
+  `HELLOASSO_WEBHOOK_TOKEN`.
 - Bugs connus : tests marqués `xfail(strict=True)` avec la référence du bug (ex. A6 de
   `docs/plan_api_only_front.md`). Ils échouent (XPASS) dès que le bug est corrigé : retirer alors le marqueur.
-- L'émulateur Firestore grossit à chaque exécution (≈ 400 Mo) : s'il ne répond plus après de nombreuses
-  exécutions, `docker restart alj-dev-firebase-emulator-1` (la suite réinitialise les données de toute façon).
+- L'émulateur Firestore grossit à chaque exécution (0,5 à 1,3 Go) et ne répond plus vers 2,5 Go : le redémarrer
+  entre deux séries d'exécutions, `docker restart alj-dev-firebase-emulator-1` (la suite réinitialise les données
+  de toute façon). La CI part d'un conteneur neuf à chaque exécution.
 - Déboguer : `--headed --slowmo 300`, ou `--tracing retain-on-failure` puis
   `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux du serveur et du seed :
   `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).

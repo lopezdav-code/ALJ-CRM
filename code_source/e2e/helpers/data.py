@@ -47,22 +47,30 @@ class TestData:
     def coaches(self) -> list:
         return self._run("result = Repo.list_coaches()")
 
+    def save_setting(self, key: str, value: str) -> None:
+        """Firestore app setting (e.g. HELLOASSO_ANNUAL_CAMPAIGN), as the desktop app saves it."""
+        self._run("Repo.save_app_setting(args['key'], args['value'])\nresult = True", key=key, value=value)
+
+    def helloasso_item(self, id_item: int):
+        """Mirror document of a HelloAsso item (link, ignore flag, comment), or None."""
+        return self._run("result = Repo.get_item(args['id'])", id=id_item)
+
     def create_coach(self, nom: str) -> int:
         return self._run("result = Repo.save_coach(args['nom'])", nom=nom)
 
     def create_competition(self, nom: str, date: str = "", prix: float = 10.0, participants=(),
-                           selected=(), coach_ids=()) -> int:
+                           selected=(), coach_ids=(), id_ffme: str = "") -> int:
         """Creates a competition; `participants` are member ids, those in `selected` participate."""
         return self._run("""
 ids = list(args['coach_ids']) + [None] * 3
-comp = Competition(nom=args['nom'], date_competition=args['date'], prix=args['prix'],
+comp = Competition(nom=args['nom'], date_competition=args['date'], prix=args['prix'], id_ffme=args['id_ffme'],
                    coach1_id=ids[0], coach2_id=ids[1], coach3_id=ids[2])
 cid = Repo.save_competition(comp)
 for aid in args['participants']:
     Repo.add_participant(cid, aid, selectionne=aid in args['selected'])
 result = cid
 """, nom=nom, date=date, prix=prix, participants=list(participants), selected=list(selected),
-            coach_ids=list(coach_ids))
+            coach_ids=list(coach_ids), id_ffme=id_ffme)
 
     def mark_paid(self, competition_id: int, adherent_id: int, amount: float, order_ref: str = "E2E-ORDER") -> None:
         """Records a HelloAsso payment (same call as the webhook)."""
