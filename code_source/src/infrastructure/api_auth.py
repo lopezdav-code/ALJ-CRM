@@ -289,7 +289,7 @@ async def auth_middleware(request, call_next):
 # ---------------------------------------------------------------------------
 # Local server without authentication (desktop app, local runs)
 # ---------------------------------------------------------------------------
-LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "testserver"})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 

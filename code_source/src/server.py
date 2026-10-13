@@ -1662,7 +1662,7 @@ def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/outi
     import urllib.parse
     from infrastructure.google_drive_client import GoogleDriveClient
     
-    client_id, _ = GoogleDriveClient.get_client_credentials()
+    client_id, _ = GoogleDriveClient.get_client_credentials(prefer_web=True)
     if not client_id:
         return HTMLResponse(
             "<h2>❌ Erreur de configuration Google OAuth2</h2>"
@@ -1674,7 +1674,11 @@ def google_auth_login(request: Request, return_to: Optional[str] = "/bureau/outi
     # Détecter dynamiquement la redirect_uri
     if not redirect_uri:
         proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        if "," in proto:
+            proto = proto.split(",")[0].strip()
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        if "," in host:
+            host = host.split(",")[0].strip()
         redirect_uri = f"{proto}://{host}/api/auth/google/callback"
 
     # Construire le state
@@ -1791,10 +1795,14 @@ def google_auth_callback(
 
     if not redirect_uri:
         proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        if "," in proto:
+            proto = proto.split(",")[0].strip()
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        if "," in host:
+            host = host.split(",")[0].strip()
         redirect_uri = f"{proto}://{host}/api/auth/google/callback"
 
-    client_id, client_secret = GoogleDriveClient.get_client_credentials()
+    client_id, client_secret = GoogleDriveClient.get_client_credentials(prefer_web=True)
     if not client_id or not client_secret:
         return _render_page(
             "Configuration incomplète",
@@ -1893,6 +1901,11 @@ def google_auth_callback(
         <div class="badge badge-success">Accès BDD & Gmail rétabli</div>
         <p>{email_display}</p>
         <p>{sync_display}</p>
+        <details style="margin:16px 0; text-align:left; font-size:12px; background:#F8FAFC; border:1px solid #CBD5E1; border-radius:8px; padding:10px 12px;">
+            <summary style="cursor:pointer; font-weight:600; color:#334155;">🔑 Nouveau Refresh Token (pour Cloud Run)</summary>
+            <p style="margin:6px 0 4px; color:#64748B; font-size:11.5px;">Le jeton a été synchronisé. Vous pouvez également copier cette valeur dans Cloud Run (GMAIL_REFRESH_TOKEN) :</p>
+            <input type="text" readonly value="{refresh_token}" style="width:100%; box-sizing:border-box; padding:6px 8px; font-family:monospace; font-size:11px; background:#FFF; border:1px solid #CBD5E1; border-radius:4px;" onclick="this.select();">
+        </details>
         <p style="font-size:13px; color:#64748B;">Redirection automatique vers le bureau dans quelques secondes…</p>
         <p><a href="{return_to}" class="btn">Retourner au bureau immédiatement</a></p>""",
         return_url=return_to,

@@ -107,14 +107,19 @@ affichée. Le prochain déploiement en production renvoie le trafic sur la nouve
 - La version de test utilise **les données Firestore et les secrets de production** : toute action
   (envoi d'e-mails, modification d'adhérents) y est réelle.
 - Un rollback ne restaure que le code, jamais les données.
-- Connexion sur l'URL de test (`Erreur 400 : redirect_uri_mismatch`) : la connexion Google passe par
-  le client OAuth `796572126711-npcue84…` (voir `web/competitions.html`). Une seule fois, dans la console
+- Connexion Google et renouvellement (`Erreur 400 : redirect_uri_mismatch`) : la connexion Google passe par
+  le client OAuth Web `796572126711-npcue84…` (projet `smart-amplifier-510811-n6`). Dans la console
   Google Cloud > API et services > Identifiants > ce client OAuth, ajouter :
-  - **Origines JavaScript autorisées** : `https://test---alj-escalade-api-….run.app`
-  - **URI de redirection autorisés** : `https://test---alj-escalade-api-….run.app/competitions`
+  - **Origines JavaScript autorisées** :
+    - Production : `https://alj-escalade-api-bdxfydatoa-ew.a.run.app`
+    - Test : `https://test---alj-escalade-api-bdxfydatoa-ew.a.run.app`
+  - **URI de redirection autorisés** :
+    - `https://alj-escalade-api-bdxfydatoa-ew.a.run.app/competitions`
+    - `https://alj-escalade-api-bdxfydatoa-ew.a.run.app/api/auth/google/callback`
+    - `https://test---alj-escalade-api-bdxfydatoa-ew.a.run.app/competitions`
+    - `https://test---alj-escalade-api-bdxfydatoa-ew.a.run.app/api/auth/google/callback`
 
-  L'URL de test ne change pas d'un déploiement `--test` à l'autre. La prise en compte peut prendre
-  quelques minutes.
+  La prise en compte par Google peut prendre quelques minutes.
 - Les webhooks HelloAsso arrivent toujours sur l'URL principale, donc sur la révision de production.
 - `firestore.rules` n'est **pas** déployé par ce script (`firebase deploy --only firestore:rules`) :
   les règles s'appliquent immédiatement à toute la production. Historique et retour arrière dans la

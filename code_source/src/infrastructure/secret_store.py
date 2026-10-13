@@ -15,10 +15,15 @@ except ImportError:
 
 SERVICE_NAME = "ALJ_Escalade_Manager"
 
+_FIRESTORE_SECRETS_CACHE: dict = {}
+_FIRESTORE_SECRETS_LOADED: bool = False
+
+
 class SecretStore:
     """
     Gère le stockage et la récupération sécurisée des secrets d'authentification.
     Tente d'utiliser le trousseau d'accès Windows via 'keyring' et se replie sur le fichier '.env'.
+    Sur Cloud Run, assure la persistance et la synchronisation avec Firestore (server_credentials).
     """
 
     @staticmethod
@@ -26,6 +31,7 @@ class SecretStore:
         """
         Récupère un secret sécurisé.
         Tente d'abord de le lire dans le keyring Windows, sinon se replie sur les variables d'environnement / .env.
+        Sur Cloud Run, vérifie également la collection server_credentials de Firestore.
         """
         if KEYRING_AVAILABLE:
             try:
@@ -34,7 +40,26 @@ class SecretStore:
                     return secret
             except Exception:
                 pass
-        
+
+        # Vérification Firestore sur Cloud Run
+        global _FIRESTORE_SECRETS_CACHE, _FIRESTORE_SECRETS_LOADED
+        is_cloud = bool(os.environ.get("K_SERVICE") or os.environ.get("K_CONFIGURATION"))
+        if is_cloud and not _FIRESTORE_SECRETS_LOADED:
+            _FIRESTORE_SECRETS_LOADED = True
+            try:
+                from infrastructure.firestore_client import FirestoreClient
+                doc = FirestoreClient.get_document("server_credentials", "google_oauth")
+                if doc:
+                    _FIRESTORE_SECRETS_CACHE = doc
+            except Exception:
+                pass
+
+        if _FIRESTORE_SECRETS_CACHE and key in ("GMAIL_REFRESH_TOKEN", "GMAIL_USER_EMAIL"):
+            field_map = {"GMAIL_REFRESH_TOKEN": "refresh_token", "GMAIL_USER_EMAIL": "user_email"}
+            target = field_map.get(key)
+            if target and _FIRESTORE_SECRETS_CACHE.get(target):
+                return str(_FIRESTORE_SECRETS_CACHE[target]).strip()
+
         # Repli sur le .env / Variables d'environnement
         return os.getenv(key, "").strip()
 
@@ -43,6 +68,7 @@ class SecretStore:
         """
         Enregistre un secret de manière sécurisée.
         Tente de l'écrire dans le keyring Windows, et met également à jour le .env pour la persistance locale.
+        Sur Cloud Run, synchronise avec Firestore (server_credentials).
         """
         success_keyring = False
         if KEYRING_AVAILABLE:
@@ -51,6 +77,30 @@ class SecretStore:
                 success_keyring = True
             except Exception:
                 pass
+
+        # Persistance Firestore sur Cloud Run
+        is_cloud = bool(os.environ.get("K_SERVICE") or os.environ.get("K_CONFIGURATION"))
+        if is_cloud and key in ("GMAIL_REFRESH_TOKEN", "GMAIL_USER_EMAIL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET"):
+            field_map = {
+                "GMAIL_REFRESH_TOKEN": "refresh_token",
+                "GMAIL_USER_EMAIL": "user_email",
+                "GMAIL_CLIENT_ID": "client_id",
+                "GMAIL_CLIENT_SECRET": "client_secret",
+            }
+            target = field_map.get(key)
+            if target:
+                global _FIRESTORE_SECRETS_CACHE
+                _FIRESTORE_SECRETS_CACHE[target] = value
+                try:
+                    from infrastructure.firestore_client import FirestoreClient
+                    import datetime
+                    FirestoreClient.update_fields(
+                        "server_credentials",
+                        "google_oauth",
+                        {target: value, "updated_at": datetime.datetime.utcnow().isoformat()}
+                    )
+                except Exception:
+                    pass
         
         # Enregistrement dans le .env pour assurer la persistance et la compatibilité historique
         # Racine du pack portable si un .env y vit déjà (survit aux mises à jour qui

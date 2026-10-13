@@ -180,6 +180,23 @@ class TestGoogleAuthWeb(unittest.TestCase):
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["user_email"], "admin@alj-escalade.fr")
 
+    @patch("glob.glob")
+    @patch("builtins.open")
+    def test_get_client_credentials_prefer_web(self, mock_open, mock_glob):
+        """Vérifie que prefer_web privilégie la configuration 'web' sur 'installed'."""
+        from infrastructure.google_drive_client import GoogleDriveClient
+        from infrastructure.secret_store import SecretStore
+        mock_glob.return_value = ["fake_client_secret.json"]
+        fake_data = {
+            "web": {"client_id": "mock_web_cid", "client_secret": "mock_web_sec"},
+            "installed": {"client_id": "mock_inst_cid", "client_secret": "mock_inst_sec"}
+        }
+        with patch.object(SecretStore, "get_secret", return_value=""):
+            with patch("json.load", return_value=fake_data):
+                cid, sec = GoogleDriveClient.get_client_credentials(prefer_web=True)
+                self.assertEqual(cid, "mock_web_cid")
+                self.assertEqual(sec, "mock_web_sec")
+
 
 if __name__ == "__main__":
     unittest.main()

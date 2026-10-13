@@ -226,7 +226,9 @@ if [ "$MODE" = "test" ]; then
     echo "ℹ️  Sign-in fails with redirect_uri_mismatch until this URL is registered on the Google OAuth client"
     echo "   (Cloud console > APIs & Services > Credentials > client 796572126711-npcue84...):"
     echo "   - Authorized JavaScript origin: $TEST_URL"
-    echo "   - Authorized redirect URI     : $TEST_URL/competitions"
+    echo "   - Authorized redirect URIs    :"
+    echo "       $TEST_URL/competitions"
+    echo "       $TEST_URL/api/auth/google/callback"
 else
     # A previous rollback pins traffic to a fixed revision: make sure the new one serves it
     gcloud run services update-traffic "$SERVICE_NAME" "${GCLOUD_TARGET[@]}" --to-latest > /dev/null
@@ -234,6 +236,12 @@ else
     echo "=============================================================================="
     URL=$(service_url)
     print_links "$URL"
+    echo ""
+    echo "ℹ️  Google OAuth configuration (Cloud console > APIs & Services > Credentials > client 796572126711-npcue84...):"
+    echo "   - Authorized JavaScript origin: $URL"
+    echo "   - Authorized redirect URIs    :"
+    echo "       $URL/competitions"
+    echo "       $URL/api/auth/google/callback"
     echo ""
     echo "🔔 HelloAsso webhook URL: $URL/webhooks/helloasso"
     if [ -n "$PREVIOUS_REVISION" ]; then

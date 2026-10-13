@@ -35,40 +35,30 @@ class GoogleDriveClient:
             return result
         return None
 
-    @classmethod
-    def _iter_credential_candidates(cls, env_paths: list = None) -> list:
-        """Construit les candidats d'identifiants (client_id, client_secret, refresh_token) :
-        1. Le SecretStore (trousseau Windows prioritaire, puis .env chargé en mémoire),
-        2. Les fichiers .env sur disque (fraîchement écrits par l'assistant OAuth2) —
-           permet de réparer automatiquement un trousseau contenant un refresh token révoqué."""
-        if env_paths is None:
-            from paths import CODE_ROOT, ROOT_DIR
-            env_paths = [os.path.join(ROOT_DIR, ".env"), os.path.join(CODE_ROOT, ".env")]
-
-        candidates = []
-        stored = (
-            SecretStore.get_secret("GMAIL_CLIENT_ID"),
-            SecretStore.get_secret("GMAIL_CLIENT_SECRET"),
-            SecretStore.get_secret("GMAIL_REFRESH_TOKEN"),
-        )
-        if all(stored):
-            candidates.append(stored)
-
         for env_path in env_paths:
             env_vals = cls._parse_env_credentials(env_path)
             if env_vals:
                 candidate = (env_vals["client_id"], env_vals["client_secret"], env_vals["refresh_token"])
                 if candidate not in candidates:
                     candidates.append(candidate)
+
         return candidates
 
     @classmethod
-    def get_client_credentials(cls) -> tuple:
-        """Récupère client_id et client_secret depuis SecretStore ou les fichiers client_secret_*.json."""
+    def get_client_credentials(cls, prefer_web: bool = False) -> tuple:
+        """Récupère client_id et client_secret depuis SecretStore ou les fichiers client_secret_*.json.
+
+        Sur Cloud Run ou si prefer_web=True, privilégie le client OAuth Web sur le client Desktop
+        (l'ancien client Desktop rejetant les redirections web HTTP/HTTPS avec redirect_uri_mismatch).
+        """
         cid = SecretStore.get_secret("GMAIL_CLIENT_ID")
         sec = SecretStore.get_secret("GMAIL_CLIENT_SECRET")
+
+        is_cloud_run = bool(os.environ.get("K_SERVICE") or os.environ.get("K_CONFIGURATION"))
+
         if cid and sec:
-            return cid, sec
+            if not (prefer_web or is_cloud_run) or "224808708472" not in cid:
+                return cid, sec
 
         import glob
         import json
@@ -80,13 +70,12 @@ class GoogleDriveClient:
                     try:
                         with open(fpath, "r", encoding="utf-8") as f:
                             data = json.load(f)
-                        key = "installed" if "installed" in data else ("web" if "web" in data else None)
+                        key = "web" if ((prefer_web or is_cloud_run) and "web" in data) else ("installed" if "installed" in data else ("web" if "web" in data else None))
                         if key and "client_id" in data[key] and "client_secret" in data[key]:
-                            cid = data[key]["client_id"]
-                            sec = data[key]["client_secret"]
-                            return cid, sec
+                            return data[key]["client_id"], data[key]["client_secret"]
                     except Exception:
                         pass
+
         return cid, sec
 
     @classmethod

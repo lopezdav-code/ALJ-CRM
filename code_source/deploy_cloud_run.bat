@@ -96,9 +96,15 @@ echo.
 echo 🏥 Sonde de santé :
 echo    %SERVICE_URL%/health
 echo.
+echo ℹ️ Configuration Google OAuth (Console GCP ^> API et services ^> Identifiants ^> client 796572126711-npcue84...) :
+echo    - Origine JavaScript autorisée : %SERVICE_URL%
+echo    - URI de redirection autorisés :
+echo        %SERVICE_URL%/competitions
+echo        %SERVICE_URL%/api/auth/google/callback
+echo.
 echo ==============================================================================
 echo ⚙️ Pour injecter ou mettre à jour vos identifiants d'API en production :
-echo    gcloud run services update %SERVICE_NAME% --region %REGION% --update-env-vars CLIENT_ID=xxx,CLIENT_SECRET=yyy
+echo    gcloud run services update %SERVICE_NAME% --region %REGION% --update-env-vars GMAIL_CLIENT_ID=796572126711-npcue84vd52prmtjik0bdp6ng6ggpie8.apps.googleusercontent.com,GMAIL_CLIENT_SECRET=xxx
 echo ==============================================================================
 echo.
 pause
