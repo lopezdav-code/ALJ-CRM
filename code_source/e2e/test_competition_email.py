@@ -8,9 +8,6 @@ from helpers.bureau import open_competitions, select_competition
 from helpers.data import unique_name
 from helpers.mobile import accept_dialogs, open_app, open_participants
 
-KNOWN_BUG_A6 = pytest.mark.xfail(strict=True, reason="bug A6: the office page reads `email_primary`, "
-                                                      "the `adherents` projection stores `email`")
-
 
 @pytest.fixture
 def competition(test_data):
@@ -45,7 +42,6 @@ def test_mobile_campaign(mobile_page, mailpit, competition):
     _assert_sent_to_selected(mailpit, competition)
 
 
-@KNOWN_BUG_A6
 def test_office_campaign(page, mailpit, competition):
     open_competitions(page)
     accept_dialogs(page)

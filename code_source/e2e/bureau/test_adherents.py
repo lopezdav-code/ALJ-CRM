@@ -93,12 +93,13 @@ def test_csv_export(page, tmp_path):
 
 def test_edit_member(page, people):
     member = people[1]
-    phone = "+44 20 " + str(uuid.uuid4().int)[:8]
+    digits = "06" + str(uuid.uuid4().int)[:8]
+    phone = " ".join(digits[i:i + 2] for i in range(0, 10, 2))   # as fmtPhone (alj-members.js) shows it
     open_members(page)
     accept_dialogs(page)
     select(page, member).locator("#btn-action-edit").click()
     expect(page.locator("#member-edit-modal")).to_be_visible()
-    page.locator("#edit-phone").fill(phone)
+    page.locator("#edit-phone").fill(digits)
     page.locator("#edit-badge-rouge").select_option("Oui")
     page.locator("#edit-save-btn").click()
     expect(page.locator("#toast")).to_contain_text("mise à jour avec succès")

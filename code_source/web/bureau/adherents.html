@@ -468,7 +468,8 @@ startBureau({
             </div>
             <div style="margin-bottom:8px;">
               <label class="fld">📍 Adresse (N° et rue)</label>
-              <input type="text" id="edit-address" class="search-input" placeholder="12 rue de la Paix" style="width:100%;">
+              <!-- textarea: stored addresses can span several lines, which an <input> would merge on save -->
+              <textarea id="edit-address" class="search-input" rows="2" placeholder="12 rue de la Paix" style="width:100%; resize:vertical; font-family:inherit; font-size:12px; line-height:1.4; padding:8px 10px;"></textarea>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 2fr; gap:12px; margin-bottom:12px;">
               <div>
