@@ -1046,6 +1046,36 @@ class SqliteRepository:
                             WHERE id = (SELECT order_id FROM purchases WHERE id = ?)
                         """, (new_status, norm, now_iso, int(purchase_id)))
 
+            # 4. Mise à jour des commentaires / correctifs (purchases)
+            comment_val = None
+            if "commentaires_correctif" in fields:
+                comment_val = fields["commentaires_correctif"]
+            elif "commentaire" in fields:
+                comment_val = fields["commentaire"]
+            elif "comment" in fields:
+                comment_val = fields["comment"]
+
+            if comment_val is not None:
+                new_comment = str(comment_val or "").strip()
+                if purchase_id:
+                    cursor.execute("""
+                        UPDATE purchases
+                        SET commentaires_correctif = ?, updated_at = ?, is_modified = 'Oui'
+                        WHERE id = ?
+                    """, (new_comment, now_iso, int(purchase_id)))
+                elif order_ref and resolved_uid:
+                    cursor.execute("""
+                        UPDATE purchases
+                        SET commentaires_correctif = ?, updated_at = ?, is_modified = 'Oui'
+                        WHERE user_id = ? AND order_id IN (SELECT id FROM orders WHERE order_ref = ?)
+                    """, (new_comment, now_iso, int(resolved_uid), str(order_ref).strip()))
+                elif resolved_uid:
+                    cursor.execute("""
+                        UPDATE purchases
+                        SET commentaires_correctif = ?, updated_at = ?, is_modified = 'Oui'
+                        WHERE user_id = ?
+                    """, (new_comment, now_iso, int(resolved_uid)))
+
             conn.commit()
             print(f"[SQLITE] Adhérent #{resolved_uid} mis à jour avec succès : {list(fields.keys())}")
             return True, ""

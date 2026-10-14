@@ -97,7 +97,7 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("slot-modal", html)
 
     def test_parametres_file_structure(self):
-        """La nouvelle page parametres.html doit contenir l'outil de connexion Google et la gestion SQLite."""
+        """La nouvelle page parametres.html doit contenir l'outil de connexion Google, la gestion SQLite et le batch résultats."""
         html = _read(os.path.join(BUREAU, "parametres.html"))
         self.assertIn("alj-shell.js", html)
         self.assertIn("alj-firebase.js", html)
@@ -108,6 +108,51 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("btn-full-rebuild-sqlite", html)
         self.assertIn("sqlite-status-badge", html)
         self.assertIn("sqlite-file-info", html)
+        # Nouveaux éléments du batch de résultats MyCompet
+        self.assertIn("results-notif-email", html)
+        self.assertIn("btn-save-notif-email", html)
+        self.assertIn("btn-run-results-batch", html)
+        self.assertIn("results-batch-last-run", html)
+        self.assertIn("results-batch-report", html)
+        self.assertIn("Suivi Automatique des Résultats MyCompet", html)
+
+    def test_competitions_results_cron_and_settings_endpoints(self):
+        """Vérifie les endpoints de configuration et de cron du batch des résultats MyCompet."""
+        from server import (
+            app,
+            get_competitions_results_settings_api,
+            update_competitions_results_settings_api,
+            api_cron_fetch_competition_results
+        )
+
+        # 1. GET /api/settings/competitions-results
+        res = get_competitions_results_settings_api()
+        self.assertEqual(res.get("status"), "success")
+        self.assertIn("notification_email", res)
+        self.assertIn("@", res["notification_email"])
+        self.assertIn("cron_schedule", res)
+
+        # 2. POST /api/settings/competitions-results
+        up_res = update_competitions_results_settings_api({"notification_email": "test.notif@alj-jonage.fr"})
+        self.assertEqual(up_res.get("status"), "success")
+        self.assertEqual(up_res.get("notification_email"), "test.notif@alj-jonage.fr")
+
+        # Rétablir l'adresse par défaut
+        update_competitions_results_settings_api({"notification_email": "david.lopez@alj-jonage.fr"})
+
+        # 3. POST /api/competitions/cron/fetch-results
+        with patch("infrastructure.competition_results_batch_service.CompetitionResultsBatchService.run_daily_batch") as mock_batch:
+            mock_batch.return_value = {
+                "status": "success",
+                "competitions_checked": 0,
+                "competitions_updated": 0,
+                "email_sent": False
+            }
+            client = TestClient(app)
+            cron_resp = client.post("/api/competitions/cron/fetch-results?force=true")
+            self.assertEqual(cron_resp.status_code, 200)
+            self.assertEqual(cron_resp.json().get("status"), "success")
+            mock_batch.assert_called_once()
 
     def test_cloud_db_status_endpoint(self):
         """Vérifie l'endpoint GET /api/cloud-db/status."""
@@ -175,6 +220,23 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("numero de licence;nom;prenom", csv_text)
         self.assertIn("MARTIN", csv_text)
 
+    def test_pivot_table_configuration_and_fields(self):
+        """Vérifie la présence du filtre Âge, des colonnes Statut & Sexe, et de l'exclusion par défaut d'Annulé."""
+        from server import get_pivot_table
+        resp = get_pivot_table(season="2026-2027")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.body.decode("utf-8")
+
+        # 1. Vérification de la configuration PivotTable.js
+        self.assertIn('"Statut", "Sexe"', html)
+        self.assertIn('"Statut": ["Annulé"]', html)
+        self.assertIn('"Groupe / Tarif": ["Liste d\'attente cours"]', html)
+
+        # 2. Vérification des attributs dans les données
+        self.assertIn('"Âge"', html)
+        self.assertIn('"Sexe"', html)
+        self.assertIn('"Statut"', html)
+
     def test_adherents_page_imports_exist_in_modules(self):
         """Chaque symbole importé par adherents.html doit être exporté par alj-members.js et alj-filters.js."""
         html = _read(os.path.join(BUREAU, "adherents.html"))
@@ -202,6 +264,39 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('data-sort="order_date"', html)
         self.assertIn("Date d'inscription", html)
         self.assertIn("order_date", filters_js)
+
+    def test_adherents_columns_diplome_and_city(self):
+        """Vérifie le masquage des colonnes Tarif/Catégorie et l'ajout des colonnes Diplôme et Ville."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        members_js = _read(os.path.join(SHARED, "alj-members.js"))
+        filters_js = _read(os.path.join(SHARED, "alj-filters.js"))
+
+        # 1. Vérification des colonnes du tableau
+        thead_match = re.search(r"<table[^>]*id=\"members-table\"[^>]*>.*?<thead>(.*?)</thead>", html, re.S)
+        self.assertIsNotNone(thead_match)
+        thead = thead_match.group(1)
+
+        # Les colonnes Tarif et Catégorie doivent être masquées (absentes du thead)
+        self.assertNotIn('data-sort="tarif_name"', thead)
+        self.assertNotIn('data-sort="categorie"', thead)
+
+        # Les nouvelles colonnes Diplôme et Ville doivent être présentes
+        self.assertIn('data-sort="diplome"', thead)
+        self.assertIn('data-sort="city"', thead)
+        self.assertIn("Diplôme", thead)
+        self.assertIn("Ville", thead)
+
+        # 2. Pictogrammes / badges attendus
+        self.assertIn("🔴", html)  # Badge rouge (rond rouge)
+        self.assertIn("🧗", html)  # Autonomie bloc (picto du grimpeur)
+        self.assertIn("🟠", html)  # Passeport Orange (rond orange)
+
+        # 3. Helpers et propagation des champs
+        self.assertIn("raw_passports", members_js)
+        self.assertIn("getMemberDiplomes", members_js)
+        self.assertIn("export function getMemberDiplomes", members_js)
+        self.assertIn("diplome", filters_js)
+        self.assertIn("ville", filters_js)
 
     def test_adherents_email_modal_and_api_wiring(self):
         """L'Étape 2 intègre la modale d'e-mail et le câblage aux endpoints d'e-mail."""
@@ -339,7 +434,8 @@ class TestBureauFiles(unittest.TestCase):
         html = _read(os.path.join(BUREAU, "adherents.html"))
         for elem in ("btn-action-edit", "member-edit-modal", "edit-modal-close", "edit-cancel-btn",
                       "edit-save-btn", "edit-badge-rouge", "edit-autonomie-bloc",
-                      "edit-tarifs-container", "edit-email-primary", "edit-email-secondary", "edit-phone"):
+                      "edit-tarifs-container", "edit-email-primary", "edit-email-secondary", "edit-phone",
+                      "edit-commentaire", "btn-insert-comment-date"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn('apiFetch("/api/members/update"', html)
 
@@ -390,7 +486,8 @@ class TestBureauFiles(unittest.TestCase):
                     "email_secondary": "parent.luc@example.com",
                     "phone": "06 99 88 77 66",
                     "tarif_name": "Cours Ados 1 (Lundi)",
-                    "status": "Annulé"
+                    "status": "Annulé",
+                    "commentaires_correctif": "Certificat médical papier fourni en main propre le 14/10."
                 }
             }
 
@@ -406,11 +503,12 @@ class TestBureauFiles(unittest.TestCase):
             self.assertEqual(u["email_secondary"], "parent.luc@example.com")
             self.assertEqual(u["phone"], "06 99 88 77 66")
 
-            # Vérification dans la table purchases (créneau & statut)
+            # Vérification dans la table purchases (créneau & statut & commentaire)
             p = conn.execute("SELECT * FROM purchases WHERE id = 70").fetchone()
             self.assertEqual(p["tarif_name"], "Cours Ados 1 (Lundi)")
             self.assertEqual(p["status"], "Annulé")
             self.assertEqual(p["status_normalized"], "Annulé")
+            self.assertEqual(p["commentaires_correctif"], "Certificat médical papier fourni en main propre le 14/10.")
             self.assertEqual(p["is_modified"], "Oui")
 
             # Vérification dans la table orders (statut de commande)
@@ -539,6 +637,9 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn("part-chip-all", html)
         self.assertIn("part-chip-selected", html)
         self.assertIn("part-chip-unpaid", html)
+        self.assertIn("part-chip-non-invite", html)
+        self.assertIn("btn-remove-all-non-invites", html)
+        self.assertIn("Retirer tous les compétiteurs non invités", html)
         self.assertIn("part-status-select", html)
         self.assertIn("⚠️ Absent", html)
         self.assertIn("🔄 Report", html)

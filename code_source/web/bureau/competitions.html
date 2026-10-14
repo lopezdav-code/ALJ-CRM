@@ -989,6 +989,15 @@ startBureau({
       const nbParticipe = parts.filter(p => p.selectionne).length;
       const nbEnAttente = parts.filter(p => p.statut_paiement === "en_attente").length;
 
+      function isPartNonInvite(p) {
+        const st = p.statut_paiement || "non_invite";
+        const hasPaid = st === "paye" || Number(p.montant_paye || 0) > 0 || Boolean(p.commande_helloasso) || st === "annule_reporte" || st === "annule_perdu";
+        return !p.selectionne && (st === "non_invite" || !st) && !hasPaid;
+      }
+
+      const nonInvites = parts.filter(isPartNonInvite);
+      const nbNonInvites = nonInvites.length;
+
       function getFilteredParts() {
         const q = ($("part-filter-input")?.value || "").toLowerCase().trim();
         let list = parts;
@@ -996,6 +1005,8 @@ startBureau({
           list = list.filter(p => p.selectionne);
         } else if (partFilterStatus === "unpaid") {
           list = list.filter(p => p.statut_paiement === "en_attente");
+        } else if (partFilterStatus === "non_invite") {
+          list = list.filter(isPartNonInvite);
         }
         if (q) {
           list = list.filter(p => `${p.nom} ${p.prenom} ${p.num_licence || ''}`.toLowerCase().includes(q));
@@ -1017,7 +1028,17 @@ startBureau({
               <button class="filter-chip${partFilterStatus === 'unpaid' ? ' active' : ''}" id="part-chip-unpaid">
                 ⏳ Paiement en attente (${nbEnAttente})
               </button>
+              <button class="filter-chip${partFilterStatus === 'non_invite' ? ' active' : ''}" id="part-chip-non-invite">
+                🔘 Non invités (${nbNonInvites})
+              </button>
             </div>
+          </div>
+          <div>
+            ${isAdmin ? `
+              <button class="btn btn-muted btn-mini" id="btn-remove-all-non-invites" ${nbNonInvites === 0 ? "disabled" : ""} style="color:var(--red); border-color:#FECACA; background:${nbNonInvites === 0 ? '#F8FAFC' : '#FEF2F2'}; cursor:${nbNonInvites === 0 ? 'not-allowed' : 'pointer'}; font-weight:600; padding:6px 12px; font-size:12px;" title="Retirer définitivement de cette compétition tous les athlètes non invités">
+                🗑️ Retirer tous les compétiteurs non invités (${nbNonInvites})
+              </button>
+            ` : ""}
           </div>
         </div>
 
@@ -1044,8 +1065,8 @@ startBureau({
             <div style="background:#fff; border:1px solid #FEE2E2; border-left:3px solid var(--red); border-radius:6px; padding:8px 10px;">
               <b style="color:var(--red);">3. ✕ Action (Retirer de l'épreuve) :</b>
               <div style="color:#475569; margin-top:2px;">
-                <b>• Quand l'utiliser :</b> En cas d'erreur de saisie (athlète ajouté par inadvertance à la liste).<br>
-                <b>• Conséquences :</b> Supprime la ligne de cette compétition.<br>
+                <b>• Quand l'utiliser :</b> En cas d'erreur de saisie (athlète ajouté par inadvertance à la liste) ou purge des non-invités.<br>
+                <b>• Conséquences :</b> Supprime la ligne de cette compétition (vous pouvez utiliser le bouton « Retirer tous les compétiteurs non invités » pour nettoyer la liste en un clic).<br>
                 <i>⚠️ Si l'athlète a déjà payé : ne cliquez pas sur ✕ ! Modifiez plutôt son paiement en « Annulé — report » ou « Annulé — perdu » pour conserver la trace comptable.</i>
               </div>
             </div>
@@ -1079,6 +1100,7 @@ startBureau({
         $("part-chip-all")?.classList.toggle("active", partFilterStatus === "all");
         $("part-chip-selected")?.classList.toggle("active", partFilterStatus === "selected");
         $("part-chip-unpaid")?.classList.toggle("active", partFilterStatus === "unpaid");
+        $("part-chip-non-invite")?.classList.toggle("active", partFilterStatus === "non_invite");
         $("parts-tbody").innerHTML = renderParticipantsRows(comp, getFilteredParts());
         attachParticipantListeners(comp);
       }
@@ -1098,9 +1120,35 @@ startBureau({
         updatePartFilterChips();
       });
 
+      $("part-chip-non-invite")?.addEventListener("click", () => {
+        partFilterStatus = "non_invite";
+        updatePartFilterChips();
+      });
+
       $("part-filter-input")?.addEventListener("input", () => {
         $("parts-tbody").innerHTML = renderParticipantsRows(comp, getFilteredParts());
         attachParticipantListeners(comp);
+      });
+
+      // Bouton de suppression groupée des compétiteurs non invités
+      $("btn-remove-all-non-invites")?.addEventListener("click", async () => {
+        const toRemove = (comp.participants || []).filter(isPartNonInvite);
+        if (!toRemove.length) {
+          toast("ℹ️ Aucun compétiteur non invité à retirer.");
+          return;
+        }
+
+        const count = toRemove.length;
+        const msg = `Retirer les ${count} compétiteur${count > 1 ? "s" : ""} non invité${count > 1 ? "s" : ""} de cette compétition ?\n\n(L'adhérent reste dans la base du club et pourra être réinscrit à tout moment).`;
+        if (!confirm(msg)) return;
+
+        const removeIds = new Set(toRemove.map(p => String(p.adherent_id)));
+        comp.participants = (comp.participants || []).filter(p => !removeIds.has(String(p.adherent_id)));
+
+        await saveCompParticipants(comp);
+        renderActiveCompWorkspace();
+        renderCompsList();
+        toast(`🗑️ ${count} compétiteur${count > 1 ? "s" : ""} non invité${count > 1 ? "s" : ""} retiré${count > 1 ? "s" : ""} de la compétition.`);
       });
 
       attachParticipantListeners(comp);

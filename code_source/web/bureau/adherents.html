@@ -27,7 +27,8 @@ import {
   fmtDate,
   telHref,
   STATUS_COLORS,
-  normalizeStatus
+  normalizeStatus,
+  getMemberDiplomes
 } from "/static-web/alj-members.js";
 import {
   FILTER_KEY,
@@ -52,7 +53,7 @@ startBureau({
       <div class="toolbar-wrap">
         <div class="toolbar-row">
           <select id="season-select" class="select-input" title="Choisir la saison"></select>
-          <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher (nom, prénom, tarif, licence, e-mail, téléphone)…">
+          <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher (nom, prénom, ville, tarif, licence, e-mail, tel)…">
           <button class="btn btn-muted btn-mini" id="toggle-filter-box" title="Afficher ou masquer la sélection des créneaux">📂 Créneaux / Tarifs</button>
           <button class="btn btn-muted btn-mini" id="export-csv-btn" title="Télécharger la liste actuellement filtrée en fichier CSV">📥 Export CSV</button>
           <a href="/bureau/outils?tab=ffme" class="btn btn-muted btn-mini" style="text-decoration:none;" title="Ouvrir l'outil d'exportation officiel FFME">🇫🇷 Export FFME</a>
@@ -88,10 +89,10 @@ startBureau({
                   <th data-sort="last_name">Nom <span class="sort-ico">▲</span></th>
                   <th data-sort="first_name">Prénom <span class="sort-ico"></span></th>
                   <th data-sort="order_date">Date d'inscription <span class="sort-ico"></span></th>
-                  <th data-sort="categorie">Catégorie <span class="sort-ico"></span></th>
-                  <th data-sort="tarif_name">Tarif <span class="sort-ico"></span></th>
+                  <th data-sort="diplome" title="Diplômes &amp; Autonomie (🔴 Badge rouge, 🧗 Autonomie bloc, 🟠 Passeport orange)" style="text-align:center;">Diplôme <span class="sort-ico"></span></th>
                   <th data-sort="status_norm">Statut <span class="sort-ico"></span></th>
                   <th data-sort="creneau_groupe">Créneau <span class="sort-ico"></span></th>
+                  <th data-sort="city">Ville <span class="sort-ico"></span></th>
                   <th data-sort="email_primary">E-mail <span class="sort-ico"></span></th>
                   <th data-sort="phone">Téléphone <span class="sort-ico"></span></th>
                   <th data-sort="licence_ffme">Licence <span class="sort-ico"></span></th>
@@ -306,6 +307,16 @@ startBureau({
             <div style="margin-bottom:8px;">
               <label class="fld">📞 Téléphone</label>
               <input type="tel" id="edit-phone" class="search-input" placeholder="06 12 34 56 78" style="width:100%;">
+            </div>
+
+            <!-- Section 4 : Commentaires / Notes internes -->
+            <div class="section-h" style="margin:10px 0 6px; display:flex; justify-content:space-between; align-items:center;">
+              <span>💬 Commentaire / Notes</span>
+              <button type="button" class="btn btn-muted btn-mini" id="btn-insert-comment-date" style="font-size:11px; padding:2px 8px; font-weight:normal;" title="Insérer la date du jour">[📅 Date]</button>
+            </div>
+            <div style="margin-bottom:8px;">
+              <textarea id="edit-commentaire" class="search-input" rows="3" placeholder="Ajouter une note ou un commentaire sur cet adhérent (ex: certificat médical papier remis, dispense, contact particulier…)" style="width:100%; resize:vertical; min-height:68px; font-family:inherit; font-size:12px; line-height:1.4; padding:8px 10px;"></textarea>
+              <div style="font-size:11px; color:#64748B; margin-top:3px;">Ce commentaire est enregistré en base et affiché sur la fiche détaillée.</div>
             </div>
           </div>
 
@@ -872,6 +883,7 @@ startBureau({
       document.getElementById("edit-email-primary").value = member.email_primary || "";
       document.getElementById("edit-email-secondary").value = member.email_secondary || "";
       document.getElementById("edit-phone").value = member.phone || "";
+      document.getElementById("edit-commentaire").value = member.commentaires_correctif || "";
       document.getElementById("edit-current-tarif").textContent = member.tarif_name || "Aucun";
 
       // Construction de la liste des tarifs (même design radio épuré que le PC TarifEditDialog)
@@ -926,6 +938,23 @@ startBureau({
       if (e.target.id === "member-edit-modal") closeEditMemberModal();
     });
 
+    // Insertion rapide de la date du jour dans le champ commentaire
+    document.getElementById("btn-insert-comment-date").addEventListener("click", e => {
+      e.preventDefault();
+      const ta = document.getElementById("edit-commentaire");
+      const d = new Date();
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const year = d.getFullYear();
+      const dateTag = `[${day}/${month}/${year}] `;
+      if (ta.value && !ta.value.endsWith("\n")) {
+        ta.value += "\n" + dateTag;
+      } else {
+        ta.value += dateTag;
+      }
+      ta.focus();
+    });
+
     document.getElementById("edit-save-btn").addEventListener("click", async () => {
       if (!activeEditMember) return;
       const m = activeEditMember;
@@ -938,10 +967,12 @@ startBureau({
       const newStatus = document.getElementById("edit-status") ? document.getElementById("edit-status").value.trim() : "";
       const selectedRadio = document.querySelector('input[name="edit-tarif-radio"]:checked');
       const newTarif = selectedRadio ? selectedRadio.value.trim() : (m.tarif_name || "");
+      const newCommentaire = document.getElementById("edit-commentaire").value.trim();
 
       const origBadgeRouge = (String(m.badge_rouge || "").toLowerCase() === "oui" || String(m.badge_rouge || "").toLowerCase() === "x") ? "Oui" : "Non";
       const origAutonomieBloc = (String(m.autonomie_bloc || "").toLowerCase() === "oui" || String(m.autonomie_bloc || "").toLowerCase() === "x") ? "Oui" : "Non";
       const origStatus = m.status_norm || m.status || "Validé";
+      const origCommentaire = String(m.commentaires_correctif || "").trim();
 
       const fields = {};
       const changesDesc = [];
@@ -973,6 +1004,10 @@ startBureau({
       if (newTarif && newTarif !== (m.tarif_name || "")) {
         fields.tarif_name = newTarif;
         changesDesc.push(`Créneau / Tarif : ${m.tarif_name || "vide"} ➔ ${newTarif}`);
+      }
+      if (newCommentaire !== origCommentaire) {
+        fields.commentaires_correctif = newCommentaire;
+        changesDesc.push(newCommentaire ? (origCommentaire ? "Commentaire mis à jour" : "Commentaire ajouté") : "Commentaire effacé");
       }
 
       if (Object.keys(fields).length === 0) {
@@ -1019,6 +1054,10 @@ startBureau({
             }
           }
 
+          if (fields.commentaires_correctif !== undefined) {
+            m.commentaires_correctif = fields.commentaires_correctif;
+          }
+
           renderDetailPanel(m);
           refreshDisplay();
           closeEditMemberModal();
@@ -1049,7 +1088,7 @@ startBureau({
       const rows = [];
       const addRow = (icon, label, val) => {
         if (val !== "" && val != null) {
-          rows.push(`<tr><th>${icon} ${esc(label)}</th><td>${esc(val)}</td></tr>`);
+          rows.push(`<tr><th>${icon} ${esc(label)}</th><td style="white-space:pre-line;">${esc(val)}</td></tr>`);
         }
       };
 
@@ -1073,6 +1112,13 @@ startBureau({
       addRow("📷", "Droit à l'image", member.photo_auth);
       addRow("🔴", "Badge rouge", member.badge_rouge);
       addRow("🧗", "Autonomie bloc", member.autonomie_bloc);
+      const pass = (String(member.raw_passports || "") + " " + String(member.passeports || "") + " " + String(member.passeport_orange || "")).toLowerCase();
+      if (pass.includes("orange") || String(member.passeport_orange || "").toLowerCase() === "oui") {
+        addRow("🟠", "Passeport orange", "Oui");
+      }
+      if (member.raw_passports) {
+        addRow("🎓", "Passeports FFME", member.raw_passports);
+      }
       if (member.payer && normKey(member.payer) !== normKey(member.first_name + " " + member.last_name)) {
         addRow("💳", "Payeur", member.payer + (member.payer_email ? ` (${member.payer_email})` : ""));
       }
@@ -1080,6 +1126,7 @@ startBureau({
       addRow("💶", "Montant réglé", member.amount != null && member.amount !== "" ? `${member.amount} €` : "");
       addRow("📧", "Attestation envoyée", member.email_sent_date ? (fmtDay(member.email_sent_date) || member.email_sent_date) : "");
       addRow("🧗", "Créneau", member.creneau_groupe ? `${member.creneau_groupe}${member.creneau_details ? ` (${member.creneau_details})` : ""}` : "");
+      addRow("💬", "Commentaire", member.commentaires_correctif);
 
       const tel = telHref(member.phone);
       const email = member.email_primary || "";
@@ -1202,6 +1249,16 @@ startBureau({
       return labelEl;
     }
 
+    function renderDiplomes(m) {
+      const diplomes = getMemberDiplomes(m);
+      if (!diplomes.length) {
+        return '<span class="cell-sub muted">—</span>';
+      }
+      return `<span class="diplome-badges" style="display:inline-flex; gap:6px; align-items:center; justify-content:center; vertical-align:middle;">` +
+        diplomes.map(d => `<span title="${esc(d.icon + ' ' + d.label)}" style="display:inline-block; font-size:${d.icon === '🧗' ? '14px' : '13px'}; line-height:1; cursor:help;">${d.icon}</span>`).join("") +
+        `</span>`;
+    }
+
     function refreshDisplay() {
       const allowed = allowedTarifKeys(itemsCache, filterCache, filters);
       const filtered = filterMembers(filterCache.members || [], filters, allowed);
@@ -1223,10 +1280,10 @@ startBureau({
               <td class="cell-name">${esc(m.last_name)}</td>
               <td>${esc(m.first_name)}</td>
               <td class="cell-sub" style="white-space:nowrap;">${esc(fmtDay(m.order_date) || "—")}</td>
-              <td class="cell-sub">${esc(m.categorie || "—")}</td>
-              <td class="cell-sub">${esc(m.tarif_name || "—")}</td>
+              <td class="cell-diplome" style="text-align:center;">${renderDiplomes(m)}</td>
               <td>${renderStatusBadge(m.status_norm)}</td>
               <td class="cell-sub">${esc(m.creneau_groupe || "—")}</td>
+              <td class="cell-sub">${esc(m.city || "—")}</td>
               <td>${m.email_primary ? `<a href="mailto:${esc(m.email_primary)}" onclick="event.stopPropagation()">${esc(m.email_primary)}</a>` : "—"}</td>
               <td>${m.phone ? `<a href="tel:${esc(telHref(m.phone))}" onclick="event.stopPropagation()">${esc(m.phone)}</a>` : "—"}</td>
               <td class="cell-sub">${esc(m.licence_ffme || "—")}</td>
@@ -1279,7 +1336,7 @@ startBureau({
           sortAsc = !sortAsc;
         } else {
           sortKey = k;
-          sortAsc = (k === "order_date" || k === "amount") ? false : true;
+          sortAsc = (k === "order_date" || k === "amount" || k === "diplome") ? false : true;
         }
         refreshDisplay();
       });

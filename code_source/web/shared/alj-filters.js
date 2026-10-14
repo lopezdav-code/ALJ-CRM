@@ -153,8 +153,10 @@ export function filterMembers(members, filters, allowedTarifs) {
       const licence = normKey(m.licence_ffme);
       const mail = normKey(m.email_primary);
       const tel = normKey(m.phone);
+      const ville = normKey(m.city);
+      const comm = normKey(m.commentaires_correctif);
       if (!(nom.includes(q) || prenom.includes(q) || plein1.includes(q) || plein2.includes(q)
-            || tarif.includes(q) || licence.includes(q) || mail.includes(q) || tel.includes(q))) {
+            || tarif.includes(q) || licence.includes(q) || mail.includes(q) || tel.includes(q) || ville.includes(q) || comm.includes(q))) {
         return false;
       }
     }
@@ -173,6 +175,26 @@ export function sortMembers(list, sortKey, sortAsc = true) {
       const na = va === "" || va == null ? -1 : Number(va);
       const nb = vb === "" || vb == null ? -1 : Number(vb);
       return sortAsc ? na - nb : nb - na;
+    }
+
+    // Traitement spécifique des diplômes & badges
+    if (sortKey === "diplome") {
+      const diplomeWeight = (m) => {
+        let score = 0;
+        const br = String(m.badge_rouge || "").trim().toLowerCase();
+        if (br === "oui" || br === "x" || br === "true" || br === "1") score += 4;
+        const ab = String(m.autonomie_bloc || "").trim().toLowerCase();
+        if (ab === "oui" || ab === "x" || ab === "true" || ab === "1") score += 2;
+        const pass = (String(m.raw_passports || "") + " " + String(m.passeports || "") + " " + String(m.passeport_orange || "")).toLowerCase();
+        if (pass.includes("orange") || String(m.passeport_orange || "").toLowerCase() === "oui") score += 1;
+        return score;
+      };
+      const wa = diplomeWeight(a);
+      const wb = diplomeWeight(b);
+      if (wa !== wb) {
+        return sortAsc ? wa - wb : wb - wa;
+      }
+      return coll.compare(String(a.last_name || ""), String(b.last_name || ""));
     }
 
     // Traitement spécifique des dates (order_date, birth_date)

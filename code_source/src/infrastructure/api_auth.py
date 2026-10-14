@@ -72,6 +72,7 @@ PUBLIC_PATHS = frozenset({
     "/favicon.ico",
     "/api/web-version",
     "/webhooks/helloasso",
+    "/api/competitions/cron/fetch-results",
     "/api/auth/google/login",
     "/api/auth/google/callback",
     "/api/auth/google/status",
@@ -131,6 +132,8 @@ def required_role(method: str, path: str) -> Optional[str]:
         return "admin"  # modification des templates d'emails réservée aux administrateurs
     if path.startswith("/api/whatsapp-template") and method not in ("GET", "HEAD"):
         return "admin"  # modification du template WhatsApp réservée aux administrateurs
+    if path.startswith("/api/settings") and method not in ("GET", "HEAD"):
+        return "admin"  # modification des paramètres généraux réservée aux administrateurs
     if path == "/api/auth/google/update-token" and method not in ("GET", "HEAD"):
         return "admin"  # mise à jour manuelle des identifiants Google réservée aux administrateurs
     return "coach"

@@ -134,7 +134,47 @@ startBureau({
           </div>
         </div>
 
-        <!-- Carte 3 : Explications et aide -->
+        <!-- Carte 3 : Suivi Automatique des Résultats MyCompet & Notifications -->
+        <div class="card" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 4px;">
+                <span>🏆 Suivi Automatique des Résultats MyCompet & Notifications</span>
+                <span class="badge" style="background:#10B981; font-size:11.5px; padding:3px 9px;">Tous les jours à 07h00</span>
+              </h2>
+              <p class="muted" style="font-size:13px; margin:4px 0 0;">
+                Un batch quotidien recherche automatiquement les résultats officiels des compétitions passées sur MyCompet FFME, met à jour les classements des compétiteurs du club et vous envoie un e-mail avec le tableau récapitulatif dès que des résultats sont disponibles.
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary" id="btn-run-results-batch" style="display:flex; align-items:center; gap:6px;">
+                <span>🚀 Lancer la détection maintenant</span>
+              </button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:16px;">
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600; margin-bottom:6px;">E-MAIL DE NOTIFICATION DES RÉSULTATS</div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <input type="email" id="results-notif-email" class="search-input" placeholder="david.lopez@alj-jonage.fr" style="width:100%; font-size:13px; padding:6px 10px;">
+                <button class="btn btn-muted btn-mini" id="btn-save-notif-email" style="font-size:12px; padding:6px 12px; font-weight:600;">Enregistrer</button>
+              </div>
+            </div>
+            <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
+              <div class="muted" style="font-size:11.5px; font-weight:600;">DERNIÈRE EXÉCUTION DU BATCH</div>
+              <div id="results-batch-last-run" style="font-weight:700; margin-top:4px; font-size:13px;">—</div>
+              <div id="results-batch-last-status" style="font-size:11.5px; color:var(--muted); margin-top:2px;">En attente du prochain passage à 07h00</div>
+            </div>
+          </div>
+
+          <div id="results-batch-report" style="display:none; margin-top:14px; background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:12px;">
+            <div style="font-weight:700; margin-bottom:6px; font-size:13px;" id="results-batch-report-title">Résultat de l'analyse :</div>
+            <div id="results-batch-report-details" style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;"></div>
+          </div>
+        </div>
+
+        <!-- Carte 4 : Explications et aide -->
         <div class="card" style="margin-bottom:0;">
           <h2 style="font-size:15px; margin:0 0 6px;">ℹ️ Pourquoi renouveler le jeton ?</h2>
           <p style="font-size:13px; color:var(--muted); margin:0 0 10px;">
@@ -411,15 +451,139 @@ startBureau({
       btnSyncDb.addEventListener("click", () => performSqliteSync(false));
     }
 
+    // ==========================================
+    // Suivi Automatique des Résultats MyCompet
+    // ==========================================
+    const resultsEmailInput = document.getElementById("results-notif-email");
+    const btnSaveNotifEmail = document.getElementById("btn-save-notif-email");
+    const resultsLastRun = document.getElementById("results-batch-last-run");
+    const resultsLastStatus = document.getElementById("results-batch-last-status");
+    const btnRunResultsBatch = document.getElementById("btn-run-results-batch");
+    const resultsBatchReport = document.getElementById("results-batch-report");
+    const resultsBatchReportDetails = document.getElementById("results-batch-report-details");
+
+    async function loadResultsBatchSettings() {
+      try {
+        const res = await apiFetch("/api/settings/competitions-results");
+        if (res.ok) {
+          const d = await res.json();
+          if (resultsEmailInput && !resultsEmailInput._userEditing) {
+            resultsEmailInput.value = d.notification_email || "david.lopez@alj-jonage.fr";
+          }
+          if (resultsLastRun) {
+            if (d.last_run) {
+              const dt = new Date(d.last_run);
+              resultsLastRun.textContent = isNaN(dt) ? d.last_run : dt.toLocaleDateString("fr-FR") + " " + dt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+            } else {
+              resultsLastRun.textContent = "Jamais exécuté";
+            }
+          }
+          if (resultsLastStatus) {
+            resultsLastStatus.textContent = d.last_status || "En attente du prochain passage à 07h00";
+          }
+        }
+      } catch (e) {
+        console.warn("Erreur chargement paramètres batch résultats :", e);
+      }
+    }
+
+    if (resultsEmailInput) {
+      resultsEmailInput.addEventListener("focus", () => { resultsEmailInput._userEditing = true; });
+      resultsEmailInput.addEventListener("blur", () => { resultsEmailInput._userEditing = false; });
+    }
+
+    if (btnSaveNotifEmail) {
+      btnSaveNotifEmail.addEventListener("click", async () => {
+        const email = (resultsEmailInput?.value || "").trim();
+        if (!email || !email.includes("@")) {
+          toast("❌ Veuillez saisir une adresse e-mail valide.");
+          return;
+        }
+        btnSaveNotifEmail.disabled = true;
+        btnSaveNotifEmail.textContent = "⏳ Enregistrement…";
+        try {
+          const res = await apiFetch("/api/settings/competitions-results", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notification_email: email })
+          });
+          const d = await res.json();
+          if (res.ok && d.status === "success") {
+            toast(`✅ Adresse de notification enregistrée : ${email}`);
+            await loadResultsBatchSettings();
+          } else {
+            toast(`❌ Échec : ${d.message || "Erreur serveur"}`);
+          }
+        } catch (err) {
+          toast("❌ Erreur réseau : " + err.message);
+        } finally {
+          btnSaveNotifEmail.disabled = false;
+          btnSaveNotifEmail.textContent = "Enregistrer";
+        }
+      });
+    }
+
+    if (btnRunResultsBatch) {
+      btnRunResultsBatch.addEventListener("click", async () => {
+        btnRunResultsBatch.disabled = true;
+        btnRunResultsBatch.innerHTML = "<span>⏳ Détection en cours…</span>";
+        if (resultsBatchReport) resultsBatchReport.style.display = "block";
+        if (resultsBatchReportDetails) {
+          resultsBatchReportDetails.innerHTML = "<div>⏳ Analyse des compétitions passées et recherche MyCompet en cours…</div>";
+        }
+
+        try {
+          const res = await apiFetch("/api/competitions/cron/fetch-results?force=true", { method: "POST" });
+          const d = await res.json();
+
+          if (res.ok && d.status === "success") {
+            toast(`✅ Détection terminée : ${d.competitions_checked} analysée(s), ${d.competitions_updated} résultat(s) trouvé(s) !`);
+            let html = `<div><b>🟢 Analyse MyCompet terminée à ${new Date().toLocaleTimeString('fr-FR')}</b></div>`;
+            html += `<div>• Compétitions passées vérifiées : <b>${d.competitions_checked}</b></div>`;
+            html += `<div>• Résultats officiels trouvés : <b>${d.competitions_updated}</b></div>`;
+            html += `<div>• E-mail récapitulatif expédié : <b>${d.email_sent ? 'Oui (à ' + esc(d.notification_email) + ')' : (d.competitions_updated > 0 ? 'Erreur envoi' : 'Non (aucun nouveau résultat)')}</b></div>`;
+
+            if (d.details && d.details.length) {
+              html += '<div style="margin-top:6px; font-weight:600;">Détail par compétition :</div><ul style="margin:4px 0; padding-left:20px;">';
+              d.details.forEach(item => {
+                const ico = item.status === "found" ? "🏆" : "⏳";
+                const count = (item.athletes || []).length;
+                const desc = item.status === "found" ? `<b>${count} athlète(s) classé(s)</b> pour le club` : "Pas encore de résultats publiés";
+                html += `<li>${ico} <b>${esc(item.nom)}</b> : ${desc}</li>`;
+              });
+              html += '</ul>';
+            }
+            if (resultsBatchReportDetails) resultsBatchReportDetails.innerHTML = html;
+            await loadResultsBatchSettings();
+          } else {
+            toast("❌ Erreur lors de l'exécution du batch : " + (d.message || "Erreur serveur"), 7000);
+            if (resultsBatchReportDetails) {
+              resultsBatchReportDetails.innerHTML = `<div style="color:var(--red)"><b>🔴 Échec :</b> ${esc(d.message || "Erreur serveur")}</div>`;
+            }
+          }
+        } catch (err) {
+          toast("❌ Erreur réseau ou serveur : " + err.message, 7000);
+          if (resultsBatchReportDetails) {
+            resultsBatchReportDetails.innerHTML = `<div style="color:var(--red)"><b>🔴 Erreur réseau :</b> ${esc(err.message)}</div>`;
+          }
+        } finally {
+          btnRunResultsBatch.disabled = false;
+          btnRunResultsBatch.innerHTML = "<span>🚀 Lancer la détection maintenant</span>";
+        }
+      });
+    }
+
     refreshBtn.addEventListener("click", () => {
       loadGoogleStatus();
       loadSqliteStatus();
+      loadResultsBatchSettings();
       toast("🔄 Statuts réactualisés.");
     });
 
     // Chargement initial des statuts
     loadGoogleStatus();
     loadSqliteStatus();
+    loadResultsBatchSettings();
   }
 });
 </script>

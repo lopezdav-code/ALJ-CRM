@@ -751,25 +751,33 @@ def get_pivot_table(season: str = "2026-2027"):
     try:
         from infrastructure.sqlite_repository import SqliteRepository
         from domain.constants import get_active_season
+        from domain.age_rules import parse_birth_date, age_at, get_season_start_date
+        from domain.models import normalize_gender
+        from domain.utils import clean_city_name
         
         target_season = (season or "").strip()
         if not target_season or target_season.lower() in ("default", "active"):
             target_season = get_active_season()
 
         raw_data = SqliteRepository.load_direct_data(target_season)
+        ref_date = get_season_start_date(target_season)
         
         # Préparer un tableau de données plat et épuré pour le TCD
         pivot_records = []
         for row in raw_data:
-            # 1. Normaliser et fusionner les statuts HelloAsso (Processed, Validated -> Validé)
+            # 1. Normaliser et fusionner les statuts HelloAsso (Processed, Validated, Terminé, Traité -> Validé)
             status_raw = str(row.get("status", "Validé")).strip()
-            if status_raw.lower() in ("processed", "validated", "validé"):
+            status_lower = status_raw.lower()
+            if status_lower in ("processed", "validated", "validé", "enregistré", "registered", "terminé", "termine", "traité", "traite"):
                 status_clean = "Validé"
+            elif status_lower in ("canceled", "cancelled", "annulé", "annule"):
+                status_clean = "Annulé"
+            elif status_lower in ("refused", "refusé", "refuse"):
+                status_clean = "Refusé"
             else:
                 status_clean = status_raw.title()
                 
             # 2. Normaliser les noms de villes pour fusionner "Saint-Maurice..." et "Saint Maurice..."
-            from domain.utils import clean_city_name
             city_raw = row.get("city") or "Inconnue"
             city_clean = clean_city_name(city_raw)
             
@@ -791,12 +799,17 @@ def get_pivot_table(season: str = "2026-2027"):
                 except ValueError:
                     date_iso = ""
             month_iso = date_iso[:7] if date_iso else ""
+
+            # 6. Âge de l'adhérent (calculé au début de la saison de référence)
+            b_date = parse_birth_date(row.get("birth_date") or row.get("birth_date_raw") or row.get("champ_Date de naissance de l'adhérent"))
+            computed_age = age_at(b_date, ref_date)
+            age_val = computed_age if computed_age is not None else "Inconnu"
             
-            from domain.models import normalize_gender
             pivot_records.append({
                 "Nom": (row.get("last_name") or "").strip().upper(),
-                "Pr\u00e9nom": (row.get("first_name") or "").strip().title(),
+                "Prénom": (row.get("first_name") or "").strip().title(),
                 "Sexe": normalize_gender(row.get("gender")) or "Inconnu",
+                "Âge": age_val,
                 "Ville": city_clean,
                 "Groupe / Tarif": str(row.get("tarif_name") or "").strip() or "Aucun",
                 "Statut": status_clean,
@@ -905,7 +918,7 @@ def get_pivot_table(season: str = "2026-2027"):
 
     <div class="header">
         <h1>📊 Tableau Croisé Dynamique — ALJ Escalade</h1>
-        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Jour de cours, Ville, Sexe, Statut, Date d'inscription, etc.)</p>
+        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Groupe / Tarif, Sexe, Statut, Âge, Ville, etc.)</p>
     </div>
 
     <div class="container">
@@ -918,9 +931,10 @@ def get_pivot_table(season: str = "2026-2027"):
             
             $("#output").pivotUI(pivotData, {
                 rows: ["Groupe / Tarif"],
-                cols: ["Statut"],
+                cols: ["Statut", "Sexe"],
                 exclusions: {
-                    "Groupe / Tarif": ["Liste d'attente cours"]
+                    "Groupe / Tarif": ["Liste d'attente cours"],
+                    "Statut": ["Annulé"]
                 },
                 aggregatorName: "Count",
                 rendererName: "Table"
@@ -1391,6 +1405,24 @@ def sync_helloasso_api():
         return {"status": "error", "message": internal_error(e, "sync_helloasso_api")}
 
 
+# --------------------------------------------------------------------------
+# Batch quotidien de récupération des résultats MyCompet FFME & Notifications
+# --------------------------------------------------------------------------
+@app.post("/api/competitions/cron/fetch-results")
+async def api_cron_fetch_competition_results(
+    force: bool = False,
+    email: Optional[str] = None
+):
+    """
+    Exécute le batch de récupération des résultats MyCompet FFME pour les compétitions passées
+    et envoie un e-mail de synthèse si des résultats sont découverts.
+    Conçu pour être appelé par Google Cloud Scheduler (ex: tous les jours à 07h00) ou manuellement.
+    """
+    from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
+    res = await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
+    return res
+
+
 @app.post("/api/competitions/{comp_id}/fetch-results")
 async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = Body(default={})):
     """
@@ -1516,6 +1548,50 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
         "matched_count": matched_count,
         "results": scraped_results,
         "participants": participants
+    }
+
+
+# --------------------------------------------------------------------------
+# Batch quotidien de récupération des résultats MyCompet FFME & Notifications
+# --------------------------------------------------------------------------
+@app.post("/api/competitions/cron/fetch-results")
+async def api_cron_fetch_competition_results(
+    force: bool = False,
+    email: Optional[str] = None
+):
+    """
+    Exécute le batch de récupération des résultats MyCompet FFME pour les compétitions passées
+    et envoie un e-mail de synthèse si des résultats sont découverts.
+    Conçu pour être appelé par Google Cloud Scheduler (ex: tous les jours à 07h00) ou manuellement.
+    """
+    from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
+    res = await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
+    return res
+
+
+@app.get("/api/settings/competitions-results")
+def get_competitions_results_settings_api():
+    """Retourne la configuration et l'état du batch quotidien de résultats."""
+    from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
+    return {
+        "status": "success",
+        **CompetitionResultsBatchService.get_batch_status()
+    }
+
+
+@app.post("/api/settings/competitions-results")
+def update_competitions_results_settings_api(data: Dict[str, Any] = Body(...)):
+    """Met à jour l'adresse e-mail de notification des résultats."""
+    from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
+    email = str(data.get("notification_email") or "").strip()
+    if not email or "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Adresse e-mail de notification invalide.")
+
+    ok = CompetitionResultsBatchService.set_notification_email(email)
+    return {
+        "status": "success",
+        "notification_email": CompetitionResultsBatchService.get_notification_email(),
+        "saved": ok
     }
 
 

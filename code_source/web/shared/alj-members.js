@@ -52,6 +52,30 @@ export function telHref(phone) {
   return String(phone || "").replace(/[^\d+]/g, "");
 }
 
+/**
+ * Retourne la liste des diplômes et badges obtenus par un adhérent.
+ * Badge rouge (🔴), Autonomie bloc (🧗), Passeport Orange (🟠).
+ * @param {Record<string, any>} m
+ * @returns {Array<{ type: string, label: string, icon: string }>}
+ */
+export function getMemberDiplomes(m) {
+  const items = [];
+  if (!m) return items;
+  const br = String(m.badge_rouge || "").trim().toLowerCase();
+  if (br === "oui" || br === "x" || br === "true" || br === "1") {
+    items.push({ type: "badge_rouge", label: "Badge rouge diff", icon: "🔴" });
+  }
+  const ab = String(m.autonomie_bloc || "").trim().toLowerCase();
+  if (ab === "oui" || ab === "x" || ab === "true" || ab === "1") {
+    items.push({ type: "autonomie_bloc", label: "Autonomie bloc", icon: "🧗" });
+  }
+  const pass = (String(m.raw_passports || "") + " " + String(m.passeports || "") + " " + String(m.passeport_orange || "")).toLowerCase();
+  if (pass.includes("orange") || String(m.passeport_orange || "").toLowerCase() === "oui") {
+    items.push({ type: "passeport_orange", label: "Passeport orange", icon: "🟠" });
+  }
+  return items;
+}
+
 export function calcAge(birthDate, refDate) {
   if (!birthDate) return null;
   const m = String(birthDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -190,6 +214,9 @@ export function buildMembersData(raw) {
       photo_auth: u.photo_auth || "",
       badge_rouge: u.badge_rouge || "",
       autonomie_bloc: u.autonomie_bloc || "",
+      raw_passports: u.raw_passports || u.passeports || u.passports || "",
+      raw_diplomas: u.raw_diplomas || u.diplomes || u.diplomas || "",
+      passeport_orange: u.passeport_orange || "",
       payer: [o.payer_first_name, o.payer_last_name].filter(Boolean).join(" "),
       payer_email: o.payer_email || "",
       order_ref: o.order_ref || "",
@@ -200,6 +227,7 @@ export function buildMembersData(raw) {
       status_norm: normalizeStatus(p.status),
       document_sante: p.document_sante || "",
       email_sent_date: p.email_sent_date || "",
+      commentaires_correctif: p.commentaires_correctif || p.comment || p.commentaire || "",
       season_name: s.name || "",
       creneau_groupe: creneauGroupe,
       categorie: categorie,
