@@ -7,9 +7,13 @@ from helpers.data import unique_name
 
 
 def _open(page, role="admin"):
-    page.goto("/bureau/communications")
-    login_as(page, role)
+    with page.expect_response(lambda r: r.url.endswith("/api/whatsapp-template") and r.request.method == "GET",
+                              timeout=20_000) as whatsapp:
+        page.goto("/bureau/communications")
+        login_as(page, role)
     expect(page.locator("#template-select option").first).to_be_attached(timeout=20_000)
+    # Loaded apart from the templates: once shown, it can no longer overwrite a fill() of the test
+    expect(page.locator("#whatsapp-input")).to_have_value(whatsapp.value.json().get("template") or "")
     return page
 
 
