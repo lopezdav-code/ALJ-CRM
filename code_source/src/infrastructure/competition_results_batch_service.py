@@ -21,7 +21,6 @@ _src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from domain.constants import get_active_season
 from infrastructure.email_repository import EmailRepository
 from infrastructure.sqlite_repository import SqliteRepository
 from mycompet_scraper import fetch_and_parse_mycompet_results, normalize_result_url, find_mycompet_result_url

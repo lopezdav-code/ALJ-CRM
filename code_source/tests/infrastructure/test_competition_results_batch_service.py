@@ -8,7 +8,7 @@ import os
 import sys
 import unittest
 import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Injection du chemin src
 _tests_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,8 +19,7 @@ if _src_dir not in sys.path:
 
 from infrastructure.competition_results_batch_service import (
     CompetitionResultsBatchService,
-    DEFAULT_NOTIFICATION_EMAIL,
-    SETTING_NOTIFICATION_EMAIL
+    DEFAULT_NOTIFICATION_EMAIL
 )
 from infrastructure.sqlite_repository import SqliteRepository
 

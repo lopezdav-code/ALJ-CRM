@@ -121,8 +121,7 @@ class TestBureauFiles(unittest.TestCase):
         from server import (
             app,
             get_competitions_results_settings_api,
-            update_competitions_results_settings_api,
-            api_cron_fetch_competition_results
+            update_competitions_results_settings_api
         )
 
         # 1. GET /api/settings/competitions-results

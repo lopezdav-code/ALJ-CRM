@@ -12,7 +12,7 @@ if _src_dir not in sys.path:
 
 from typing import Optional
 
-from fastapi import FastAPI, Body, BackgroundTasks, Query, Request
+from fastapi import FastAPI, Body, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 
 # Importer les fonctions de notre script existant
@@ -1585,24 +1585,6 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
         "results": scraped_results,
         "participants": participants
     }
-
-
-# --------------------------------------------------------------------------
-# Batch quotidien de récupération des résultats MyCompet FFME & Notifications
-# --------------------------------------------------------------------------
-@app.post("/api/competitions/cron/fetch-results")
-async def api_cron_fetch_competition_results(
-    force: bool = False,
-    email: Optional[str] = None
-):
-    """
-    Exécute le batch de récupération des résultats MyCompet FFME pour les compétitions passées
-    et envoie un e-mail de synthèse si des résultats sont découverts.
-    Conçu pour être appelé par Google Cloud Scheduler (ex: tous les jours à 07h00) ou manuellement.
-    """
-    from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
-    res = await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
-    return res
 
 
 @app.get("/api/settings/competitions-results")
