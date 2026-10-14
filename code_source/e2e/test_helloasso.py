@@ -54,6 +54,20 @@ def _participant(test_data, setup, member) -> dict:
                 if p["adherent_id"] == member["id"])
 
 
+def _office_attach(page, setup, member) -> None:
+    """Office portal: syncs HelloAsso, then links the unknown payer's item to `member` by hand."""
+    open_competitions(page)
+    bureau_go_to(page, "helloasso")
+    page.locator("#btn-sync-ha-global").click()
+    expect(page.locator("#toast")).to_contain_text("articles traités", timeout=20_000)
+    page.locator("#ha-search-input").fill(setup["unknown_payer"]["user"]["lastName"])
+    page.locator("#ha-table-tbody tr[data-item-id] .btn-open-attach").click()
+    page.locator("#attach-comp-select").select_option(str(setup["competition"]["id"]))
+    page.locator("#attach-adh-select").select_option(str(member["id"]))
+    page.locator("#ha-attach-submit").click()
+    expect(page.locator("#toast")).to_contain_text("Rattachement enregistré")
+
+
 def test_sync_links_payment_automatically(mobile_page, test_data, setup):
     page = open_app(mobile_page)
     _sync_on_phone(page)
@@ -152,7 +166,7 @@ def test_resync_keeps_coach_decisions(mobile_page, test_data, setup):
     eventually(kept)
 
 
-def test_webhook_marks_member_paid(mobile_page, page, test_data, setup):
+def test_webhook_marks_member_paid(page, test_data, setup):
     """HelloAsso notifies an order: the server re-reads it from the API and links it."""
     order_id = setup["auto"]["order"]["id"]
     refused = page.request.post("/webhooks/helloasso?token=wrong", data={"eventType": "Order", "data": {"id": order_id}})
@@ -163,11 +177,12 @@ def test_webhook_marks_member_paid(mobile_page, page, test_data, setup):
     assert accepted.ok, accepted.text()
     assert accepted.json()["verified"] == "api"
 
-    phone = open_app(mobile_page)
-    open_participants(phone, setup["competition"]["nom"])
-    expect(participant_card(phone, setup["members"][0])).to_contain_text("Payé")
-    go_to(phone, "helloasso")
-    expect(_item_card(phone, setup["auto"])).to_contain_text("Rattaché")
+    # Stored as the phone's sync stores it (whose display test_sync_links_payment_automatically checks)
+    def linked():
+        member = setup["members"][0]
+        assert test_data.helloasso_item(setup["auto"]["id"])["adherent_id"] == member["id"]
+        assert _participant(test_data, setup, member)["statut_paiement"] == "paye"
+    eventually(linked)
 
 
 def test_webhook_ignores_other_forms(page, fake_helloasso):
@@ -194,16 +209,7 @@ def test_office_sync_and_filters(page, setup):
 
 def test_office_manual_link(page, test_data, setup):
     member = setup["members"][1]
-    open_competitions(page)
-    bureau_go_to(page, "helloasso")
-    page.locator("#btn-sync-ha-global").click()
-    expect(page.locator("#toast")).to_contain_text("articles traités", timeout=20_000)
-    page.locator("#ha-search-input").fill(setup["unknown_payer"]["user"]["lastName"])
-    page.locator("#ha-table-tbody tr[data-item-id] .btn-open-attach").click()
-    page.locator("#attach-comp-select").select_option(str(setup["competition"]["id"]))
-    page.locator("#attach-adh-select").select_option(str(member["id"]))
-    page.locator("#ha-attach-submit").click()
-    expect(page.locator("#toast")).to_contain_text("Rattachement enregistré")
+    _office_attach(page, setup, member)
 
     def paid():
         participant = _participant(test_data, setup, member)
@@ -214,16 +220,7 @@ def test_office_manual_link(page, test_data, setup):
 @KNOWN_BUG_A6
 def test_office_manual_link_is_stored_like_the_phone(page, test_data, setup):
     member = setup["members"][1]
-    open_competitions(page)
-    bureau_go_to(page, "helloasso")
-    page.locator("#btn-sync-ha-global").click()
-    expect(page.locator("#toast")).to_contain_text("articles traités", timeout=20_000)
-    page.locator("#ha-search-input").fill(setup["unknown_payer"]["user"]["lastName"])
-    page.locator("#ha-table-tbody tr[data-item-id] .btn-open-attach").click()
-    page.locator("#attach-comp-select").select_option(str(setup["competition"]["id"]))
-    page.locator("#attach-adh-select").select_option(str(member["id"]))
-    page.locator("#ha-attach-submit").click()
-    expect(page.locator("#toast")).to_contain_text("Rattachement enregistré")
+    _office_attach(page, setup, member)
 
     def stored():
         doc = test_data.helloasso_item(setup["unknown_payer"]["id"])

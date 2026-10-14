@@ -30,6 +30,10 @@ def test_server_cache_status(page):
     expect(page.locator("#sqlite-pending-info")).to_have_text("0 (à jour)")
     expect(page.locator("#sqlite-last-sync")).not_to_have_text("Non renseignée")
 
+    page.locator("#settings-refresh-btn").click()
+    expect(page.locator("#toast")).to_contain_text("Statuts réactualisés")
+    expect(page.locator("#sqlite-status-badge")).to_contain_text("Cache opérationnel")
+
 
 def test_incremental_update_and_full_rebuild(page):
     _open(page)
@@ -56,8 +60,3 @@ def test_full_rebuild_needs_confirmation(page):
     page.locator("#btn-full-rebuild-sqlite").click()
     expect(page.locator("#sqlite-sync-report")).to_be_hidden()
 
-
-def test_refresh_statuses(page):
-    _open(page)
-    page.locator("#settings-refresh-btn").click()
-    expect(page.locator("#toast")).to_contain_text("Statuts réactualisés")

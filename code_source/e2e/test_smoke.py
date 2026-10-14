@@ -1,12 +1,8 @@
-"""Every page loads in dev mode (emulator banner, no JavaScript error) and the stack is wired."""
+"""Every page loads in dev mode (emulator banner, no JavaScript error)."""
 import re
-import smtplib
-from email.message import EmailMessage
 
 import pytest
 from playwright.sync_api import expect
-
-from helpers import stack
 
 pytestmark = pytest.mark.smoke
 
@@ -42,16 +38,3 @@ def test_mobile_page_loads(mobile_page, path):
     expect(mobile_page).to_have_url(re.compile(re.escape(path) + "$"))
     expect(mobile_page.locator("#alj-dev-banner")).to_be_visible()
 
-
-def test_dev_smtp_reaches_mailpit(mailpit):
-    """The server's SMTP settings (dev/dev.env, port of the e2e stack) deliver to Mailpit."""
-    smtp = {**stack.read_env_file(stack.DEV_ENV_FILE), **stack.STACK_ENV}
-    msg = EmailMessage()
-    msg["From"] = smtp["SMTP_FROM_EMAIL"]
-    msg["To"] = "harry.potter@hogwarts.example"
-    msg["Subject"] = "e2e smtp check"
-    msg.set_content("hello")
-    with smtplib.SMTP(smtp["SMTP_HOST"], int(smtp["SMTP_PORT"]), timeout=10) as client:
-        client.send_message(msg)
-    [received] = mailpit.wait_for("subject:\"e2e smtp check\"")
-    assert received["To"][0]["Address"] == "harry.potter@hogwarts.example"

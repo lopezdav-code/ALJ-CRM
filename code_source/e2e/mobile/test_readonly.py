@@ -5,16 +5,13 @@ from helpers.data import unique_name
 from helpers.mobile import SEEDED_COMPETITION, competition_card, open_app, open_participants
 
 
-def test_only_consultation_tabs(mobile_page):
+def test_consultation_tabs_and_competitions(mobile_page):
     page = open_app(mobile_page, role="readonly")
     for tab in ("comps", "participants"):
         expect(page.locator(f"nav button[data-page='{tab}']")).to_be_visible()
     for tab in ("helloasso", "coaches", "balance"):
         expect(page.locator(f"nav button[data-page='{tab}']")).to_be_hidden()
 
-
-def test_competitions_cannot_be_changed(mobile_page):
-    page = open_app(mobile_page, role="readonly")
     expect(page.locator("#f-open-create")).to_be_hidden()
     expect(page.locator("#comps-archive-past")).to_be_hidden()
     card = competition_card(page, SEEDED_COMPETITION)

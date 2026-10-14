@@ -36,12 +36,14 @@ def test_create_rename_delete_coach(mobile_page, test_data):
     eventually(deleted)
 
 
-def test_rename_shows_in_competitions(mobile_page, test_data):
+def test_coach_changes_reach_competitions(mobile_page, test_data):
+    """A renamed coach shows under the new name on their competitions; a deleted one leaves them."""
     coach = unique_name("E2E Coach")
     coach_id = test_data.create_coach(coach)
     comp = unique_name("E2E Coached")
     test_data.create_competition(comp, date="2027-06-01", coach_ids=[coach_id])
     page = open_app(mobile_page)
+    accept_dialogs(page)
     expect(competition_card(page, comp)).to_contain_text(f"Coachs : {coach}")
 
     go_to(page, "coaches")
@@ -50,20 +52,11 @@ def test_rename_shows_in_competitions(mobile_page, test_data):
     renamed = unique_name("E2E Coach renamed")
     page.locator("#f-coach-nom").fill(renamed)
     page.locator("#f-coach-update").click()
-
     go_to(page, "comps")
     expect(competition_card(page, comp)).to_contain_text(f"Coachs : {renamed}")
 
-
-def test_deleted_coach_leaves_competitions(mobile_page, test_data):
-    coach = unique_name("E2E Coach")
-    coach_id = test_data.create_coach(coach)
-    comp = unique_name("E2E Coached")
-    test_data.create_competition(comp, date="2027-06-02", coach_ids=[coach_id])
-    page = open_app(mobile_page)
-    accept_dialogs(page)
     go_to(page, "coaches")
-    _coach_card(page, coach).click()
+    _coach_card(page, renamed).click()
     page.locator("#f-coach-delete").click()
     go_to(page, "comps")
     expect(competition_card(page, comp)).to_contain_text("Aucun coach")

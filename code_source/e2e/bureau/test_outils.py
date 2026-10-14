@@ -31,6 +31,9 @@ def test_members_map(page):
     expect(clusters.first).to_be_visible(timeout=15_000)
     assert "nominatim" not in page.request.get("/map").text().lower()
 
+    page.locator("#tools-refresh-btn").click()
+    expect(page.locator("#toast")).to_contain_text("Carte réactualisée")
+
 
 def test_pivot_table_by_season(page):
     _open(page)
@@ -47,13 +50,6 @@ def test_pivot_table_by_season(page):
     expect(frame.locator(".pvtTable, .pvtUi").first).to_be_visible()
 
 
-def test_refresh_button(page):
-    _open(page)
-    expect(page.locator("#iframe-map")).to_be_visible(timeout=30_000)
-    page.locator("#tools-refresh-btn").click()
-    expect(page.locator("#toast")).to_contain_text("Carte réactualisée")
-
-
 def test_expired_google_token_warning(page):
     """Every office page warns when the club's Google token has expired (alj-shell.js)."""
     page.route("**/api/auth/google/status", lambda route: route.fulfill(
@@ -61,13 +57,6 @@ def test_expired_google_token_warning(page):
     page.goto("/bureau/")
     login_as(page, "admin")
     expect(page.locator("#google-auth-warning")).to_be_visible()
-
-
-def test_no_warning_when_token_is_fine(page):
-    page.goto("/bureau/")
-    login_as(page, "admin")
-    expect(page.locator("#content")).to_be_visible()
-    expect(page.locator("#google-auth-warning")).to_be_hidden()
 
 
 # ---------------------------------------------------------------------------

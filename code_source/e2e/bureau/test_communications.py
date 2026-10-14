@@ -29,7 +29,8 @@ def accept_with(page):
     return answer
 
 
-def test_create_edit_delete_template(page, accept_with):
+def test_template_lifecycle(page, accept_with):
+    """Create, edit (kept after a reload), rename, delete."""
     _open(page)
     name = unique_name("E2E Template")
     _create(page, name)
@@ -48,19 +49,15 @@ def test_create_edit_delete_template(page, accept_with):
     expect(page.locator("#body-input")).to_have_value("Hello {first_name}, see you at the camp.")
     expect(page.locator("#sender-email")).to_have_value("competitions@alj-escalade.fr")
 
-    page.locator("#btn-del-tpl").click()
-    expect(page.locator("#toast")).to_contain_text(f"Modèle « {name} » supprimé")
-    expect(page.locator("#template-select option").filter(has_text=name)).to_have_count(0)
-
-
-def test_rename_template(page, accept_with):
-    _open(page)
-    name, renamed = unique_name("E2E Template"), unique_name("E2E Renamed")
-    _create(page, name)
+    renamed = unique_name("E2E Renamed")
     page.locator("#template-name-input").fill(renamed)
     page.locator("#btn-save-tpl").click()
     expect(page.locator("#template-select")).to_have_value(renamed)
     expect(page.locator("#template-select option").filter(has_text=name)).to_have_count(0)
+
+    page.locator("#btn-del-tpl").click()
+    expect(page.locator("#toast")).to_contain_text(f"Modèle « {renamed} » supprimé")
+    expect(page.locator("#template-select option").filter(has_text=renamed)).to_have_count(0)
 
 
 def test_duplicate_name_refused(page, accept_with):

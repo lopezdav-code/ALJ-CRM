@@ -48,10 +48,11 @@ def test_name_is_required(mobile_page):
     expect(page.locator("#comp-form-card")).to_be_visible()
 
 
-def test_edit_competition(mobile_page, test_data):
+def test_edit_and_delete_competition(mobile_page, test_data):
     nom = unique_name("E2E Edit")
     test_data.create_competition(nom, date=_iso(30), prix=10)
     page = open_app(mobile_page)
+    accept_dialogs(page)
     competition_card(page, nom).get_by_role("button", name="Modifier").click()
     expect(page.locator("#f-nom")).to_have_value(nom)
     renamed = unique_name("E2E Edited")
@@ -65,19 +66,13 @@ def test_edit_competition(mobile_page, test_data):
     expect(card).to_contain_text("Coachs : Filius Flitwick")
     expect(competition_card(page, nom)).to_have_count(0)
 
-
-def test_delete_competition(mobile_page, test_data):
-    nom = unique_name("E2E Delete")
-    test_data.create_competition(nom, date=_iso(30))
-    page = open_app(mobile_page)
-    accept_dialogs(page)
-    competition_card(page, nom).get_by_role("button", name="Modifier").click()
+    card.get_by_role("button", name="Modifier").click()
     page.locator("#f-delete").click()
     expect(page.locator("#toast")).to_contain_text("Compétition supprimée")
-    expect(competition_card(page, nom)).to_have_count(0)
+    expect(competition_card(page, renamed)).to_have_count(0)
 
     def deleted():
-        assert test_data.competition_by_name(nom) is None
+        assert test_data.competition_by_name(renamed) is None
     eventually(deleted)
 
 

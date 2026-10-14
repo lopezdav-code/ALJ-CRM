@@ -23,7 +23,8 @@ def _controlled(page, path="/bureau/"):
     return page
 
 
-def test_precache_named_after_web_version(page):
+def test_cache_contents(page):
+    """Precache named after the web version; the API and runtime config are never cached."""
     web_version = page.request.get("/api/web-version").json()["web_version"]
     _controlled(page)
     cache_name = f"alj-escalade-v{web_version}"
@@ -32,11 +33,7 @@ def test_precache_named_after_web_version(page):
     for path in ("/bureau/", "/competitions", "/static-web/alj-core.js", "/static-web/alj-firebase.js"):
         assert path in cached, f"{path} not precached"
 
-
-def test_api_and_runtime_config_never_cached(page):
-    _controlled(page)
     page.evaluate("() => Promise.all([fetch('/api/web-version'), fetch('/runtime-config.js'), fetch('/health')])")
-    cache_name = page.evaluate(_CACHE_KEYS)[0]
     cached = page.evaluate(_CACHED_URLS, cache_name)
     assert "/api/web-version" not in cached
     assert "/runtime-config.js" not in cached
