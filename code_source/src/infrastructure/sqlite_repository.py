@@ -1136,6 +1136,14 @@ class SqliteRepository:
             return prep
         try:
             df = pd.read_excel(excel_path)
+            required_cols = ["Nom", "Pr\u00e9nom", "N\u00b0 de licence"]
+            if not all(col in df.columns for col in required_cols):
+                try:
+                    df_h1 = pd.read_excel(excel_path, header=1)
+                    if all(col in df_h1.columns for col in required_cols):
+                        df = df_h1
+                except Exception:
+                    pass
         except Exception as e:
             stats["errors"].append(f"Erreur de lecture Excel : {e}")
             return prep
@@ -1267,7 +1275,7 @@ class SqliteRepository:
         return prep
 
     @classmethod
-    def apply_ffme_matches(cls, updates: list) -> bool:
+    def apply_ffme_matches(cls, updates: list, season_name: str = None) -> bool:
         """
         Phase B de l'import FFME — écrit en base les associations validées :
         updates = [(match_type, licence, passeports, diplomas, document_sante, user_id), ...]
@@ -1282,20 +1290,49 @@ class SqliteRepository:
         conn = cls.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.executemany("""
-                UPDATE users
-                SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
-                WHERE id = ?
-            """, [(u[1], u[2], u[3], u[5]) for u in updates])
+            from domain.constants import get_active_season
+            target_season = str(season_name or get_active_season()).strip()
+
+            for u in updates:
+                lic = str(u[1] or "").strip()
+                passp = str(u[2] or "").strip()
+                dipl = str(u[3] or "").strip()
+                uid = int(u[5])
+
+                if passp and dipl:
+                    cursor.execute("""
+                        UPDATE users
+                        SET licence_ffme = ?, raw_passports = ?, raw_diplomas = ?
+                        WHERE id = ?
+                    """, (lic, passp, dipl, uid))
+                elif passp:
+                    cursor.execute("""
+                        UPDATE users
+                        SET licence_ffme = ?, raw_passports = ?
+                        WHERE id = ?
+                    """, (lic, passp, uid))
+                elif dipl:
+                    cursor.execute("""
+                        UPDATE users
+                        SET licence_ffme = ?, raw_diplomas = ?
+                        WHERE id = ?
+                    """, (lic, dipl, uid))
+                else:
+                    cursor.execute("""
+                        UPDATE users
+                        SET licence_ffme = ?
+                        WHERE id = ?
+                    """, (lic, uid))
+
             cursor.executemany("""
                 UPDATE purchases
                 SET status = ?, status_normalized = ?, document_sante = ?, updated_at = ?
                 WHERE user_id = ? AND order_id IN (
                     SELECT id FROM orders
-                    WHERE season_id = (SELECT id FROM seasons WHERE name = '2026-2027')
+                    WHERE season_id = (SELECT id FROM seasons WHERE name = ? OR is_active = 1 LIMIT 1)
                 )
             """, [(u[0], schema_v2.normalize_status(u[0]), u[4],
-                   datetime.datetime.now().isoformat(timespec="seconds"), u[5]) for u in updates])
+                   datetime.datetime.now().isoformat(timespec="seconds"), u[5], target_season) for u in updates])
             conn.commit()
             return True
         except Exception as e:

@@ -61,6 +61,7 @@ startBureau({
           <button class="btn btn-muted btn-mini" id="toggle-filter-box" title="Afficher ou masquer la sélection des créneaux">📂 Créneaux / Tarifs</button>
           <button class="btn btn-muted btn-mini" id="export-csv-btn" title="Télécharger la liste actuellement filtrée en fichier CSV">📥 Export CSV</button>
           <a href="/bureau/outils?tab=ffme" class="btn btn-muted btn-mini" style="text-decoration:none;" title="Ouvrir l'outil d'exportation officiel FFME">🇫🇷 Export FFME</a>
+          ${isAdmin ? `<a href="/bureau/outils?tab=ffme-import" class="btn btn-muted btn-mini" style="text-decoration:none;" title="Importer la liste Excel des licenciés FFME">📥 Import FFME</a>` : ""}
           <button class="btn btn-muted btn-mini" id="btn-sync-now" title="Forcer la synchronisation immédiate de la base de données avec Firestore">🔄 Synchroniser BDD</button>
           ${isAdmin ? `<button class="btn btn-primary btn-mini" id="btn-add-member" title="Ajouter manuellement un nouvel adhérent pour la saison sélectionnée">➕ Ajouter un adhérent</button>` : ""}
         </div>

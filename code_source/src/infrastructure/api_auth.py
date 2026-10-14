@@ -134,6 +134,8 @@ def required_role(method: str, path: str) -> Optional[str]:
         return "admin"  # modification du template WhatsApp réservée aux administrateurs
     if path.startswith("/api/settings") and method not in ("GET", "HEAD"):
         return "admin"  # modification des paramètres généraux réservée aux administrateurs
+    if path.startswith("/api/ffme") and method not in ("GET", "HEAD"):
+        return "admin"  # imports et modifications FFME réservés aux administrateurs
     if path == "/api/auth/google/update-token" and method not in ("GET", "HEAD"):
         return "admin"  # mise à jour manuelle des identifiants Google réservée aux administrateurs
     return "coach"

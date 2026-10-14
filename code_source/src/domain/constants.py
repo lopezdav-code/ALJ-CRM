@@ -9,7 +9,7 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"), override=True)
 
 # Saison active par défaut
 DEFAULT_SEASON = "2026-2027"
-APP_VERSION = "2.7.4"
+APP_VERSION = "2.7.5"
 
 # Tarifs permanents disponibles hors créneau de cours (ex: licence seule)
 DEFAULT_EXTRA_TARIFS = ["Licence sèche"]

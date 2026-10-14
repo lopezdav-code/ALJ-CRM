@@ -43,6 +43,7 @@ startBureau({
               <span class="filter-chip" id="tab-btn-pivot" style="font-size:13px; padding:6px 14px;">📊 Analyse des effectifs (TCD)</span>
               <span class="filter-chip" id="tab-btn-presence" style="font-size:13px; padding:6px 14px;">📋 Fiches de présence</span>
               <span class="filter-chip" id="tab-btn-ffme" style="font-size:13px; padding:6px 14px;">🇫🇷 Export CSV FFME</span>
+              <span class="filter-chip" id="tab-btn-ffme-import" style="font-size:13px; padding:6px 14px;">📥 Import Excel FFME</span>
             </div>
             <button class="btn btn-muted btn-mini" id="tools-refresh-btn" title="Recharger l'outil actif">🔄 Recharger</button>
           </div>
@@ -242,6 +243,107 @@ startBureau({
         </div>
       </div>
 
+      <!-- Onglet 5 : Importation Fédérale FFME (Excel) -->
+      <div class="tools-wrap" id="pane-ffme-import" style="display:none; flex-direction:column; gap:16px;">
+        <div class="card" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+            <div>
+              <h2 style="font-size:16px; margin:0 0 4px; display:flex; align-items:center; gap:8px;">
+                <span>📥 Importation de la liste des licenciés FFME (.xlsx)</span>
+                <span class="badge" style="background:#ECFDF5; color:#065F46; font-size:11px; padding:2px 8px;">Synchronisation Fédérale</span>
+              </h2>
+              <p class="muted" style="font-size:13px; margin:0; line-height:1.45;">
+                Téléversez le fichier Excel exporté depuis le portail <b>MyFFME</b>. Le système analyse la liste, réconcilie les licenciés avec la base du club (par N° de licence ou par Nom/Prénom), enregistre les licences, diplômes et documents de santé, et bascule les adhérents associés en statut <b>« Terminé »</b>.
+              </p>
+            </div>
+            <a href="https://myffme.fr" target="_blank" class="btn btn-muted btn-mini" style="text-decoration:none; display:flex; align-items:center; gap:6px;">
+              <span>🌐 Portail MyFFME</span>
+            </a>
+          </div>
+
+          <!-- Zone de sélection / Drag & drop du fichier Excel -->
+          <div id="ffme-drop-zone" style="border:2px dashed #CBD5E1; border-radius:10px; padding:24px 20px; text-align:center; background:#F8FAFC; cursor:pointer; transition:all .2s ease; margin-bottom:16px;">
+            <div style="font-size:32px; margin-bottom:8px;">📊</div>
+            <div style="font-size:14px; font-weight:700; color:var(--ink); margin-bottom:4px;">
+              Glissez-déposez le fichier Excel exporté depuis la FFME ici
+            </div>
+            <div class="muted" style="font-size:12px; margin-bottom:12px;">
+              ou cliquez pour parcourir vos fichiers (.xlsx)
+            </div>
+            <input type="file" id="ffme-file-input" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;">
+            <button type="button" class="btn btn-muted btn-mini" id="ffme-browse-btn" style="padding:6px 16px; font-size:12.5px;">
+              📁 Parcourir un fichier…
+            </button>
+            <div id="ffme-file-selected-name" style="margin-top:10px; font-weight:600; font-size:13px; color:#2563EB; display:none;"></div>
+          </div>
+
+          <!-- Actions d'importation -->
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px;">
+            <button class="btn btn-primary" id="btn-ffme-analyze" disabled style="padding:9px 18px; font-size:13px;">
+              🔍 Analyser & Prévisualiser le fichier
+            </button>
+            <button class="btn btn-muted" id="btn-ffme-quick-import" disabled style="padding:9px 18px; font-size:13px;">
+              ⚡ Importer & Fusionner directement
+            </button>
+            <span id="ffme-import-status-text" class="muted" style="font-size:12.5px;"></span>
+          </div>
+
+          <!-- Zone des résultats de l'analyse (masquée au départ) -->
+          <div id="ffme-results-section" style="display:none; border-top:1px solid var(--line); padding-top:16px;">
+            <!-- Cartes statistiques du rapprochement -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
+              <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+                <div class="muted" style="font-size:11px; font-weight:600;">LIGNES EXCEL TRAITÉES</div>
+                <div id="ffme-res-total" style="font-size:18px; font-weight:700; color:var(--ink); margin-top:2px;">—</div>
+              </div>
+              <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+                <div class="muted" style="font-size:11px; font-weight:600;">🟢 TROUVÉS PAR N° LICENCE</div>
+                <div id="ffme-res-licence" style="font-size:18px; font-weight:700; color:#16A34A; margin-top:2px;">—</div>
+              </div>
+              <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+                <div class="muted" style="font-size:11px; font-weight:600;">🔵 TROUVÉS PAR NOM & PRÉNOM</div>
+                <div id="ffme-res-name" style="font-size:18px; font-weight:700; color:#2563EB; margin-top:2px;">—</div>
+              </div>
+              <div style="background:#F8FAFC; border:1px solid var(--line); border-radius:8px; padding:10px 12px;">
+                <div class="muted" style="font-size:11px; font-weight:600;">⚠️ NON TROUVÉS DANS LA BASE</div>
+                <div id="ffme-res-unmatched" style="font-size:18px; font-weight:700; color:#DC2626; margin-top:2px;">—</div>
+              </div>
+            </div>
+
+            <!-- Section Licenciés non trouvés : Tableau d'association manuelle -->
+            <div id="ffme-unmatched-box" style="display:none; margin-bottom:16px; background:#FEF2F2; border:1px solid #FECACA; border-radius:8px; padding:12px 14px;">
+              <div style="font-size:13.5px; font-weight:700; color:#991B1B; margin-bottom:6px;">
+                ⚠️ Licenciés FFME non reconnus automatiquement dans la base (<span id="ffme-unmatched-count">0</span>)
+              </div>
+              <p class="muted" style="font-size:12px; margin:0 0 10px; color:#7F1D1D;">
+                Ces licenciés sont présents dans le fichier FFME mais n'ont pas pu être associés de façon certaine. Vous pouvez associer chaque ligne à un adhérent du club ou la laisser ignorée.
+              </p>
+              <div style="max-height:260px; overflow-y:auto; border:1px solid #FECACA; border-radius:6px; background:#FFFFFF;">
+                <table class="data-table" style="font-size:12px; width:100%;">
+                  <thead>
+                    <tr>
+                      <th style="padding:6px 10px;">Licencié FFME (Fichier)</th>
+                      <th style="padding:6px 10px;">N° Licence</th>
+                      <th style="padding:6px 10px;">Naissance</th>
+                      <th style="padding:6px 10px;">Associer à un adhérent du club</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ffme-unmatched-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Bouton de validation finale -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <button class="btn btn-primary" id="btn-ffme-apply" style="padding:10px 22px; font-size:13.5px;">
+                ✅ Appliquer et enregistrer en base de données
+              </button>
+              <span class="muted" id="ffme-apply-summary" style="font-size:12px;"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="toast"></div>
     `;
 
@@ -266,12 +368,37 @@ startBureau({
     const tabBtnPivot = document.getElementById("tab-btn-pivot");
     const tabBtnPresence = document.getElementById("tab-btn-presence");
     const tabBtnFfme = document.getElementById("tab-btn-ffme");
+    const tabBtnFfmeImport = document.getElementById("tab-btn-ffme-import");
     const paneMap = document.getElementById("pane-map");
     const panePivot = document.getElementById("pane-pivot");
     const panePresence = document.getElementById("pane-presence");
     const paneFfme = document.getElementById("pane-ffme");
+    const paneFfmeImport = document.getElementById("pane-ffme-import");
     const refreshBtn = document.getElementById("tools-refresh-btn");
     const seasonSelect = document.getElementById("pivot-season-select");
+
+    // Éléments Importation FFME
+    const ffmeDropZone = document.getElementById("ffme-drop-zone");
+    const ffmeFileInput = document.getElementById("ffme-file-input");
+    const ffmeBrowseBtn = document.getElementById("ffme-browse-btn");
+    const ffmeFileSelectedName = document.getElementById("ffme-file-selected-name");
+    const btnFfmeAnalyze = document.getElementById("btn-ffme-analyze");
+    const btnFfmeQuickImport = document.getElementById("btn-ffme-quick-import");
+    const ffmeImportStatusText = document.getElementById("ffme-import-status-text");
+    const ffmeResultsSection = document.getElementById("ffme-results-section");
+    const ffmeResTotal = document.getElementById("ffme-res-total");
+    const ffmeResLicence = document.getElementById("ffme-res-licence");
+    const ffmeResName = document.getElementById("ffme-res-name");
+    const ffmeResUnmatched = document.getElementById("ffme-res-unmatched");
+    const ffmeUnmatchedBox = document.getElementById("ffme-unmatched-box");
+    const ffmeUnmatchedCount = document.getElementById("ffme-unmatched-count");
+    const ffmeUnmatchedTbody = document.getElementById("ffme-unmatched-tbody");
+    const btnFfmeApply = document.getElementById("btn-ffme-apply");
+    const ffmeApplySummary = document.getElementById("ffme-apply-summary");
+
+    let selectedFfmeFile = null;
+    let selectedFfmeBase64 = null;
+    let currentFfmePreview = null;
 
     // Éléments présence
     const presenceAutonomeSummary = document.getElementById("presence-autonome-summary");
@@ -575,17 +702,270 @@ startBureau({
       }
     });
 
+    // ==========================================
+    // Gestion du fichier Excel FFME
+    // ==========================================
+    function handleFfmeFile(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith(".xlsx")) {
+        toast("⚠️ Seuls les fichiers Excel .xlsx sont acceptés.");
+        return;
+      }
+      selectedFfmeFile = file;
+      ffmeFileSelectedName.style.display = "block";
+      ffmeFileSelectedName.textContent = `📄 Fichier sélectionné : ${file.name} (${Math.round(file.size / 1024)} Ko)`;
+      btnFfmeAnalyze.disabled = false;
+      btnFfmeQuickImport.disabled = false;
+      ffmeResultsSection.style.display = "none";
+      currentFfmePreview = null;
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        const raw = e.target.result;
+        selectedFfmeBase64 = raw.split(",")[1];
+      };
+      reader.readAsDataURL(file);
+    }
+
+    ffmeBrowseBtn.addEventListener("click", () => ffmeFileInput.click());
+    ffmeDropZone.addEventListener("click", e => {
+      if (e.target !== ffmeBrowseBtn) ffmeFileInput.click();
+    });
+    ffmeFileInput.addEventListener("change", e => {
+      if (e.target.files && e.target.files[0]) handleFfmeFile(e.target.files[0]);
+    });
+
+    ffmeDropZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      ffmeDropZone.style.borderColor = "var(--blue)";
+      ffmeDropZone.style.background = "#EFF6FF";
+    });
+    ffmeDropZone.addEventListener("dragleave", e => {
+      e.preventDefault();
+      ffmeDropZone.style.borderColor = "#CBD5E1";
+      ffmeDropZone.style.background = "#F8FAFC";
+    });
+    ffmeDropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      ffmeDropZone.style.borderColor = "#CBD5E1";
+      ffmeDropZone.style.background = "#F8FAFC";
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFfmeFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    btnFfmeAnalyze.addEventListener("click", async () => {
+      if (!selectedFfmeBase64) {
+        toast("⚠️ Veuillez d'abord sélectionner un fichier Excel .xlsx.");
+        return;
+      }
+
+      btnFfmeAnalyze.disabled = true;
+      btnFfmeQuickImport.disabled = true;
+      ffmeImportStatusText.textContent = "⏳ Analyse en cours…";
+
+      try {
+        const res = await apiFetch("/api/ffme/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: selectedFfmeFile.name,
+            content_base64: selectedFfmeBase64
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast("❌ Erreur analyse : " + (err.message || res.statusText));
+          ffmeImportStatusText.textContent = "";
+          return;
+        }
+
+        const data = await res.json();
+        currentFfmePreview = data;
+
+        ffmeResultsSection.style.display = "block";
+        const st = data.stats || {};
+        ffmeResTotal.textContent = st.total_processed || 0;
+        ffmeResLicence.textContent = st.matched_by_licence || 0;
+        ffmeResName.textContent = st.matched_by_name || 0;
+        ffmeResUnmatched.textContent = (data.unmatched || []).length;
+
+        const unmatched = data.unmatched || [];
+        const users = data.users || [];
+        if (unmatched.length > 0) {
+          ffmeUnmatchedBox.style.display = "block";
+          ffmeUnmatchedCount.textContent = unmatched.length;
+
+          const userOptions = users.map(u => `<option value="${u.id}">${esc(u.last_name)} ${esc(u.first_name)} (${esc(u.birth_date || "—")})</option>`).join("");
+
+          ffmeUnmatchedTbody.innerHTML = unmatched.map((item, idx) => {
+            return `
+              <tr>
+                <td style="padding:6px 10px; font-weight:600;">${esc(item.nom)} ${esc(item.prenom)}</td>
+                <td style="padding:6px 10px; font-family:monospace;">${esc(item.licence || "—")}</td>
+                <td style="padding:6px 10px;">${esc(item.birth_date || "—")}</td>
+                <td style="padding:6px 10px;">
+                  <select class="select-input ffme-manual-select" data-idx="${idx}" style="width:100%; font-size:12px; padding:3px 6px;">
+                    <option value="">-- Ignorer cette ligne --</option>
+                    ${userOptions}
+                  </select>
+                </td>
+              </tr>
+            `;
+          }).join("");
+        } else {
+          ffmeUnmatchedBox.style.display = "none";
+        }
+
+        ffmeApplySummary.textContent = `${data.matched_count} adhérents réconciliés automatiquement.`;
+        toast("✅ Analyse terminée ! Vous pouvez vérifier les correspondances ci-dessous.");
+      } catch (err) {
+        toast("❌ Erreur réseau lors de l'analyse : " + err.message);
+      } finally {
+        btnFfmeAnalyze.disabled = false;
+        btnFfmeQuickImport.disabled = false;
+        ffmeImportStatusText.textContent = "";
+      }
+    });
+
+    btnFfmeQuickImport.addEventListener("click", async () => {
+      if (!selectedFfmeBase64) {
+        toast("⚠️ Veuillez sélectionner un fichier Excel .xlsx.");
+        return;
+      }
+      if (!confirm("Voulez-vous lancer l'importation directe ? Les licenciés reconnus automatiquement par N° de licence ou Nom/Prénom seront mis à jour et basculés en statut « Terminé ».")) {
+        return;
+      }
+
+      btnFfmeAnalyze.disabled = true;
+      btnFfmeQuickImport.disabled = true;
+      ffmeImportStatusText.textContent = "⏳ Importation en cours…";
+
+      try {
+        const res = await apiFetch("/api/ffme/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: selectedFfmeFile.name,
+            content_base64: selectedFfmeBase64
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast("❌ Échec : " + (err.message || res.statusText));
+          return;
+        }
+
+        const data = await res.json();
+        toast("✅ " + data.message);
+        ffmeResultsSection.style.display = "none";
+        selectedFfmeFile = null;
+        selectedFfmeBase64 = null;
+        ffmeFileSelectedName.style.display = "none";
+        btnFfmeAnalyze.disabled = true;
+        btnFfmeQuickImport.disabled = true;
+      } catch (err) {
+        toast("❌ Erreur réseau : " + err.message);
+      } finally {
+        ffmeImportStatusText.textContent = "";
+      }
+    });
+
+    btnFfmeApply.addEventListener("click", async () => {
+      if (!currentFfmePreview) {
+        toast("⚠️ Aucune analyse en cours.");
+        return;
+      }
+
+      const manualMatches = [];
+      document.querySelectorAll(".ffme-manual-select").forEach(sel => {
+        const uid = sel.value;
+        if (uid) {
+          const idx = parseInt(sel.dataset.idx, 10);
+          const item = currentFfmePreview.unmatched[idx];
+          if (item) {
+            manualMatches.push({
+              user_id: parseInt(uid, 10),
+              nom: item.nom,
+              prenom: item.prenom,
+              licence: item.licence,
+              passeports: item.passeports,
+              diplomes: item.diplomes,
+              document_sante: item.document_sante
+            });
+          }
+        }
+      });
+
+      const totalToUpdate = (currentFfmePreview.updates || []).length + manualMatches.length;
+      if (totalToUpdate === 0) {
+        toast("⚠️ Aucune modification à appliquer.");
+        return;
+      }
+
+      if (!confirm(`Confirmer l'enregistrement de ${totalToUpdate} adhérents en base de données ?\n\n• ${currentFfmePreview.updates.length} réconciliés automatiquement\n• ${manualMatches.length} associés manuellement`)) {
+        return;
+      }
+
+      btnFfmeApply.disabled = true;
+      btnFfmeApply.textContent = "⏳ Enregistrement…";
+
+      try {
+        const res = await apiFetch("/api/ffme/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: selectedFfmeFile ? selectedFfmeFile.name : "import_ffme.xlsx",
+            content_base64: selectedFfmeBase64,
+            updates: currentFfmePreview.updates,
+            manual_matches: manualMatches
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast("❌ Échec : " + (err.message || res.statusText));
+          return;
+        }
+
+        const data = await res.json();
+        toast("🎉 " + data.message);
+
+        ffmeResultsSection.innerHTML = `
+          <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:8px; padding:16px; text-align:center;">
+            <div style="font-size:24px; margin-bottom:6px;">🎉</div>
+            <div style="font-size:15px; font-weight:700; color:#065F46; margin-bottom:4px;">
+              Importation FFME enregistrée avec succès !
+            </div>
+            <p style="font-size:13px; color:#047857; margin:0 0 12px;">
+              ${data.updated_count} adhérents ont été mis à jour avec leurs licences, diplômes et documents de santé. Leurs statuts sont désormais passés en <b>« Terminé »</b>.
+            </p>
+            <button class="btn btn-muted btn-mini" onclick="location.reload()" style="padding:6px 14px;">🔄 Réinitialiser l'outil</button>
+          </div>
+        `;
+      } catch (err) {
+        toast("❌ Erreur réseau : " + err.message);
+      } finally {
+        btnFfmeApply.disabled = false;
+        btnFfmeApply.textContent = "✅ Appliquer et enregistrer en base de données";
+      }
+    });
+
     function switchTab(tab) {
       activeTab = tab;
       tabBtnMap.classList.toggle("active", tab === "map");
       tabBtnPivot.classList.toggle("active", tab === "pivot");
       tabBtnPresence.classList.toggle("active", tab === "presence");
       tabBtnFfme.classList.toggle("active", tab === "ffme");
+      tabBtnFfmeImport.classList.toggle("active", tab === "ffme-import");
 
       paneMap.style.display = tab === "map" ? "flex" : "none";
       panePivot.style.display = tab === "pivot" ? "flex" : "none";
       panePresence.style.display = tab === "presence" ? "flex" : "none";
       paneFfme.style.display = tab === "ffme" ? "flex" : "none";
+      paneFfmeImport.style.display = tab === "ffme-import" ? "flex" : "none";
 
       if (tab === "map") loadMap();
       else if (tab === "pivot") loadPivot(seasonSelect.value || "2026-2027");
@@ -597,6 +977,7 @@ startBureau({
     tabBtnPivot.addEventListener("click", () => switchTab("pivot"));
     tabBtnPresence.addEventListener("click", () => switchTab("presence"));
     tabBtnFfme.addEventListener("click", () => switchTab("ffme"));
+    tabBtnFfmeImport.addEventListener("click", () => switchTab("ffme-import"));
 
     refreshBtn.addEventListener("click", () => {
       if (activeTab === "map") {
@@ -611,6 +992,14 @@ startBureau({
       } else if (activeTab === "ffme") {
         loadFfmeStats(true);
         toast("🔄 Statistiques FFME réactualisées.");
+      } else if (activeTab === "ffme-import") {
+        selectedFfmeFile = null;
+        selectedFfmeBase64 = null;
+        ffmeFileSelectedName.style.display = "none";
+        ffmeResultsSection.style.display = "none";
+        btnFfmeAnalyze.disabled = true;
+        btnFfmeQuickImport.disabled = true;
+        toast("🔄 Formulaire d'import FFME réinitialisé.");
       }
     });
 
@@ -640,9 +1029,9 @@ startBureau({
       });
     } catch (e) {}
 
-    // Vérifier si un onglet est passé dans l'URL (?tab=ffme, ?tab=presence, ?tab=pivot)
+    // Vérifier si un onglet est passé dans l'URL (?tab=ffme, ?tab=ffme-import, ?tab=presence, ?tab=pivot)
     const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab && ["map", "pivot", "presence", "ffme"].includes(urlTab)) {
+    if (urlTab && ["map", "pivot", "presence", "ffme", "ffme-import"].includes(urlTab)) {
       switchTab(urlTab);
     } else {
       loadMap();

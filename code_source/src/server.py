@@ -2078,6 +2078,154 @@ def export_ffme_api(season: Optional[str] = None, include_termine: bool = Query(
         return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "export_ffme_api")})
 
 
+# --------------------------------------------------------------------------
+# Importation & Rapprochement Fédéral FFME (Excel)
+# --------------------------------------------------------------------------
+@app.post("/api/ffme/preview")
+def preview_ffme_import_api(data: Dict[str, Any] = Body(...)):
+    """Analyse un fichier Excel FFME et prépare le rapprochement sans modifier la base."""
+    import base64
+    import tempfile
+    import os
+    from infrastructure.sqlite_repository import SqliteRepository
+
+    try:
+        content_b64 = data.get("content_base64") or ""
+        filename = str(data.get("filename") or "licencies_ffme.xlsx").strip()
+
+        if not content_b64:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Fichier Excel manquant (content_base64 obligatoire)."})
+
+        file_bytes = base64.b64decode(content_b64)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        try:
+            prep = SqliteRepository.prepare_ffme_licensees(tmp_path)
+            stats = prep.get("stats", {})
+            if stats.get("errors") and not prep.get("updates"):
+                return JSONResponse(status_code=400, content={"status": "error", "message": stats["errors"][0], "errors": stats["errors"]})
+
+            return {
+                "status": "success",
+                "filename": filename,
+                "stats": stats,
+                "matched_count": len(prep.get("updates", [])),
+                "unmatched_count": len(prep.get("unmatched", [])),
+                "updates": prep.get("updates", []),
+                "unmatched": prep.get("unmatched", []),
+                "users": prep.get("users", [])
+            }
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "preview_ffme_import_api")})
+
+
+@app.post("/api/ffme/import")
+def apply_ffme_import_api(data: Dict[str, Any] = Body(...)):
+    """Applique l'importation FFME en BDD (mises à jour automatiques + associations manuelles)."""
+    import base64
+    import os
+    import tempfile
+    from infrastructure.sqlite_repository import SqliteRepository
+    from domain.constants import get_active_season
+    from paths import ROOT_DIR
+
+    try:
+        season = str(data.get("season") or get_active_season()).strip()
+        updates = list(data.get("updates") or [])
+        manual_matches = list(data.get("manual_matches") or [])
+        content_b64 = data.get("content_base64")
+        filename = str(data.get("filename") or "import_ffme.xlsx").strip()
+
+        # Si pas d'updates fournis mais content_b64 fourni : préparer automatiquement
+        stats = {
+            "total_processed": 0,
+            "matched_by_licence": 0,
+            "matched_by_name": 0,
+            "matched_manually": 0,
+            "errors": []
+        }
+
+        if not updates and content_b64:
+            file_bytes = base64.b64decode(content_b64)
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
+            try:
+                prep = SqliteRepository.prepare_ffme_licensees(tmp_path)
+                updates = prep.get("updates", [])
+                stats = prep.get("stats", {})
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+        elif data.get("stats"):
+            stats = dict(data.get("stats"))
+
+        # Ajouter les associations manuelles
+        matched_manually = 0
+        for m in manual_matches:
+            uid = m.get("user_id")
+            if uid:
+                updates.append((
+                    "Terminé",
+                    str(m.get("licence") or "").strip(),
+                    str(m.get("passeports") or "").strip(),
+                    str(m.get("diplomes") or "").strip(),
+                    str(m.get("document_sante") or "").strip(),
+                    int(uid)
+                ))
+                matched_manually += 1
+
+        stats["matched_manually"] = matched_manually
+
+        if not updates:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "Aucune mise à jour à appliquer (aucun rapprochement trouvé)."}
+            )
+
+        ok = SqliteRepository.apply_ffme_matches(updates, season_name=season)
+        if not ok:
+            return JSONResponse(status_code=500, content={"status": "error", "message": "Échec de l'écriture des associations en base de données."})
+
+        # Sauvegarde éventuelle d'une copie dans import/ffme/
+        if content_b64:
+            try:
+                dest_dir = os.path.join(ROOT_DIR, "import", "ffme")
+                os.makedirs(dest_dir, exist_ok=True)
+                dest_path = os.path.join(dest_dir, filename)
+                file_bytes = base64.b64decode(content_b64)
+                with open(dest_path, "wb") as f:
+                    f.write(file_bytes)
+            except Exception as se:
+                print(f"[FFME IMPORT] Copie locale du fichier non critique : {se}")
+
+        from infrastructure.cloud_database import CloudDatabase
+        if CloudDatabase.is_enabled():
+            CloudDatabase.after_write()
+
+        return {
+            "status": "success",
+            "message": f"Importation FFME validée : {len(updates)} adhérents mis à jour.",
+            "updated_count": len(updates),
+            "matched_manually": matched_manually,
+            "season": season,
+            "stats": stats
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "apply_ffme_import_api")})
+
+
 @app.get("/api/season-tarifs")
 def get_season_tarifs_api(season: Optional[str] = None):
     """Retourne la liste des tarifs HelloAsso (groupes disponibles) d'une saison pour l'édition de créneau."""

@@ -726,7 +726,7 @@ class TestBureauFiles(unittest.TestCase):
         res_del = delete_planning_item_api(saved_id)
         self.assertEqual(res_del.get("status"), "success")
 
-    def test_outils_page_tabs_and_iframes_wiring(self):
+    def test_outils_page_tabs(self):
         """La page outils.html contient les onglets Carte et TCD."""
         html = _read(os.path.join(BUREAU, "outils.html"))
         for elem in ("tab-btn-map", "tab-btn-pivot", "pane-map", "pane-pivot",
@@ -735,6 +735,158 @@ class TestBureauFiles(unittest.TestCase):
         self.assertIn('apiFetch("/map")', html)
         self.assertIn('apiFetch(url)', html)
         self.assertIn('frame.srcdoc = html;', html)
+
+    def test_ffme_import_ui_elements(self):
+        """La page outils.html contient l'onglet et les éléments d'importation Excel FFME."""
+        html = _read(os.path.join(BUREAU, "outils.html"))
+        for elem in (
+            "tab-btn-ffme-import", "pane-ffme-import", "ffme-drop-zone", "ffme-file-input",
+            "ffme-browse-btn", "btn-ffme-analyze", "btn-ffme-quick-import",
+            "btn-ffme-apply", "ffme-results-section", "ffme-unmatched-box", "ffme-unmatched-tbody"
+        ):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/api/ffme/preview"', html)
+        self.assertIn('apiFetch("/api/ffme/import"', html)
+
+        # Vérification du lien direct depuis adherents.html
+        adh_html = _read(os.path.join(BUREAU, "adherents.html"))
+        self.assertIn('/bureau/outils?tab=ffme-import', adh_html)
+
+    def test_ffme_auth_roles(self):
+        """Les routes de modification/import FFME exigent le rôle admin."""
+        from infrastructure.api_auth import required_role
+        self.assertEqual(required_role("POST", "/api/ffme/preview"), "admin")
+        self.assertEqual(required_role("POST", "/api/ffme/import"), "admin")
+        self.assertEqual(required_role("GET", "/api/ffme/export"), "coach")
+
+    def test_ffme_preview_and_apply_api(self):
+        """preview_ffme_import_api et apply_ffme_import_api fonctionnent de bout en bout avec un fichier Excel FFME."""
+        import base64
+        import tempfile
+        import shutil
+        import pandas as pd
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import preview_ffme_import_api, apply_ffme_import_api
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_ffme_import.db")
+        orig_db_path = SqliteRepository.get_db_path()
+
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+            conn = SqliteRepository.get_connection()
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO seasons (id, name, is_active) VALUES (1, '2026-2027', 1)")
+            # Insérer un utilisateur connu
+            c.execute("""
+                INSERT INTO users (id, last_name, first_name, last_name_key, first_name_key, licence_ffme, birth_date)
+                VALUES (101, 'GARCIA', 'Elena', 'garcia', 'elena', '112233', '2008-03-15')
+            """)
+            c.execute("""
+                INSERT INTO orders (id, order_ref, season_id, order_date, status, status_normalized)
+                VALUES (201, 'CMD-GARCIA', 1, '2026-09-01', 'Validé', 'Validé')
+            """)
+            c.execute("""
+                INSERT INTO purchases (id, order_id, user_id, tarif_name, amount, status, status_normalized)
+                VALUES (301, 201, 101, 'Cours Ados', 190.0, 'Validé', 'Validé')
+            """)
+            # Insérer un second utilisateur qui sera associé manuellement
+            c.execute("""
+                INSERT INTO users (id, last_name, first_name, last_name_key, first_name_key, licence_ffme, birth_date)
+                VALUES (102, 'MOREL', 'Thomas', 'morel', 'thomas', '', '2009-07-22')
+            """)
+            c.execute("""
+                INSERT INTO orders (id, order_ref, season_id, order_date, status, status_normalized)
+                VALUES (202, 'CMD-MOREL', 1, '2026-09-01', 'Validé', 'Validé')
+            """)
+            c.execute("""
+                INSERT INTO purchases (id, order_id, user_id, tarif_name, amount, status, status_normalized)
+                VALUES (302, 202, 102, 'Cours Ados', 190.0, 'Validé', 'Validé')
+            """)
+            conn.commit()
+            conn.close()
+
+            # Création du fichier Excel FFME de test (header=1)
+            excel_path = os.path.join(temp_dir, "test_ffme.xlsx")
+            df = pd.DataFrame([
+                {
+                    "Nom": "GARCIA",
+                    "Prénom": "Elena",
+                    "N° de licence": "112233",
+                    "Date de naissance": "15/03/2008",
+                    "Passeports": "Grimpeur Vert",
+                    "Diplômes": "Initiateur SAE",
+                    "Document de santé": "Questionnaire de santé"
+                },
+                {
+                    "Nom": "MOREL-DUPONT",
+                    "Prénom": "Tom",
+                    "N° de licence": "998877",
+                    "Date de naissance": "22/07/2009",
+                    "Passeports": "Grimpeur Bleu",
+                    "Diplômes": "",
+                    "Document de santé": "Certificat médical"
+                }
+            ])
+            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False, startrow=1)
+
+            with open(excel_path, "rb") as f:
+                b64_content = base64.b64encode(f.read()).decode("utf-8")
+
+            # 1. Test Prévisualisation
+            prev_res = preview_ffme_import_api({
+                "filename": "test_ffme.xlsx",
+                "content_base64": b64_content
+            })
+            self.assertEqual(prev_res.get("status"), "success")
+            self.assertEqual(prev_res.get("matched_count"), 1)
+            self.assertEqual(prev_res.get("unmatched_count"), 1)
+
+            # 2. Test Application avec 1 correspondance automatique et 1 association manuelle
+            apply_res = apply_ffme_import_api({
+                "season": "2026-2027",
+                "filename": "test_ffme.xlsx",
+                "content_base64": b64_content,
+                "updates": prev_res.get("updates"),
+                "manual_matches": [
+                    {
+                        "user_id": 102,
+                        "nom": "MOREL-DUPONT",
+                        "prenom": "Tom",
+                        "licence": "998877",
+                        "passeports": "Grimpeur Bleu",
+                        "diplomes": "",
+                        "document_sante": "Certificat médical"
+                    }
+                ]
+            })
+            self.assertEqual(apply_res.get("status"), "success")
+            self.assertEqual(apply_res.get("updated_count"), 2)
+
+            # Vérification dans SQLite
+            conn = SqliteRepository.get_connection()
+            u1 = conn.execute("SELECT * FROM users WHERE id = 101").fetchone()
+            self.assertEqual(u1["licence_ffme"], "112233")
+            self.assertEqual(u1["raw_passports"], "Grimpeur Vert")
+            self.assertEqual(u1["raw_diplomas"], "Initiateur SAE")
+
+            p1 = conn.execute("SELECT * FROM purchases WHERE id = 301").fetchone()
+            self.assertEqual(p1["status_normalized"], "Terminé")
+            self.assertEqual(p1["document_sante"], "Questionnaire de santé")
+
+            u2 = conn.execute("SELECT * FROM users WHERE id = 102").fetchone()
+            self.assertEqual(u2["licence_ffme"], "998877")
+            self.assertEqual(u2["raw_passports"], "Grimpeur Bleu")
+
+            p2 = conn.execute("SELECT * FROM purchases WHERE id = 302").fetchone()
+            self.assertEqual(p2["status_normalized"], "Terminé")
+            self.assertEqual(p2["document_sante"], "Certificat médical")
+            conn.close()
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_communications_page_ui_and_wiring(self):
         """La page communications.html reprend le design desktop et contient tous les contrôles."""
