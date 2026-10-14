@@ -7,6 +7,7 @@ import uuid
 import pytest
 from playwright.sync_api import expect
 
+from helpers.data import unique_name
 from helpers.members import ROWS, displayed_count, find, open_members, select
 from helpers.mobile import accept_dialogs
 
@@ -125,14 +126,15 @@ def test_send_email(page, mailpit, people):
     accept_dialogs(page)
     select(page, member).locator("#btn-action-email").click()
     expect(page.locator("#em-dest-email")).to_contain_text(member["email"])
-    page.locator("#em-subject").fill("Practice moved, {first_name}")
+    topic = unique_name("Practice moved")
+    page.locator("#em-subject").fill(topic + ", {first_name}")
     page.locator("#em-body").fill("Hello {first_name}, practice moves to Thursday.")
-    expect(page.locator("#em-preview-box")).to_contain_text(f"Practice moved, {member['prenom']}")
+    expect(page.locator("#em-preview-box")).to_contain_text(f"{topic}, {member['prenom']}")
     page.locator("#em-submit-btn").click()
     expect(page.locator("#toast")).to_contain_text("E-mail envoyé avec succès")
 
-    [sent] = mailpit.wait_for(f"to:{member['email']}")
-    assert sent["Subject"] == f"Practice moved, {member['prenom']}"
+    [sent] = mailpit.wait_for(f'to:{member["email"]} subject:"{topic}"')
+    assert sent["Subject"] == f"{topic}, {member['prenom']}"
     assert f"Hello {member['prenom']}, practice moves to Thursday." in sent["Text"]
 
 
@@ -166,7 +168,7 @@ def test_payment_certificate(page, mailpit, people, tmp_path):
 
     page.locator("#att-send-btn").click()
     expect(page.locator("#toast")).to_contain_text("Attestation envoyée avec succès")
-    [sent] = mailpit.wait_for(f"to:{recipient}")
+    [sent] = mailpit.wait_for(f"to:{recipient} has:attachment")   # the only e-mails with one
     attachments = sent["Attachments"]
     assert [a["ContentType"] for a in attachments] == ["application/pdf"]
     assert attachments[0]["FileName"].endswith(".pdf")

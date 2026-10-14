@@ -12,6 +12,9 @@ from playwright.sync_api import expect
 
 from helpers.auth import login_as
 
+# Attendance sheets and exports list the planning slots, which test_planning.py creates and deletes
+pytestmark = pytest.mark.xdist_group("planning")
+
 
 def _open(page, role="admin"):
     page.goto("/bureau/outils")

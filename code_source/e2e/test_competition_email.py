@@ -28,7 +28,7 @@ def _assert_sent_to_selected(mailpit, competition):
     recipients = sorted(m["To"][0]["Address"] for m in sent)
     assert recipients == sorted(m["email"].lower() for m in competition["selected"])
     assert all(competition["nom"] in m["Subject"] for m in sent), "competition variables resolved by the server"
-    assert not mailpit.messages(f'to:{competition["invited"]["email"]}')
+    assert not mailpit.messages(f'to:{competition["invited"]["email"]} subject:"{competition["nom"]}"')
 
 
 def test_mobile_campaign(mobile_page, mailpit, competition):

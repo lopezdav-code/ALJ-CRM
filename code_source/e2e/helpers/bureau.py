@@ -8,7 +8,7 @@ from helpers.mobile import SEEDED_COMPETITION
 def open_competitions(page: Page, role: str = "admin") -> Page:
     page.goto("/bureau/competitions")
     login_as(page, role)
-    expect(competition_card(page, SEEDED_COMPETITION)).to_be_visible()
+    expect(competition_card(page, SEEDED_COMPETITION)).to_be_visible(timeout=20_000)   # first load, as open_members
     return page
 
 

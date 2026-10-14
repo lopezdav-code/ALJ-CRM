@@ -9,6 +9,8 @@ from helpers.auth import login_as
 from helpers.data import unique_name
 from helpers.mobile import accept_dialogs
 
+# Tests create slots and compare counts with /api/planning: one after another, with test_outils.py
+pytestmark = pytest.mark.xdist_group("planning")
 ROWS = "#planning-table-tbody tr"
 
 

@@ -1,82 +1,96 @@
 """
-Fixtures of the e2e suite (Playwright, pytest-playwright).
+Fixtures of the e2e suite (Playwright, pytest-playwright), run in parallel by pytest-xdist.
 
-Session: start the throwaway e2e stack (e2e/docker-compose.yml: Firebase emulator + Mailpit on
-their own ports), seed it, start the fake HelloAsso and the server in dev mode on E2E_PORT
-(default 8090); the stack is removed at the end (E2E_KEEP_STACK=1 keeps it). The dev stack of
-dev/docker-compose.yml and its data are never touched.
+Session (helpers/session.py), started once by the xdist controller (or by the only process with -n 0)
+before any test: the throwaway e2e stack (e2e/docker-compose.yml: Firebase emulator + Mailpit on their
+own ports), seeded, the fake HelloAsso and the server in dev mode on E2E_PORT (default 8090). The
+workers receive the server's URL and environment. The stack is removed at the end (E2E_KEEP_STACK=1
+keeps it). The dev stack of dev/docker-compose.yml and its data are never touched.
+
+Tests run concurrently against that one server: those that change state other tests read (fake
+HelloAsso items, planning slots) share an xdist_group, which runs them one after another on one worker.
 
 Every browser context blocks service workers: sw.js caches the emulator hosts cache-first, which
 would leak state between tests.
 """
 import os
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import BrowserContext, expect
 
-from helpers import data as test_data_helpers, helloasso, stack
+from helpers import data as test_data_helpers, helloasso
 from helpers.auth import login_as as _login_as
 from helpers.data import TestData
 from helpers.mailpit import Mailpit
+from helpers.session import E2ESession
 
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 PHONE_DEVICE = "Pixel 7"
 EXPECT_TIMEOUT = 5_000      # Playwright's default
 KNOWN_BUG_TIMEOUT = 2_000   # see known_bug_timeouts
 
-
-@pytest.fixture(scope="session")
-def e2e_logs(pytestconfig) -> Path:
-    """Stack, seed and server logs, next to the Playwright artifacts (uploaded by the CI on failure)."""
-    folder = Path(pytestconfig.getoption("--output")).resolve()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+_SESSION = pytest.StashKey[E2ESession]()
 
 
-@pytest.fixture(scope="session")
-def e2e_stack(e2e_logs):
-    """Fresh emulator + Mailpit for the run: the emulator's memory grows with use, and a run
-    must not reset the developer's dev data."""
-    log_path = e2e_logs / "stack.log"
+def _is_worker(config) -> bool:
+    return hasattr(config, "workerinput")
+
+
+def pytest_sessionstart(session):
+    """Controller only (xdist's own sessionstart, which starts the workers, runs last)."""
+    config = session.config
+    if _is_worker(config) or config.option.collectonly:
+        return
+    # Stack, seed and server logs, next to the Playwright artifacts (uploaded by the CI on failure).
+    # Emptied here, once: see delete_output_dir
+    logs_dir = Path(config.getoption("--output")).resolve()
+    shutil.rmtree(logs_dir, ignore_errors=True)
+    logs_dir.mkdir(parents=True)
+    e2e = E2ESession(logs_dir)
     try:
-        stack.start_stack(log_path)
+        e2e.start()
     except (RuntimeError, TimeoutError, OSError) as e:
-        pytest.fail(f"e2e stack (e2e/docker-compose.yml) did not start: {e}", pytrace=False)
-    yield
-    if os.environ.get("E2E_KEEP_STACK") != "1":
-        stack.stop_stack(log_path)
+        e2e.stop(failed=False)
+        pytest.exit(f"e2e session did not start: {e}\n(logs: {logs_dir})", returncode=3)
+    config.stash[_SESSION] = e2e
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    """xdist: hands the server's URL and environment to each worker."""
+    e2e = node.config.stash.get(_SESSION, None)
+    if e2e is not None:
+        node.workerinput["e2e"] = {"url": e2e.url, "env": e2e.env}
+
+
+def pytest_sessionfinish(session):
+    e2e = session.config.stash.get(_SESSION, None)
+    if e2e is not None:
+        e2e.stop(failed=session.testsfailed > 0)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def delete_output_dir():
+    """Replaces pytest-playwright's: it empties --output at the first test, which would delete the session's
+    logs, and would run on every xdist worker. pytest_sessionstart empties it instead."""
+
+
+@dataclass(frozen=True)
+class Server:
+    url: str
+    env: dict
 
 
 @pytest.fixture(scope="session")
-def fake_helloasso_server(e2e_logs, tmp_path_factory):
-    """Fake HelloAsso API (e2e/fakes/helloasso_fake.py), reached by the server in dev mode only."""
-    env = stack.dev_environment(tmp_path_factory.mktemp("fake-helloasso"))
-    srv = stack.ServerProcess(env, helloasso.FAKE_PORT, e2e_logs / "fake-helloasso.log", app="helloasso_fake:app",
-                              app_dir="e2e/fakes", health_path="/docs", check_env=False)
-    srv.start()
-    yield srv
-    srv.stop()
-
-
-@pytest.fixture(scope="session")
-def server(e2e_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request):
-    data_dir = tmp_path_factory.mktemp("alj-data")
-    env = stack.dev_environment(data_dir, **helloasso.SERVER_ENV)
-    log_path = e2e_logs / "server.log"
-    stack.seed(env, log_path)
-    data = TestData(env)
-    try:
-        data.save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
-        data.fill_geocache()
-    finally:
-        data.close()   # before the server starts: fill_geocache used its SQLite file
-    srv = stack.ServerProcess(env, int(os.environ.get("E2E_PORT", "8090")), log_path)
-    srv.start()
-    yield srv
-    srv.stop()
-    if request.session.testsfailed:
-        print(f"\n--- server log (tail, full log: {log_path}) ---\n{stack.tail(log_path)}")
+def server(pytestconfig) -> Server:
+    """The session's server (URL, environment of the dev subprocesses)."""
+    if _is_worker(pytestconfig):
+        return Server(**pytestconfig.workerinput["e2e"])
+    e2e = pytestconfig.stash[_SESSION]
+    return Server(e2e.url, e2e.env)
 
 
 @pytest.fixture(scope="session")
@@ -163,10 +177,10 @@ def login_as():
 
 
 @pytest.fixture
-def mailpit(e2e_stack) -> Mailpit:
-    client = Mailpit()
-    client.clear()
-    return client
+def mailpit() -> Mailpit:
+    """Shared by the workers and cleared once per run only: search a test's own e-mails by recipient and
+    subject (unique_name)."""
+    return Mailpit()
 
 
 @pytest.fixture(scope="session")
@@ -178,8 +192,9 @@ def test_data(server) -> TestData:
 
 
 @pytest.fixture
-def fake_helloasso(fake_helloasso_server) -> helloasso.FakeHelloAsso:
-    """Empty fake HelloAsso: each test loads the forms and items it needs (fake.set(items))."""
+def fake_helloasso() -> helloasso.FakeHelloAsso:
+    """Empty fake HelloAsso: each test loads the forms and items it needs (fake.set(items)). One state for
+    the whole server: its tests share the « helloasso » xdist_group."""
     fake = helloasso.FakeHelloAsso()
     fake.clear()
     return fake

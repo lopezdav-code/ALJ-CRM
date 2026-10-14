@@ -61,6 +61,13 @@ python -m playwright install --with-deps chromium    # WSL/Linux : bibliothèque
 python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute la suite
 ```
 
+- **En parallèle** : 4 processus (pytest-xdist, `-n 4` dans `e2e/pytest.ini`), environ 1 min pour toute la suite.
+  La pile, le seed, le faux HelloAsso et le serveur sont démarrés une seule fois, par le processus principal
+  (`e2e/helpers/session.py`), puis partagés par les 4 processus. Au-delà de 4 sous WSL (~3 Go libres), la mémoire
+  sature et la suite ralentit. `-n 0` : un seul processus (pour déboguer avec `--headed`).
+- Tests qui modifient un état lu par d'autres tests (faux HelloAsso, créneaux du planning) : même
+  `xdist_group` (`pytestmark`), exécutés l'un après l'autre sur un même processus. Mailpit n'est vidé qu'une fois par
+  exécution : chercher ses e-mails par destinataire **et** sujet (`unique_name`).
 - Ports de la pile e2e : Firestore `18081`, Auth `19099`, Mailpit `18025` (SMTP `11025`) ; serveur de test
   `8090` (`E2E_PORT`), faux HelloAsso `8095`. La pile de dev (`8081`, `9099`, `8025`) et `run_server.sh` (`8080`)
   peuvent rester lancés. Docker est requis.
@@ -88,7 +95,7 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
   `HELLOASSO_WEBHOOK_TOKEN`.
 - Bugs connus : tests marqués `xfail(strict=True)` avec la référence du bug (ex. A6 de
   `docs/plan_api_only_front.md`). Ils échouent (XPASS) dès que le bug est corrigé : retirer alors le marqueur.
-- Déboguer : `--headed --slowmo 300`, ou `--tracing retain-on-failure` puis
+- Déboguer : `-n 0 --headed --slowmo 300`, ou `--tracing retain-on-failure` puis
   `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux de la pile, du serveur et du seed :
   `test-results/stack.log`, `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
 - En CI, en cas d'échec : artefact `e2e-results` (traces, captures, vidéos, journaux serveur et Docker).

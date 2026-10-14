@@ -12,6 +12,8 @@ from helpers.data import eventually, unique_name
 from helpers.helloasso import item
 from helpers.mobile import go_to, open_app, open_participants, participant_card
 
+# One fake HelloAsso state for the whole server: these tests run one after another (conftest.py)
+pytestmark = pytest.mark.xdist_group("helloasso")
 KNOWN_BUG_A6 = pytest.mark.xfail(strict=True, reason="bug A6: the office page stores the ids as strings and "
                                                       "reads the order reference from `order.id`")
 

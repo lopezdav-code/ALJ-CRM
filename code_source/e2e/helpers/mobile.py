@@ -10,7 +10,8 @@ SEEDED_COMPETITION = "Hogwarts Lead Open"
 def open_app(page: Page, role: str = "coach") -> Page:
     page.goto("/competitions")
     login_as(page, role)
-    expect(competition_card(page, SEEDED_COMPETITION)).to_be_visible()
+    # First load: every collection's listener (members included), slower while other workers run
+    expect(competition_card(page, SEEDED_COMPETITION)).to_be_visible(timeout=20_000)
     return page
 
 

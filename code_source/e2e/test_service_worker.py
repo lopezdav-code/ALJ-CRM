@@ -4,6 +4,8 @@ Service workers are blocked in the other tests (they cache the emulator hosts ca
 import pytest
 from playwright.sync_api import expect
 
+from helpers.data import eventually
+
 pytestmark = pytest.mark.browser_context_args(service_workers="allow")
 
 _CACHE_KEYS = "() => caches.keys()"
@@ -34,11 +36,14 @@ def test_cache_contents(page):
         assert path in cached, f"{path} not precached"
 
     page.evaluate("() => Promise.all([fetch('/api/web-version'), fetch('/runtime-config.js'), fetch('/health')])")
-    cached = page.evaluate(_CACHED_URLS, cache_name)
-    assert "/api/web-version" not in cached
-    assert "/runtime-config.js" not in cached
-    # Same-origin pages and assets are cached as they are fetched (network first)
-    assert "/health" in cached
+
+    def cached_as_fetched():
+        cached = page.evaluate(_CACHED_URLS, cache_name)
+        # Same-origin pages and assets are cached as they are fetched (network first, stored after answering)
+        assert "/health" in cached
+        assert "/api/web-version" not in cached
+        assert "/runtime-config.js" not in cached
+    eventually(cached_as_fetched)
 
 
 def test_pages_open_offline(page, context):
