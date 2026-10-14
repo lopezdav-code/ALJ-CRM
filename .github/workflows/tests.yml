@@ -100,10 +100,12 @@ jobs:
     - name: Run e2e tests (pytest + Playwright)
       env:
         E2E_KEEP_STACK: '1' # kept for the logs below, removed by the last step
+      # No --video: "retain-on-failure" still records every test, which overloads the 4-vCPU runner
+      # shared by 4 workers (timeouts). The trace has a screenshot and DOM snapshot of every step.
       run: >
         python -m pytest -c e2e/pytest.ini e2e
         --output e2e-results --tracing retain-on-failure
-        --screenshot only-on-failure --video retain-on-failure
+        --screenshot only-on-failure
 
     - name: e2e stack logs
       if: failure()

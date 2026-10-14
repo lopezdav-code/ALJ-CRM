@@ -98,7 +98,7 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
 - Déboguer : `-n 0 --headed --slowmo 300`, ou `--tracing retain-on-failure` puis
   `python -m playwright show-trace e2e-results/<test>/trace.zip`. Journaux de la pile, du serveur et du seed :
   `test-results/stack.log`, `test-results/server.log` (`e2e-results/` avec `--output e2e-results`, comme la CI).
-- En CI, en cas d'échec : artefact `e2e-results` (traces, captures, vidéos, journaux serveur et Docker).
+- En CI, en cas d'échec : artefact `e2e-results` (traces, captures, journaux serveur et Docker ; pas de vidéo : l'enregistrement de chaque test surcharge le runner).
 
 ## Fichiers
 
