@@ -155,6 +155,73 @@ class TestHelloAssoWebhookService(unittest.TestCase):
             resp = asyncio.run(webhook_helloasso(payload))
         self.assertEqual(resp["status"], "ignored")
 
+    def test_check_and_notify_all_paid_success(self):
+        """Vérifie l'envoi d'e-mail récapitulatif lorsque tous les compétiteurs ont réglé."""
+        from domain.competition_models import Competition, Participant
+        from infrastructure.helloasso_webhook_service import HelloAssoWebhookService
+
+        comp = Competition(id=10, nom="Open Régional Bloc", date_competition="2026-11-20", prix=15.0)
+        p1 = Participant(competition_id=10, adherent_id=1, nom="DUPONT", prenom="Alice",
+                         num_licence="123456", selectionne=True, statut_paiement="paye",
+                         montant_paye=15.0, commande_helloasso="CMD-1", date_synchro_helloasso="2026-10-14")
+        p2 = Participant(competition_id=10, adherent_id=2, nom="MARTIN", prenom="Bob",
+                         num_licence="654321", selectionne=True, statut_paiement="paye",
+                         montant_paye=15.0, commande_helloasso="CMD-2", date_synchro_helloasso="2026-10-14")
+        p3 = Participant(competition_id=10, adherent_id=3, nom="DURAND", prenom="Charlie",
+                         num_licence="999999", selectionne=False, statut_paiement="non_invite")
+
+        Repo = "infrastructure.competition_firestore_repository.CompetitionFirestoreRepository"
+        settings_store = {}
+
+        def mock_get_setting(key, default=""):
+            return settings_store.get(key, default)
+
+        def mock_save_setting(key, value):
+            settings_store[key] = value
+            return True
+
+        with patch(f"{Repo}.get_competition", return_value=comp), \
+             patch(f"{Repo}.list_participants", return_value=[p1, p2, p3]), \
+             patch(f"{Repo}.get_app_setting", side_effect=mock_get_setting), \
+             patch(f"{Repo}.save_app_setting", side_effect=mock_save_setting), \
+             patch("infrastructure.competition_results_batch_service.CompetitionResultsBatchService.get_notification_email", return_value="coach@alj-escalade.fr"), \
+             patch("infrastructure.email_repository.EmailRepository.send_email", return_value=True) as mock_send:
+
+            res = HelloAssoWebhookService.check_and_notify_all_paid(10)
+            self.assertTrue(res)
+            mock_send.assert_called_once()
+            call_kwargs = mock_send.call_args.kwargs
+            self.assertEqual(call_kwargs["to_email"], "coach@alj-escalade.fr")
+            self.assertIn("Open Régional Bloc", call_kwargs["subject"])
+            self.assertIn("DUPONT", call_kwargs["html_body"])
+            self.assertIn("MARTIN", call_kwargs["html_body"])
+            self.assertIn("30.00 €", call_kwargs["html_body"])
+
+            # Deuxième appel : déduplication active, pas de réexpédition
+            res_again = HelloAssoWebhookService.check_and_notify_all_paid(10)
+            self.assertFalse(res_again)
+            self.assertEqual(mock_send.call_count, 1)
+
+    def test_check_and_notify_all_paid_incomplete(self):
+        """Ne déclenche pas d'e-mail si au moins un compétiteur sélectionné n'a pas encore payé."""
+        from domain.competition_models import Competition, Participant
+        from infrastructure.helloasso_webhook_service import HelloAssoWebhookService
+
+        comp = Competition(id=11, nom="Coupe de France Difficulté", prix=20.0)
+        p1 = Participant(competition_id=11, adherent_id=1, nom="DUPONT", prenom="Alice", selectionne=True, statut_paiement="paye")
+        p2 = Participant(competition_id=11, adherent_id=2, nom="MARTIN", prenom="Bob", selectionne=True, statut_paiement="en_attente")
+
+        Repo = "infrastructure.competition_firestore_repository.CompetitionFirestoreRepository"
+        with patch(f"{Repo}.get_competition", return_value=comp), \
+             patch(f"{Repo}.list_participants", return_value=[p1, p2]), \
+             patch(f"{Repo}.get_app_setting", return_value=""), \
+             patch(f"{Repo}.save_app_setting"), \
+             patch("infrastructure.email_repository.EmailRepository.send_email") as mock_send:
+
+            res = HelloAssoWebhookService.check_and_notify_all_paid(11)
+            self.assertFalse(res)
+            mock_send.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

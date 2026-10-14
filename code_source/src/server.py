@@ -1222,6 +1222,21 @@ async def webhook_helloasso(payload: Dict[str, Any] = Body(...),
         return {"status": "error", "message": internal_error(e, "webhook_helloasso")}
 
 
+@app.post("/api/competitions/{comp_id}/check-all-paid")
+def check_competition_all_paid_api(comp_id: int):
+    """Vérifie si tous les compétiteurs ont payé et envoie l'e-mail récapitulatif si applicable."""
+    try:
+        from infrastructure.helloasso_webhook_service import HelloAssoWebhookService
+        notified = HelloAssoWebhookService.check_and_notify_all_paid(comp_id)
+        return {
+            "status": "success",
+            "competition_id": comp_id,
+            "notified": notified
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": internal_error(e, "check_competition_all_paid_api")})
+
+
 @app.get("/api/email-templates")
 def get_email_templates():
     """Retourne la liste des modèles d'e-mails configurés."""

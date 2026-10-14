@@ -22,6 +22,7 @@ Sécurité (le contenu d'une notification n'est jamais cru sur parole) :
 """
 
 import datetime
+import html
 from typing import Dict, Any, List, Optional
 
 import helloasso_api
@@ -272,6 +273,7 @@ class HelloAssoWebhookService:
 
         matches = []
         anomalies = []
+        affected_competition_ids = set()
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 4. Traitement et application en base de données pour chaque article
@@ -338,6 +340,8 @@ class HelloAssoWebhookService:
                             date_synchro=date_item
                         )
 
+                    affected_competition_ids.add(cid)
+
                     matches.append({
                         "id_item": id_item,
                         "competition_id": cid,
@@ -369,6 +373,15 @@ class HelloAssoWebhookService:
                     "reason": "Numéro ou nom de compétition non reconnu sur le formulaire HelloAsso"
                 })
 
+        # 5. Si tous les compétiteurs ont finalisé leur paiement, expédition de la notification
+        notified_competitions = []
+        for cid in affected_competition_ids:
+            try:
+                if cls.check_and_notify_all_paid(cid):
+                    notified_competitions.append(cid)
+            except Exception as notif_err:
+                print(f"⚠️ [WEBHOOK_HELLOASSO] Erreur notification tous compétiteurs payés pour comp #{cid} : {notif_err}")
+
         return {
             "status": "success",
             "event_type": event_type,
@@ -377,5 +390,229 @@ class HelloAssoWebhookService:
             "anomalies_count": len(anomalies),
             "matches": matches,
             "anomalies": anomalies,
+            "notified_competitions": notified_competitions,
             "timestamp": now_str
         }
+
+    # ------------------------------------------------------------------
+    # Notification lorsque tous les compétiteurs ont payé
+    # ------------------------------------------------------------------
+    @classmethod
+    def build_all_paid_email_html(cls, comp: Any, participants: List[Any]) -> str:
+        """Génère le corps HTML de l'e-mail récapitulatif 'Tous les paiements reçus'."""
+        nom_comp = html.escape(str(getattr(comp, "nom", None) if not isinstance(comp, dict) else comp.get("nom")) or "Compétition")
+        date_c = str(getattr(comp, "date_competition", None) if not isinstance(comp, dict) else comp.get("date_competition") or "")
+        date_fmt = "/".join(reversed(date_c.split("-"))) if ("-" in date_c and len(date_c.split("-")) == 3) else date_c
+        try:
+            prix = float(getattr(comp, "prix", 0.0) if not isinstance(comp, dict) else comp.get("prix") or 0.0)
+        except Exception:
+            prix = 0.0
+
+        rows_html = []
+        total_collecte = 0.0
+        for p in participants:
+            nom = str(getattr(p, "nom", None) if not isinstance(p, dict) else p.get("nom") or "")
+            prenom = str(getattr(p, "prenom", None) if not isinstance(p, dict) else p.get("prenom") or "")
+            licence = str(getattr(p, "num_licence", None) if not isinstance(p, dict) else p.get("num_licence") or "")
+            try:
+                montant = float(getattr(p, "montant_paye", 0.0) if not isinstance(p, dict) else p.get("montant_paye") or 0.0)
+            except Exception:
+                montant = 0.0
+            cmd = str(getattr(p, "commande_helloasso", None) if not isinstance(p, dict) else p.get("commande_helloasso") or "")
+            date_sync = str(getattr(p, "date_synchro_helloasso", None) if not isinstance(p, dict) else p.get("date_synchro_helloasso") or "")
+            total_collecte += montant
+
+            rows_html.append(f"""
+              <tr style="border-bottom:1px solid #E2E8F0;">
+                <td style="padding:10px 12px; font-weight:600; color:#1E293B;">{html.escape(nom)} {html.escape(prenom)}</td>
+                <td style="padding:10px 12px; font-family:monospace; color:#475569;">{html.escape(licence or '—')}</td>
+                <td style="padding:10px 12px; color:#475569; font-size:12px;">{html.escape(date_sync or '—')}</td>
+                <td style="padding:10px 12px; font-family:monospace; font-size:12px; color:#64748B;">{html.escape(cmd or '—')}</td>
+                <td style="padding:10px 12px; text-align:right; font-weight:700; color:#16A34A;">{montant:.2f} €</td>
+              </tr>
+            """)
+
+        table_rows = "".join(rows_html)
+        nb_parts = len(participants)
+
+        return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tous les paiements validés — {nom_comp}</title>
+</head>
+<body style="margin:0; padding:20px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color:#F1F5F9; color:#1E293B;">
+  <div style="max-width:680px; margin:0 auto; background:#FFFFFF; border:1px solid #E2E8F0; border-radius:12px; overflow:hidden;">
+
+    <!-- En-tête -->
+    <div style="background:linear-gradient(135deg, #163A5F 0%, #1E40AF 100%); color:#FFFFFF; padding:24px 28px; text-align:center;">
+      <div style="font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#93C5FD; margin-bottom:4px;">Amicale Laïque de Jonage · Escalade</div>
+      <div style="font-size:32px; margin-bottom:6px;">🎉</div>
+      <h1 style="margin:0; font-size:22px; font-weight:800;">Tous les paiements sont validés !</h1>
+      <p style="margin:8px 0 0; font-size:14px; color:#E0E7FF;">Compétition : <b>{nom_comp}</b></p>
+    </div>
+
+    <!-- Corps -->
+    <div style="padding:24px 28px;">
+      <p style="font-size:14px; line-height:1.5; color:#334155; margin-top:0;">
+        Bonjour,<br><br>
+        Tous les compétiteurs inscrits pour la compétition <b>{nom_comp}</b> ont finalisé leur règlement via HelloAsso.
+      </p>
+
+      <!-- Synthèse -->
+      <div style="background:#F8FAFC; border:1px solid #CBD5E1; border-radius:8px; padding:14px 18px; margin:16px 0;">
+        <table style="width:100%; font-size:13px; border-collapse:collapse;">
+          <tr>
+            <td style="padding:4px 0; color:#64748B;">📅 Date de l'épreuve :</td>
+            <td style="padding:4px 0; text-align:right; font-weight:600; color:#1E293B;">{html.escape(date_fmt or 'Non renseignée')}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0; color:#64748B;">👥 Compétiteurs inscrits et réglés :</td>
+            <td style="padding:4px 0; text-align:right; font-weight:700; color:#16A34A;">{nb_parts} athlète(s)</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0; color:#64748B;">💶 Tarif inscription unitaire :</td>
+            <td style="padding:4px 0; text-align:right; font-weight:600; color:#1E293B;">{prix:.2f} €</td>
+          </tr>
+          <tr style="border-top:1px solid #E2E8F0;">
+            <td style="padding:8px 0 4px; font-weight:700; color:#1E293B;">💰 Montant total perçu :</td>
+            <td style="padding:8px 0 4px; text-align:right; font-weight:800; font-size:15px; color:#2563EB;">{total_collecte:.2f} €</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Liste des athlètes -->
+      <h3 style="font-size:14px; font-weight:700; color:#1E293B; margin:22px 0 10px;">📋 Détail des règlements par compétiteur :</h3>
+      <div style="overflow-x:auto; border:1px solid #E2E8F0; border-radius:8px;">
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+          <thead>
+            <tr style="background:#F1F5F9; border-bottom:2px solid #CBD5E1; text-align:left;">
+              <th style="padding:8px 12px; color:#475569;">Compétiteur</th>
+              <th style="padding:8px 12px; color:#475569;">Licence</th>
+              <th style="padding:8px 12px; color:#475569;">Date</th>
+              <th style="padding:8px 12px; color:#475569;">Commande</th>
+              <th style="padding:8px 12px; color:#475569; text-align:right;">Montant</th>
+            </tr>
+          </thead>
+          <tbody>
+            {table_rows}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:20px; padding:12px 16px; background:#ECFDF5; border:1px solid #A7F3D0; border-radius:8px; font-size:12.5px; color:#065F46;">
+        ✅ <b>Tous les paiements sont complets.</b> L'inscription définitive du groupe auprès de la FFME peut être effectuée en toute sérénité.
+      </div>
+    </div>
+
+    <!-- Pied de page -->
+    <div style="background:#F8FAFC; border-top:1px solid #E2E8F0; padding:14px 28px; text-align:center; font-size:12px; color:#64748B;">
+      🤖 Notification automatique déclenchée par le webhook HelloAsso de l'ALJ Escalade.
+    </div>
+
+  </div>
+</body>
+</html>
+"""
+
+    @classmethod
+    def build_all_paid_email_text(cls, comp: Any, participants: List[Any]) -> str:
+        """Génère le texte brut de secours de l'e-mail récapitulatif."""
+        nom_comp = str(getattr(comp, "nom", None) if not isinstance(comp, dict) else comp.get("nom")) or "Compétition"
+        date_c = str(getattr(comp, "date_competition", None) if not isinstance(comp, dict) else comp.get("date_competition") or "")
+        total_collecte = sum(float(getattr(p, "montant_paye", 0.0) if not isinstance(p, dict) else p.get("montant_paye") or 0.0) for p in participants)
+
+        lines = [
+            f"ALJ Escalade — Tous les paiements validés pour : {nom_comp}",
+            "=" * 60,
+            "",
+            f"Tous les compétiteurs inscrits pour « {nom_comp} » ont finalisé leur règlement sur HelloAsso.",
+            f"Date de l'épreuve : {date_c or 'Non renseignée'}",
+            f"Nombre de compétiteurs : {len(participants)}",
+            f"Total collecté : {total_collecte:.2f} €",
+            "",
+            "Liste des compétiteurs :",
+        ]
+        for p in participants:
+            nom = str(getattr(p, "nom", None) if not isinstance(p, dict) else p.get("nom") or "")
+            prenom = str(getattr(p, "prenom", None) if not isinstance(p, dict) else p.get("prenom") or "")
+            licence = str(getattr(p, "num_licence", None) if not isinstance(p, dict) else p.get("num_licence") or "")
+            montant = float(getattr(p, "montant_paye", 0.0) if not isinstance(p, dict) else p.get("montant_paye") or 0.0)
+            cmd = str(getattr(p, "commande_helloasso", None) if not isinstance(p, dict) else p.get("commande_helloasso") or "")
+            lines.append(f" - {nom} {prenom} (Licence : {licence or '—'}) : {montant:.2f} € [Commande : {cmd or '—'}]")
+
+        lines.extend([
+            "",
+            "Tous les paiements sont complets. L'inscription définitive auprès de la FFME peut être effectuée.",
+        ])
+        return "\n".join(lines)
+
+    @classmethod
+    def check_and_notify_all_paid(cls, competition_id: int) -> bool:
+        """
+        Vérifie si tous les compétiteurs sélectionnés d'une épreuve ont payé.
+        Si la condition est remplie et qu'aucune notification n'a encore été envoyée,
+        expédie l'e-mail récapitulatif à l'adresse de notification du club.
+        """
+        comp = CompetitionRepository.get_competition(competition_id)
+        if not comp:
+            return False
+
+        participants = CompetitionRepository.list_participants(competition_id, selected_only=False)
+        selected_parts = [
+            p for p in participants
+            if (getattr(p, "selectionne", False) or (isinstance(p, dict) and p.get("selectionne")))
+        ]
+
+        if not selected_parts:
+            return False
+
+        # Vérifier que CHAQUE compétiteur sélectionné a bien le statut "paye"
+        for p in selected_parts:
+            st = getattr(p, "statut_paiement", None) if not isinstance(p, dict) else p.get("statut_paiement")
+            if str(st or "").strip().lower() != "paye":
+                # Si au moins un participant n'a pas encore payé, réinitialiser le flag
+                setting_key = f"COMP_ALL_PAID_NOTIFIED_{competition_id}"
+                CompetitionRepository.save_app_setting(setting_key, "")
+                return False
+
+        # Tous les compétiteurs sélectionnés ont payé !
+        setting_key = f"COMP_ALL_PAID_NOTIFIED_{competition_id}"
+        already_notified = CompetitionRepository.get_app_setting(setting_key, "")
+        if already_notified:
+            return False
+
+        # Récupération de l'e-mail de notification
+        from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
+        recipient = CompetitionResultsBatchService.get_notification_email()
+        if not recipient or "@" not in recipient:
+            print(f"⚠️ [WEBHOOK_HELLOASSO] Adresse de notification invalide ou non configurée : '{recipient}'")
+            return False
+
+        nom_comp = str(getattr(comp, "nom", None) if not isinstance(comp, dict) else comp.get("nom")) or "Compétition"
+        subject = f"✅ [ALJ Compétitions] Tous les paiements validés : {nom_comp}"
+        html_body = cls.build_all_paid_email_html(comp, selected_parts)
+        plain_body = cls.build_all_paid_email_text(comp, selected_parts)
+
+        from infrastructure.email_repository import EmailRepository
+        try:
+            ok = EmailRepository.send_email(
+                to_email=recipient,
+                subject=subject,
+                body=plain_body,
+                html_body=html_body,
+                from_email="inscription@alj-escalade.fr",
+                from_name="ALJ Escalade - Compétitions"
+            )
+            if ok:
+                now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+                CompetitionRepository.save_app_setting(setting_key, now_iso)
+                print(f"✅ [WEBHOOK_HELLOASSO] E-mail 'Tous les paiements validés' envoyé à {recipient} pour la compétition '{nom_comp}'")
+                return True
+            else:
+                print(f"❌ [WEBHOOK_HELLOASSO] Échec lors de l'envoi de l'e-mail 'Tous les paiements validés' à {recipient}")
+                return False
+        except Exception as err:
+            print(f"❌ [WEBHOOK_HELLOASSO] Erreur envoi e-mail notification tous payés : {err}")
+            return False
