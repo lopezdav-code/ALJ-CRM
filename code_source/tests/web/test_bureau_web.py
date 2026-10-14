@@ -222,7 +222,13 @@ class TestBureauFiles(unittest.TestCase):
     def test_pivot_table_configuration_and_fields(self):
         """Vérifie la présence du filtre Âge, des colonnes Statut & Sexe, et de l'exclusion par défaut d'Annulé."""
         from server import get_pivot_table
-        resp = get_pivot_table(season="2026-2027")
+        from infrastructure.sqlite_repository import SqliteRepository
+
+        # Fake data: attribute keys only appear in data rows, so the test must not depend on the local DB.
+        fake_row = {"last_name": "Dupont", "first_name": "jean", "gender": "M", "birth_date": "2000-01-15",
+                    "city": "Jonage", "tarif_name": "Adulte", "status": "Processed", "season_name": "2026-2027"}
+        with patch.object(SqliteRepository, "load_direct_data", return_value=[fake_row]):
+            resp = get_pivot_table(season="2026-2027")
         self.assertEqual(resp.status_code, 200)
         html = resp.body.decode("utf-8")
 
@@ -234,6 +240,7 @@ class TestBureauFiles(unittest.TestCase):
         # 2. Vérification des attributs dans les données
         self.assertIn('"Âge"', html)
         self.assertIn('"Tranche d\'Âge"', html)
+        self.assertIn('"Tranche d\'Âge": "25 à 29 ans"', html)
         self.assertIn('"Sexe"', html)
         self.assertIn('"Statut"', html)
 
