@@ -31,8 +31,8 @@ The plan file is updated with any decisions taken during a review. Nothing is co
 |---|---|---|
 | 0 | Done (approved) | Cold-start measurement still to do against production (needs a deploy). ETag responses use `Cache-Control: no-store`: the page keeps the last body and sends `If-None-Match` itself (`alj-sync.js`), so personal data never lands in the browser's HTTP cache. |
 | 1 | Done (approved) | See « Phase 1 — as built » below. |
-| 2 | Done, awaiting review | See « Phase 2 — as built » below. |
-| 3 | Not started | |
+| 2 | Done (approved) | See « Phase 2 — as built » below. |
+| 3 | Done, awaiting review | Code only; nothing deployed. See « Phase 3 — as built » below for the deploy order. |
 | 4 | Not started | Cleanup backlog, filled during reviews |
 
 ## Decisions taken (from review Q&A)
@@ -173,6 +173,36 @@ Existing member writes (`/api/members/update`, `/api/attestations/*`) are unchan
 5. Docs: `ARCHITECTURE.md` §2/§4/§5, `docs/base_firestore.md`, `README.md` (rules deploy step).
 6. Web version bump to the next version (**v23**; main is at v22 since ffdf6f3) (`<meta alj-web-version>`, titles, badge, `CACHE_NAME`).
 7. Deploy order (see S1): app first, rules last, after a waiting period.
+
+#### Phase 3 — as built (deviations and notes for review)
+
+- **Front end (v23).**
+  - The Firestore SDK (`firebase-firestore-compat.js`) is gone from the 9 pages and from the `sw.js` precache; `CACHE_NAME` is `alj-escalade-v23`.
+  - `alj-firebase.js` starts Auth only: `init()` returns `{ auth }`, and dev mode connects the Auth emulator only. `/runtime-config.js` no longer sends `firestoreEmulator`.
+  - `enablePersistence` is removed from `competitions.html` and `index.html`. The unused `initFirebase` import is removed from `bureau/planning.html`.
+  - Texts that said "temps réel / Firestore" (directory login box, bureau home, 🔄 tooltip) now describe the API polling.
+- **Old offline cache wiped (step 2).** `alj-firebase.js` runs `wipeFirestoreCache()` on every `init()`:
+  - it deletes each IndexedDB database whose name starts with `firestore/` (`indexedDB.databases()`);
+  - without `databases()` (Firefox < 126), or if it fails, it deletes the known names `firestore/[DEFAULT]/<project>/main` (production and dev projects);
+  - it also removes the old SDK's `firestore_*` multi-tab keys from `localStorage`.
+  - Deviation: it runs on every start, not once. A phone can come back after months, and the call does nothing once the data is gone.
+  - Limit: a database still open in another tab running an old version is deleted only when that tab closes (`deleteDatabase` waits). This is harmless.
+- **Rules (step 3).** `firestore.rules` is now a single `match /{document=**} { allow read, write: if false; }`. Role functions and e-mail lists are gone.
+  - Checked on the emulator, with the rules hot-reloaded: admin (club domain and claim), coach and readonly are all refused (403), for reads and writes on 9 collections. The admin token `owner`, which stands in for IAM, still gets 200, and the dev server's `/api/*` keep working.
+  - The server never forwards a user's ID token to Firestore: it only uses the service account (Cloud Run) or the club's OAuth token (desktop, local server), and IAM checks both.
+- **Tests (step 4).**
+  - `test_api_security`: `test_rules_hold_no_role_list` (no e-mail address or `request.auth` in the rules) and `test_display_lists_match_api` (the JS display lists still equal `api_auth`).
+  - `test_firestore_rules_emulator`: every role is denied, and the admin token is still allowed.
+  - `test_firestore_sync.test_firestore_rules_file`: asserts the deny-all rule.
+  - `test_bureau_web`: a guard test against any `firestore-compat`, `firebase.firestore(`, `.collection(`, `onSnapshot`, `enablePersistence` or `runTransaction` left under `web/`, and a test of the wipe.
+  - `test_runtime_env`: no `firestoreEmulator` in the client configuration.
+- **Docs (step 5).** `ARCHITECTURE.md` (§1, §2, §4, §5, §7, §8), `docs/base_firestore.md` (directory and rights), `README.md` (rules deploy order and rollback), `dev/README.md`.
+- **Deploy order (step 7, S1). Nothing is deployed yet.**
+  1. Deploy the application: `deploy_cloud_run.sh --test` (0 % traffic), smoke-test, then promote. This ships phases 1–3 of the front end together and doesn't touch the rules.
+  2. Wait **at least one week**. Then check in the GCP console that Firestore requests evaluated by rules are about 0, meaning no v22 client is still active.
+  3. Deploy the rules: `firebase deploy --only firestore:rules`. Rollback: `git checkout <prev> -- firestore.rules && firebase deploy --only firestore:rules`.
+  - ⚠️ A plain `firebase deploy` would also push the rules. Until step 3, always deploy with `--only`.
+- **Not verified:** a browser test of the v23 pages, and the wipe on a real phone that has the v22 cache.
 
 ### Phase 4 — Cleanup (after phase 3)
 

@@ -1,7 +1,7 @@
 /* Socle commun des pages « bureau » (ordinateur) : Firebase, connexion Google,
    rôles, appels à l'API avec jeton, version de la page et mise à jour du cache.
-   Ne contient aucune donnée d'adhérent. Les rôles sont des miroirs de
-   firestore.rules et de src/infrastructure/api_auth.py (un test vérifie les listes). */
+   Ne contient aucune donnée d'adhérent. Les rôles sont des miroirs (affichage seulement)
+   de src/infrastructure/api_auth.py (un test vérifie les listes). */
 
 /* Mêmes listes que competitions.html / index.html. COACH_EMAILS contient aussi les
    administrateurs (convention des pages PWA). */
@@ -39,7 +39,7 @@ export function initFirebase() {
 }
 
 /* ===================== Rôles ===================== */
-/* Rôle d'affichage : le serveur et Firestore restent les seuls juges des droits. */
+/* Rôle d'affichage : le serveur (api_auth.py) reste le seul juge des droits. */
 export function roleFor(user, claims) {
   if (!user) return "anonyme";
   const c = claims || {};

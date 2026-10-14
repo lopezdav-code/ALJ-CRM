@@ -58,12 +58,12 @@ class TestBureauFiles(unittest.TestCase):
         self.assertEqual(get_bureau_page("inconnue").status_code, 404)
 
     def test_pages_are_static_shells_without_member_data(self):
-        """Les pages n'embarquent aucune donnée : elles chargent le socle et lisent Firestore après connexion."""
+        """Les pages n'embarquent aucune donnée : elles chargent le socle et lisent l'API après connexion."""
         for name in ("index.html", "adherents.html", "outils.html"):
             html = _read(os.path.join(BUREAU, name))
             self.assertIn('href="/static-web/alj.css"', html, name)
             self.assertIn('import { startBureau } from "/static-web/alj-shell.js"', html, name)
-            self.assertIn("firebase-firestore-compat.js", html, name)
+            self.assertNotIn("firebase-firestore-compat.js", html, name)
             self.assertNotIn("crm_users", html, name)
             self.assertNotIn("crm_orders", html, name)
 
@@ -1203,7 +1203,7 @@ class TestSingleFirebaseInit(unittest.TestCase):
         os.path.join(BUREAU, n) for n in sorted(os.listdir(BUREAU)) if n.endswith(".html")]
 
     def test_pages_load_config_then_init(self):
-        sdk = '<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>'
+        sdk = '<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>'
         for path in self.PAGES:
             html = _read(path)
             i_sdk = html.index(sdk)
@@ -1211,6 +1211,24 @@ class TestSingleFirebaseInit(unittest.TestCase):
             i_init = html.index('<script src="/static-web/alj-firebase.js"></script>')
             self.assertLess(i_sdk, i_cfg, path)
             self.assertLess(i_cfg, i_init, path)
+
+    def test_no_client_firestore_access(self):
+        """Firebase signs in only: no Firestore SDK, query or offline cache left (plan phase 3)."""
+        files = self.PAGES + [os.path.join(SHARED, n) for n in os.listdir(SHARED) if n.endswith(".js")]
+        files.append(get_sw().path)
+        for path in files:
+            text = _read(path)
+            for needle in ("firestore-compat", "firebase.firestore(", ".collection(", "onSnapshot",
+                           "enablePersistence", "runTransaction"):
+                self.assertNotIn(needle, text, f"{os.path.basename(path)}: {needle}")
+
+    def test_old_firestore_cache_is_wiped(self):
+        """alj-firebase.js deletes the IndexedDB copy kept by the pages up to v22."""
+        js = _read(os.path.join(SHARED, "alj-firebase.js"))
+        self.assertIn('FIRESTORE_DB_PREFIX = "firestore/"', js)
+        self.assertIn("indexedDB.deleteDatabase(name)", js)
+        self.assertIn('"firestore/[DEFAULT]/" + FIREBASE_CONFIG.projectId + "/main"', js)
+        self.assertRegex(js, r"wipeFirestoreCache\(\);\s*services = \{ auth \};")
 
     def test_firebase_config_defined_once(self):
         files = self.PAGES + [os.path.join(SHARED, n) for n in os.listdir(SHARED) if n.endswith(".js")]

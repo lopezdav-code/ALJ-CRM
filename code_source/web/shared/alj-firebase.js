@@ -1,11 +1,14 @@
 /* Single Firebase initialisation for every page (PWA and office portal).
    Classic script (not a module): usable from pages through <script> as well as from
-   alj-core.js. Must be loaded after the firebase-*-compat.js SDKs and after
+   alj-core.js. Must be loaded after the firebase-app/auth compat SDKs and after
    /runtime-config.js, which defines window.ALJ_RUNTIME (served by server.py).
+
+   Firebase only signs the user in (ID token sent to the API); the pages never read or
+   write Firestore (firestore.rules denies every client).
 
    - Production: the club's project configuration, nothing else.
    - Development (ALJ_RUNTIME.env === "dev"): "demo-alj" project connected to the
-     local Firebase emulator (Auth + Firestore). No call to the real services. */
+     local Auth emulator. No call to the real services. */
 (function () {
   "use strict";
 
@@ -38,7 +41,35 @@
     else document.addEventListener("DOMContentLoaded", add);
   }
 
-  /* Idempotent: returns { auth, db } (compat). */
+  /* Up to v22 the pages kept an offline copy of Firestore (SDK persistence): every member
+     record, health and emergency data included, in IndexedDB. Deleted on every start, as a
+     phone may come back after months; a no-op once the copy is gone. */
+  const FIRESTORE_DB_PREFIX = "firestore/";
+  const KNOWN_FIRESTORE_DBS = [
+    "firestore/[DEFAULT]/" + FIREBASE_CONFIG.projectId + "/main",
+    "firestore/[DEFAULT]/" + (runtime.projectId || "demo-alj") + "/main"
+  ];
+
+  function wipeFirestoreCache() {
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith("firestore_"))  // multi-tab bookkeeping of the old SDK
+        .forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* storage unavailable (private mode) */ }
+    if (!window.indexedDB) return;
+    const drop = name => {
+      try { indexedDB.deleteDatabase(name); } catch (e) { /* nothing to delete */ }
+    };
+    if (typeof indexedDB.databases === "function") {
+      indexedDB.databases()
+        .then(list => list.map(d => d.name).filter(n => n && n.startsWith(FIRESTORE_DB_PREFIX)).forEach(drop))
+        .catch(() => KNOWN_FIRESTORE_DBS.forEach(drop));
+    } else {
+      KNOWN_FIRESTORE_DBS.forEach(drop);  // Firefox < 126: no databases()
+    }
+  }
+
+  /* Idempotent: returns { auth } (compat). */
   function init() {
     if (services) return services;
     const config = isEmulator
@@ -46,14 +77,12 @@
       : FIREBASE_CONFIG;
     firebase.initializeApp(config);
     const auth = firebase.auth();
-    const db = firebase.firestore();
     if (isEmulator) {
       auth.useEmulator(runtime.authEmulator);
-      const [host, port] = String(runtime.firestoreEmulator).split(":");
-      db.useEmulator(host, Number(port));
       showDevBanner();
     }
-    services = { auth, db };
+    wipeFirestoreCache();
+    services = { auth };
     return services;
   }
 

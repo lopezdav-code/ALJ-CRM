@@ -1,114 +1,14 @@
 rules_version = '2';
+
+// No client access: the web pages use Firebase only to sign in, and every read and
+// write goes through the API (Cloud Run), which checks roles in api_auth.py.
+// The server (service account) and the desktop app (club OAuth token) reach Firestore
+// through IAM, which these rules do not apply to.
+// See docs/plan_api_only_front.md (phase 3) for the deploy order and the rollback.
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Vérifie si l'utilisateur est authentifié
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    // Email-based roles only for a verified address (always the case with Google sign-in):
-    // an unverified account named like a club address must never get a role.
-    function hasVerifiedEmail() {
-      return request.auth.token.email_verified == true;
-    }
-
-    // Vérifie si l'utilisateur est administrateur (custom claim, domaine du club ou liste autorisée)
-    function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.admin == true ||
-        (hasVerifiedEmail() && (
-          request.auth.token.email.matches('.*@alj-escalade\\.fr$') ||
-          request.auth.token.email in [
-            'lopez.dav@gmail.com'
-          ]
-        ))
-      );
-    }
-
-    // Vérifie si l'utilisateur est entraîneur / coach
-    function isCoach() {
-      return isAuthenticated() && (
-        isAdmin() ||
-        request.auth.token.coach == true ||
-        (hasVerifiedEmail() && request.auth.token.email in [
-          'stephane.loridant@orange.fr'
-        ])
-      );
-    }
-
-    // Utilisateurs autorisés en consultation seule (liste blanche stricte)
-    function isReadOnly() {
-      return isAuthenticated() && (
-        request.auth.token.readonly == true ||
-        (hasVerifiedEmail() && request.auth.token.email in [
-          'muah.did@gmail.com',
-          'clement.dlf78@gmail.com',
-          'delphine0910@gmail.com'
-        ])
-      );
-    }
-
-    // Accès au site privé : seuls les administrateurs, coachs ou personnes en consultation
-    function isAuthorizedUser() {
-      return isCoach() || isReadOnly();
-    }
-
-    // 1. Compétitions : Lecture pour utilisateurs autorisés uniquement, gestion pour les coachs
-    match /competitions/{competitionId} {
-      allow read: if isAuthorizedUser();
-      allow write: if isCoach();
-
-      // Sous-collection Participants : sélection et pointage de paiement
-      match /participants/{participantId} {
-        allow read: if isAuthorizedUser();
-        allow write: if isCoach();
-      }
-    }
-
-    // 2. Annuaire des adhérents : Consultation autorisée aux seuls membres whitelistés, mise à jour réservée aux admins
-    match /adherents/{adherentId} {
-      allow read: if isAuthorizedUser();
-      allow write: if isAdmin();
-    }
-
-    // 3. Planning et créneaux du club
-    match /planning/{creneauId} {
-      allow read: if isAuthorizedUser();
-      allow write: if isAdmin();
-    }
-
-    // 5. Référentiel des coachs (gestion des entraîneurs)
-    match /coaches/{coachId} {
-      allow read: if isAuthorizedUser();
-      allow write: if isCoach();
-    }
-
-    // 4. Modèles d'e-mails : Lecture par les coachs, modification par les admins
-    match /email_templates/{templateId} {
-      allow read: if isCoach();
-      allow write: if isAdmin();
-    }
-
-    // 5. Paramètres applicatifs (campagne annuelle HelloAsso, etc.) : admins
-    match /app_settings/{settingId} {
-      allow read: if isCoach();
-      allow write: if isAdmin();
-    }
-
-    // 6. Miroir des paiements HelloAsso + rattachements : réservé aux coachs
-    match /helloasso_items/{itemId} {
-      allow read: if isCoach();
-      allow write: if isCoach();
-    }
-
-    // 7. Base principale des adhérents (ex-database.db) : collections crm_<table>
-    //    (crm_users, crm_orders, crm_purchases, crm_planning...). Lecture : coachs
-    //    (état civil, contacts d'urgence et santé compris) ; écriture : admins.
-    //    L'application de bureau et Cloud Run y accèdent par IAM.
-    match /{collection}/{docId} {
-      allow read: if collection.matches('crm_.*') && isCoach();
-      allow write: if collection.matches('crm_.*') && isAdmin();
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

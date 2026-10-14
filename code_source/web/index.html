@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Annuaire des adhérents (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Annuaire des adhérents (v23)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,7 +15,6 @@
 <script src="/static-web/alj-vue.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
 <script src="/static-web/alj-sync.js"></script>
@@ -141,7 +140,7 @@
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v22</span></b>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v23</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
@@ -155,9 +154,9 @@
     <div class="card setup-box">
       <h2>🔐 Connexion</h2>
       <p>L'annuaire des adhérents est réservé aux coachs et gestionnaires du club. Les données
-         sont lues en <b>temps réel</b> dans la base du club (Google Cloud Firestore) : toute
-         modification faite dans l'application de bureau apparaît ici automatiquement.
-         Cette page est en <b>lecture seule</b>.</p>
+         sont lues dans la base du club et actualisées automatiquement (environ toutes les
+         20 secondes) : toute modification faite dans l'application de bureau apparaît ici.
+         Cette page est en <b>lecture seule</b> et nécessite une connexion internet.</p>
       <div id="setup-not-logged">
         <div class="btn-row">
           <button class="btn btn-primary" id="login-btn" style="flex:2">🔑 Se connecter avec Google</button>
@@ -234,9 +233,10 @@
 <script>
 "use strict";
 
-/* ===================== Firebase (Auth + Firestore) ===================== */
-// Project configuration and emulator (dev): /static-web/alj-firebase.js
-const { auth, db: fsdb } = ALJFirebase.init();
+/* ===================== Firebase (sign-in) ===================== */
+// Project configuration and emulator (dev): /static-web/alj-firebase.js. Firebase only signs
+// the user in (ID token); the data comes from the API.
+const { auth } = ALJFirebase.init();
 
 /* Member list from the API (/api/members, one season), computed on the server.
    Online only: no offline copy of member data (plan D2). */
@@ -281,7 +281,7 @@ function isSetupPageActive() {
   return !a || a.id === "page-setup";
 }
 
-/* ===================== Rôles (mêmes listes que competitions.html / firestore.rules) ===================== */
+/* ===================== Rôles (display only; same lists as competitions.html and api_auth.py) ===================== */
 const COACH_EMAILS = [
   "lopez.dav@gmail.com",
   "stephane.loridant@orange.fr"
@@ -741,8 +741,6 @@ async function forceWebUpdate() {
   checkWebVersion();
   wireEvents();
   $("#search").value = filters.search || "";
-  try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
-  catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 })();
 </script>
 </body>

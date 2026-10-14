@@ -37,7 +37,7 @@ PREVIOUS_SEASON = "2025-2026"
 RETURNING_RATIO = 0.7          # share of members already registered the previous season
 EMAIL_DOMAIN = "hogwarts.example"   # reserved domain: no e-mail can ever be delivered
 
-# Fake Google accounts in the Auth emulator, one per role (see firestore.rules / api_auth):
+# Fake Google accounts in the Auth emulator, one per role (see api_auth):
 # (uid, e-mail, display name, custom claims)
 DEV_ACCOUNTS = [
     ("dev-dumbledore", "albus.dumbledore@alj-escalade.fr", "Albus Dumbledore (admin)", {}),

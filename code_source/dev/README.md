@@ -39,7 +39,8 @@ Connexion : le bouton « Se connecter » ouvre le sélecteur de comptes de l'ém
 - **Persistance** : l'émulateur exporte ses données dans `dev/.emulator-data/` à l'arrêt
   (`docker compose -f dev/docker-compose.yml down`) et les recharge au démarrage.
   Relancer le seed repart de zéro (et vide le cache `data-dev/` du serveur).
-- **Règles** : l'émulateur applique le vrai `firestore.rules` (monté en lecture seule).
+- **Règles** : l'émulateur applique le vrai `firestore.rules` (monté en lecture seule) : refus de tout client.
+  Le serveur passe par le jeton administrateur de l'émulateur (`owner`), qui joue le rôle d'IAM.
 - **HelloAsso** : `/api/dashboard` et la synchro HelloAsso appellent toujours l'API HelloAsso
   réelle (lecture) si des identifiants sont configurés ; sans eux, ces écrans sont en erreur.
 - **Service worker** : en cas de page figée après un changement, « Mettre à jour » sur le badge

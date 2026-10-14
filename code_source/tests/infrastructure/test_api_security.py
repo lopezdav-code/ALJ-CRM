@@ -1,6 +1,6 @@
 """
 Tests de sécurité de l'API Cloud Run :
-- authentification par jeton d'identité Firebase + rôles (miroir de firestore.rules) ;
+- authentification par jeton d'identité Firebase + rôles (seul juge des droits : firestore.rules refuse tout client) ;
 - vérification des notifications webhook HelloAsso (jeton secret, relecture API).
 """
 
@@ -125,21 +125,15 @@ class TestRoles(unittest.TestCase):
         self.assertTrue(api_auth.has_role({"admin": True}, "coach"))
         self.assertFalse(api_auth.has_role({"readonly": True}, "coach"))
 
-    def test_lists_match_firestore_rules_and_pwa(self):
-        """Les listes Python doivent rester identiques à firestore.rules et à la PWA."""
+    def test_rules_hold_no_role_list(self):
+        """firestore.rules denies every client: roles live in api_auth.py only (plan phase 3)."""
         with open(os.path.join(_code_root, "firestore.rules"), encoding="utf-8") as f:
             rules = f.read()
+        self.assertNotIn("@", rules)
+        self.assertNotIn("request.auth", rules)
 
-        def rule_emails(func):
-            body = re.search(r"function %s\(\)\s*\{(.*?)\n    \}" % func, rules, re.S).group(1)
-            return {e for e in re.findall(r"'([^'@\s]+@[^'\s]+)'", body) if "*" not in e}
-
-        self.assertEqual(rule_emails("isAdmin"), set(api_auth.ADMIN_EMAILS))
-        self.assertEqual(rule_emails("isCoach"), set(api_auth.COACH_EMAILS))
-        self.assertEqual(rule_emails("isReadOnly"), set(api_auth.READONLY_EMAILS))
-        for d in api_auth.ADMIN_EMAIL_DOMAINS:
-            self.assertIn(d.replace(".", "\\\\."), rules)
-
+    def test_display_lists_match_api(self):
+        """The pages' role lists (display only) stay identical to the API's."""
         for page in ("competitions.html", "index.html", os.path.join("shared", "alj-core.js")):
             with open(os.path.join(_code_root, "web", page), encoding="utf-8") as f:
                 html = f.read()

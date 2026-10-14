@@ -4,14 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Bureau · Accueil (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Bureau · Accueil (v23)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
 </head>
@@ -62,7 +61,7 @@ startBureau({
              loading="lazy"
              style="max-width: 100%; width: 100%; max-height: 480px; object-fit: cover; border-radius: 14px; box-shadow: 0 4px 16px rgba(15,23,42,.08); border: 1px solid var(--line);">
       </div>
-      <p class="muted" style="margin-top: 18px;">Connecté en tant que ${qui}. Les données sont lues en temps réel depuis Firestore.</p>`;
+      <p class="muted" style="margin-top: 18px;">Connecté en tant que ${qui}. Les données sont lues depuis la base du club et actualisées automatiquement.</p>`;
   }
 });
 </script>
