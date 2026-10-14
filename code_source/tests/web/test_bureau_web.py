@@ -234,6 +234,7 @@ class TestBureauFiles(unittest.TestCase):
 
         # 2. Vérification des attributs dans les données
         self.assertIn('"Âge"', html)
+        self.assertIn('"Tranche d\'Âge"', html)
         self.assertIn('"Sexe"', html)
         self.assertIn('"Statut"', html)
 
@@ -250,6 +251,19 @@ class TestBureauFiles(unittest.TestCase):
         f_block = re.search(r"import\s*\{([^}]+)\}\s*from\s*\"/static-web/alj-filters\.js\"", html, re.S).group(1)
         for sym in [s.strip() for s in f_block.split(",") if s.strip()]:
             self.assertRegex(filters_js, rf"export (function|const|async function) {sym}\b", sym)
+
+    def test_adherents_formatters_names_city_phone(self):
+        """Vérifie l'harmonisation d'affichage pour les noms, prénoms, villes et téléphones."""
+        members_js = _read(os.path.join(SHARED, "alj-members.js"))
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+
+        # Vérification des exports et imports
+        for fn in ("fmtLastName", "fmtFirstName", "fmtCity", "fmtPhone"):
+            self.assertIn(f"export function {fn}", members_js)
+            self.assertIn(fn, html)
+
+        # Vérification du regex / logique de téléphone
+        self.assertIn("replace(/(\\d{2})(?=\\d)/g, \"$1 \")", members_js)
 
     def test_adherents_page_elements(self):
         """La page adherents.html contient le tableau, les filtres et le panneau de détail."""

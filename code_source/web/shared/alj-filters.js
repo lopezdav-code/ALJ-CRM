@@ -153,10 +153,13 @@ export function filterMembers(members, filters, allowedTarifs) {
       const licence = normKey(m.licence_ffme);
       const mail = normKey(m.email_primary);
       const tel = normKey(m.phone);
+      const telDigits = String(m.phone || "").replace(/\D/g, "");
+      const qDigits = q.replace(/\D/g, "");
+      const telMatch = tel.includes(q) || (qDigits.length >= 4 && telDigits.includes(qDigits));
       const ville = normKey(m.city);
       const comm = normKey(m.commentaires_correctif);
       if (!(nom.includes(q) || prenom.includes(q) || plein1.includes(q) || plein2.includes(q)
-            || tarif.includes(q) || licence.includes(q) || mail.includes(q) || tel.includes(q) || ville.includes(q) || comm.includes(q))) {
+            || tarif.includes(q) || licence.includes(q) || mail.includes(q) || telMatch || ville.includes(q) || comm.includes(q))) {
         return false;
       }
     }

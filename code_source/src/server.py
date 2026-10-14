@@ -804,12 +804,33 @@ def get_pivot_table(season: str = "2026-2027"):
             b_date = parse_birth_date(row.get("birth_date") or row.get("birth_date_raw") or row.get("champ_Date de naissance de l'adhérent"))
             computed_age = age_at(b_date, ref_date)
             age_val = computed_age if computed_age is not None else "Inconnu"
+
+            # 7. Tranche d'Âge (regroupement par décennies & mineurs, ordonné pour le tri TCD)
+            if computed_age is None:
+                tranche_age = "Inconnue"
+            elif computed_age < 10:
+                tranche_age = "0 à 9 ans (< 10 ans)"
+            elif computed_age < 18:
+                tranche_age = "10 à 17 ans"
+            elif computed_age < 25:
+                tranche_age = "18 à 24 ans"
+            elif computed_age < 30:
+                tranche_age = "25 à 29 ans"
+            elif computed_age < 40:
+                tranche_age = "30 à 39 ans"
+            elif computed_age < 50:
+                tranche_age = "40 à 49 ans"
+            elif computed_age < 65:
+                tranche_age = "50 à 64 ans"
+            else:
+                tranche_age = "65 ans et plus"
             
             pivot_records.append({
                 "Nom": (row.get("last_name") or "").strip().upper(),
                 "Prénom": (row.get("first_name") or "").strip().title(),
                 "Sexe": normalize_gender(row.get("gender")) or "Inconnu",
                 "Âge": age_val,
+                "Tranche d'Âge": tranche_age,
                 "Ville": city_clean,
                 "Groupe / Tarif": str(row.get("tarif_name") or "").strip() or "Aucun",
                 "Statut": status_clean,
@@ -918,7 +939,7 @@ def get_pivot_table(season: str = "2026-2027"):
 
     <div class="header">
         <h1>📊 Tableau Croisé Dynamique — ALJ Escalade</h1>
-        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Groupe / Tarif, Sexe, Statut, Âge, Ville, etc.)</p>
+        <p>Glissez et déposez les étiquettes ci-dessous pour filtrer et croiser à volonté les adhérents (par Groupe / Tarif, Sexe, Statut, Âge, Tranche d'Âge, Ville, etc.)</p>
     </div>
 
     <div class="container">

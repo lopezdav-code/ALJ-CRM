@@ -53,6 +53,80 @@ export function telHref(phone) {
 }
 
 /**
+ * Formate un nom de famille en majuscules (norme française).
+ * Ex: "dupont" -> "DUPONT", "de lima ferreira" -> "DE LIMA FERREIRA"
+ */
+export function fmtLastName(name) {
+  if (!name) return "";
+  return String(name).trim().toUpperCase();
+}
+
+/**
+ * Formate un prénom en casse nom propre (1ère lettre en majuscule, reste en minuscule),
+ * en respectant les prénoms composés avec tiret ou espace.
+ * Ex: "JEAN-PIERRE" -> "Jean-Pierre", "marie-claire" -> "Marie-Claire", "ERIC" -> "Eric"
+ */
+export function fmtFirstName(name) {
+  if (!name) return "";
+  const s = String(name).trim();
+  return s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-öø-ÿ])/gi, (_, sep, letter) => sep + letter.toUpperCase());
+}
+
+/**
+ * Formate un nom de ville (1ère lettre en majuscule, reste en minuscule),
+ * en gérant les noms composés (tirets, espaces, apostrophes) et particules françaises.
+ * Ex: "JONAGE" -> "Jonage", "CHARVIEU-CHAVAGNEUX" -> "Charvieu-Chavagneux", "VILLETTE D'ANTHON" -> "Villette d'Anthon"
+ */
+export function fmtCity(city) {
+  if (!city) return "";
+  const s = String(city).trim().replace(/[’‘]/g, "'").replace(/\s+/g, " ");
+  const particles = new Set(["de", "des", "du", "d", "en", "sur", "sous", "les", "la", "le"]);
+
+  const capWord = (w, isFirst = false) => {
+    const parts = w.split(/(')/);
+    return parts.map(p => {
+      if (p === "'") return "'";
+      if (!isFirst && particles.has(p.toLowerCase())) return p.toLowerCase();
+      return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    }).join("");
+  };
+
+  const tokens = s.split(/([-\s])/);
+  let wordIdx = 0;
+  return tokens.map(tok => {
+    if (tok === "-" || tok === " " || /^\s+$/.test(tok)) {
+      return tok;
+    }
+    const res = capWord(tok, wordIdx === 0);
+    wordIdx++;
+    return res;
+  }).join("");
+}
+
+/**
+ * Formate un numéro de téléphone avec un espace entre chaque paire de chiffres.
+ * Ex: "0601821825" -> "06 01 82 18 25", "+33619984329" -> "06 19 98 43 29"
+ */
+export function fmtPhone(phone) {
+  if (!phone) return "";
+  let s = String(phone).trim();
+  // Remplacement de l'indicatif international +33 ou 0033 par le 0 national
+  s = s.replace(/^(\+33|0033)\s*/, "0");
+  const digits = s.replace(/\D/g, "");
+  let cleanDigits = digits;
+  if (digits.length === 9 && /^[1-9]/.test(digits)) {
+    cleanDigits = "0" + digits;
+  }
+  if (cleanDigits.length === 10) {
+    return cleanDigits.replace(/(\d{2})(?=\d)/g, "$1 ");
+  }
+  if (cleanDigits.length > 4 && cleanDigits.length % 2 === 0) {
+    return cleanDigits.replace(/(\d{2})(?=\d)/g, "$1 ");
+  }
+  return s;
+}
+
+/**
  * Retourne la liste des diplômes et badges obtenus par un adhérent.
  * Badge rouge (🔴), Autonomie bloc (🧗), Passeport Orange (🟠).
  * @param {Record<string, any>} m
@@ -194,21 +268,21 @@ export function buildMembersData(raw) {
     members.push({
       user_id: u.id,
       purchase_id: p.id || p._id,
-      last_name: u.last_name || "",
-      first_name: u.first_name || "",
+      last_name: fmtLastName(u.last_name || ""),
+      first_name: fmtFirstName(u.first_name || ""),
       birth_date: birthDate,
       age: age,
       gender: normalizeGender(u.gender),
       address: u.address || "",
       zip_code: u.zip_code || "",
-      city: u.city || "",
-      phone: u.phone || "",
+      city: fmtCity(u.city || ""),
+      phone: fmtPhone(u.phone || ""),
       email_primary: u.email_primary || "",
       email_secondary: u.email_secondary || "",
-      emergency1_name: u.emergency1_name || "",
-      emergency1_phone: u.emergency1_phone || "",
-      emergency2_name: u.emergency2_name || "",
-      emergency2_phone: u.emergency2_phone || "",
+      emergency1_name: fmtFirstName(u.emergency1_name || ""),
+      emergency1_phone: fmtPhone(u.emergency1_phone || ""),
+      emergency2_name: fmtFirstName(u.emergency2_name || ""),
+      emergency2_phone: fmtPhone(u.emergency2_phone || ""),
       licence_ffme: u.licence_ffme || "",
       health_commitment: u.health_commitment || "",
       photo_auth: u.photo_auth || "",
