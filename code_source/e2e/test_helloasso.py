@@ -8,7 +8,7 @@ from playwright.sync_api import expect
 
 from helpers import helloasso
 from helpers.bureau import go_to as bureau_go_to, open_competitions
-from helpers.data import unique_name
+from helpers.data import eventually, unique_name
 from helpers.helloasso import item
 from helpers.mobile import go_to, open_app, open_participants, participant_card
 
@@ -49,6 +49,11 @@ def _item_card(page, ha_item):
     return page.locator("#ha-items-list > .card").filter(has_text=re.compile(rf"Commande #{ha_item['order']['id']}\b"))
 
 
+def _participant(test_data, setup, member) -> dict:
+    return next(p for p in test_data.competition(setup["competition"]["id"])["participants"]
+                if p["adherent_id"] == member["id"])
+
+
 def test_sync_links_payment_automatically(mobile_page, test_data, setup):
     page = open_app(mobile_page)
     _sync_on_phone(page)
@@ -60,7 +65,10 @@ def test_sync_links_payment_automatically(mobile_page, test_data, setup):
     open_participants(page, setup["competition"]["nom"])
     paid = participant_card(page, setup["members"][0])
     expect(paid).to_contain_text("Payé")
-    assert test_data.helloasso_item(setup["auto"]["id"])["source"] == "auto"
+
+    def linked():
+        assert test_data.helloasso_item(setup["auto"]["id"])["source"] == "auto"
+    eventually(linked)
 
 
 def test_manual_link_marks_member_paid(mobile_page, test_data, setup):
@@ -80,12 +88,13 @@ def test_manual_link_marks_member_paid(mobile_page, test_data, setup):
     go_to(page, "comps")
     open_participants(page, setup["competition"]["nom"])
     expect(participant_card(page, member)).to_contain_text("Payé")
-    stored = test_data.helloasso_item(setup["unknown_payer"]["id"])
-    assert (stored["competition_id"], stored["adherent_id"], stored["source"]) == (
-        setup["competition"]["id"], member["id"], "manuel")
-    participant = next(p for p in test_data.competition(setup["competition"]["id"])["participants"]
-                       if p["adherent_id"] == member["id"])
-    assert (participant["montant_paye"], participant["commande_helloasso"]) == (15, str(setup["unknown_payer"]["order"]["id"]))
+
+    def stored():
+        doc = test_data.helloasso_item(setup["unknown_payer"]["id"])
+        assert (doc["competition_id"], doc["adherent_id"], doc["source"]) == (setup["competition"]["id"], member["id"], "manuel")
+        participant = _participant(test_data, setup, member)
+        assert (participant["montant_paye"], participant["commande_helloasso"]) == (15, str(setup["unknown_payer"]["order"]["id"]))
+    eventually(stored)
 
 
 def test_ignore_and_restore_a_payment(mobile_page, test_data, setup):
@@ -103,13 +112,19 @@ def test_ignore_and_restore_a_payment(mobile_page, test_data, setup):
     expect(card).to_have_count(0)
     page.locator("#ha-chip-ignored").click()
     expect(card).to_contain_text("Ignoré")
-    stored = test_data.helloasso_item(setup["no_competition"]["id"])
-    assert stored["ignore"] is True and stored["ignore_motif"] == "Shop purchase, not a competition"
+
+    def ignored():
+        doc = test_data.helloasso_item(setup["no_competition"]["id"])
+        assert (doc["ignore"], doc["ignore_motif"]) == (True, "Shop purchase, not a competition")
+    eventually(ignored)
 
     card.get_by_role("button", name="Détails").click()
     page.locator("#ha-modal-ignore-btn").click()
     expect(page.locator("#toast")).to_contain_text("n'est plus ignorée")
-    assert test_data.helloasso_item(setup["no_competition"]["id"])["ignore"] is False
+
+    def restored():
+        assert test_data.helloasso_item(setup["no_competition"]["id"])["ignore"] is False
+    eventually(restored)
 
 
 def test_resync_keeps_coach_decisions(mobile_page, test_data, setup):
@@ -129,10 +144,12 @@ def test_resync_keeps_coach_decisions(mobile_page, test_data, setup):
 
     page.locator("#ha-btn-sync").click()
     expect(page.locator("#toast")).to_contain_text("Synchro terminée", timeout=20_000)
-    linked = test_data.helloasso_item(setup["unknown_payer"]["id"])
-    ignored = test_data.helloasso_item(setup["no_competition"]["id"])
-    assert (linked["source"], linked["adherent_id"]) == ("manuel", member["id"])
-    assert ignored["ignore"] is True
+
+    def kept():
+        linked = test_data.helloasso_item(setup["unknown_payer"]["id"])
+        assert (linked["source"], linked["adherent_id"]) == ("manuel", member["id"])
+        assert test_data.helloasso_item(setup["no_competition"]["id"])["ignore"] is True
+    eventually(kept)
 
 
 def test_webhook_marks_member_paid(mobile_page, page, test_data, setup):
@@ -187,9 +204,11 @@ def test_office_manual_link(page, test_data, setup):
     page.locator("#attach-adh-select").select_option(str(member["id"]))
     page.locator("#ha-attach-submit").click()
     expect(page.locator("#toast")).to_contain_text("Rattachement enregistré")
-    participant = next(p for p in test_data.competition(setup["competition"]["id"])["participants"]
-                       if p["adherent_id"] == member["id"])
-    assert (participant["statut_paiement"], participant["montant_paye"]) == ("paye", 15)
+
+    def paid():
+        participant = _participant(test_data, setup, member)
+        assert (participant["statut_paiement"], participant["montant_paye"]) == ("paye", 15)
+    eventually(paid)
 
 
 @KNOWN_BUG_A6
@@ -205,11 +224,12 @@ def test_office_manual_link_is_stored_like_the_phone(page, test_data, setup):
     page.locator("#attach-adh-select").select_option(str(member["id"]))
     page.locator("#ha-attach-submit").click()
     expect(page.locator("#toast")).to_contain_text("Rattachement enregistré")
-    stored = test_data.helloasso_item(setup["unknown_payer"]["id"])
-    assert (stored["competition_id"], stored["adherent_id"]) == (setup["competition"]["id"], member["id"])
-    participant = next(p for p in test_data.competition(setup["competition"]["id"])["participants"]
-                       if p["adherent_id"] == member["id"])
-    assert participant["commande_helloasso"] == str(setup["unknown_payer"]["order"]["id"])
+
+    def stored():
+        doc = test_data.helloasso_item(setup["unknown_payer"]["id"])
+        assert (doc["competition_id"], doc["adherent_id"]) == (setup["competition"]["id"], member["id"])
+        assert _participant(test_data, setup, member)["commande_helloasso"] == str(setup["unknown_payer"]["order"]["id"])
+    eventually(stored)
 
 
 def test_membership_dashboard(page, fake_helloasso):

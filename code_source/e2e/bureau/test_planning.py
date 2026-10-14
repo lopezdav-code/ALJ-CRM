@@ -107,7 +107,7 @@ def test_sunday_slot_on_week_view(page, planning):
     page.locator("#slot-horaires").fill("10:00 - 12:00")
     page.locator("#btn-save-modal").click()
     expect(page.locator("#toast")).to_contain_text("enregistré")
-    expect(page.locator(".plan-slot-card").filter(has_text=groupe)).to_be_visible(timeout=3_000)
+    expect(page.locator(".plan-slot-card").filter(has_text=groupe)).to_be_visible()
 
 
 def test_name_and_hours_are_required(page, planning):

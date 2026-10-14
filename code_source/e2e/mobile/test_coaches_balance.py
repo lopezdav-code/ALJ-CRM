@@ -1,7 +1,7 @@
 """Mobile app, coach: coaches management and the athletes' payment balance."""
 from playwright.sync_api import expect
 
-from helpers.data import unique_name
+from helpers.data import eventually, unique_name
 from helpers.mobile import accept_dialogs, competition_card, go_to, open_app
 
 
@@ -30,7 +30,10 @@ def test_create_rename_delete_coach(mobile_page, test_data):
 
     page.locator("#f-coach-delete").click()
     expect(_coach_card(page, renamed)).to_have_count(0)
-    assert all(c["nom"] != renamed for c in test_data.coaches())
+
+    def deleted():
+        assert all(c["nom"] != renamed for c in test_data.coaches())
+    eventually(deleted)
 
 
 def test_rename_shows_in_competitions(mobile_page, test_data):
@@ -64,7 +67,10 @@ def test_deleted_coach_leaves_competitions(mobile_page, test_data):
     page.locator("#f-coach-delete").click()
     go_to(page, "comps")
     expect(competition_card(page, comp)).to_contain_text("Aucun coach")
-    assert test_data.competition_by_name(comp)["coach_ids"] == []
+
+    def unassigned():
+        assert test_data.competition_by_name(comp)["coach_ids"] == []
+    eventually(unassigned)
 
 
 def test_balance_of_an_athlete(mobile_page, test_data):

@@ -3,23 +3,58 @@ Test data set up through the application's own repository (CompetitionFirestoreR
 code path of the desktop app and the HelloAsso webhook), run in a dev-mode subprocess like the
 seed: the pytest process never talks to Firestore itself.
 
+The subprocess is started once and serves every request (JSON lines on stdin / stdout): a fresh
+interpreter per call cost ~0.5 s of startup and imports, against ~20 ms for the call itself.
+
 Each test creates the competitions it changes, under a unique name, so tests stay independent
 of each other and of the seeded data.
 """
 import json
+import queue
 import subprocess
 import sys
+import threading
+import time
 import uuid
 
 from helpers.stack import CODE_SOURCE
 
-_PRELUDE = """
-import json, sys
+_RESULT, _ERROR = "__RESULT__", "__ERROR__"
+_TIMEOUT = 60   # seconds per request
+EVENTUALLY_TIMEOUT = 5.0   # seconds, as Playwright's expect (shortened by conftest.known_bug_timeouts)
+
+# Each request line is {"body", "args"}: `body` runs with `args`, `Repo` and `Competition` in scope and sets
+# `result`. The adherents cache is dropped first, so that every request reads Firestore as a fresh process would.
+_WORKER = f"""
+import json, sys, traceback
 sys.path.insert(0, "src")
 from domain.competition_models import Competition
 from infrastructure.competition_firestore_repository import CompetitionFirestoreRepository as Repo
-args = json.loads(sys.argv[1])
+for line in sys.stdin:
+    request = json.loads(line)
+    try:
+        Repo._invalidate_adherents_cache()
+        scope = {{"json": json, "sys": sys, "Repo": Repo, "Competition": Competition, "args": request["args"]}}
+        exec(request["body"], scope)
+        print({_RESULT!r} + json.dumps(scope["result"], default=str), flush=True)
+    except Exception:
+        print({_ERROR!r} + json.dumps(traceback.format_exc()), flush=True)
 """
+
+
+def eventually(check, timeout: float = None):
+    """Retries `check` (plain asserts on test_data reads) until it passes, then returns its result; after
+    `timeout` (EVENTUALLY_TIMEOUT by default), its last error is raised. The pages update optimistically: a read right after the UI change
+    can run before the write reaches Firestore. A missing document or participant (None, KeyError,
+    StopIteration) counts as "not yet"."""
+    deadline = time.monotonic() + (EVENTUALLY_TIMEOUT if timeout is None else timeout)
+    while True:
+        try:
+            return check()
+        except (AssertionError, LookupError, TypeError, StopIteration):
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
 
 
 def unique_name(prefix: str) -> str:
@@ -29,16 +64,54 @@ def unique_name(prefix: str) -> str:
 class TestData:
     def __init__(self, env: dict):
         self.env = env
+        self._process = None
+        self._lines = None
+
+    def _start(self) -> None:
+        self._process = subprocess.Popen([sys.executable, "-c", _WORKER], cwd=CODE_SOURCE, env=self.env,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding="utf-8", bufsize=1)
+        # Read from a thread: a blocking readline could not time out (and pipes are not selectable on Windows)
+        self._lines = queue.Queue()
+        threading.Thread(target=self._pump, args=(self._process.stdout, self._lines), daemon=True).start()
+
+    @staticmethod
+    def _pump(stream, lines: queue.Queue) -> None:
+        for line in stream:
+            lines.put(line.rstrip("\n"))
+        lines.put(None)   # end of output: the worker exited
+
+    def close(self) -> None:
+        if self._process is None:
+            return
+        self._process.stdin.close()
+        try:
+            self._process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait()
+        self._process = None
 
     def _run(self, body: str, **args):
         """Runs `body` (which sets `result`) with the repository in dev mode; returns `result`."""
-        code = _PRELUDE + body + "\nprint('__RESULT__' + json.dumps(result, default=str))"
-        proc = subprocess.run([sys.executable, "-c", code, json.dumps(args)], cwd=CODE_SOURCE, env=self.env,
-                              capture_output=True, text=True, timeout=60)
-        if proc.returncode != 0:
-            raise RuntimeError(f"test data setup failed:\n{proc.stdout}\n{proc.stderr}")
-        line = next(ln for ln in reversed(proc.stdout.splitlines()) if ln.startswith("__RESULT__"))
-        return json.loads(line[len("__RESULT__"):])
+        if self._process is None or self._process.poll() is not None:
+            self._start()
+        self._process.stdin.write(json.dumps({"body": body, "args": args}) + "\n")
+        self._process.stdin.flush()
+        output = []   # the application's own prints and logs, shown on failure
+        while True:
+            try:
+                line = self._lines.get(timeout=_TIMEOUT)
+            except queue.Empty:
+                self._process.kill()
+                raise RuntimeError(f"test data setup timed out after {_TIMEOUT} s:\n" + "\n".join(output))
+            if line is None:
+                raise RuntimeError(f"test data worker exited (code {self._process.wait()}):\n" + "\n".join(output))
+            if line.startswith(_RESULT):
+                return json.loads(line[len(_RESULT):])
+            if line.startswith(_ERROR):
+                raise RuntimeError("test data setup failed:\n" + "\n".join(output) + "\n" + json.loads(line[len(_ERROR):]))
+            output.append(line)
 
     def members(self, competition_only: bool = False) -> list:
         """Members of the `adherents` projection (id, nom, prenom, tarif, email…)."""

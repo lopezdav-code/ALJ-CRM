@@ -79,6 +79,10 @@ python -m pytest -c e2e/pytest.ini e2e -m smoke      # rapide ; sans -m : toute 
   (`e2e/helpers/auth.py`). E-mails : fixture `mailpit` (`e2e/helpers/mailpit.py`). Données de test : fixture
   `test_data` (`e2e/helpers/data.py`), qui passe par le dépôt de l'application ; chaque test crée ses propres
   compétitions sous un nom unique.
+  Les pages mettent à jour l'affichage avant l'écriture Firestore : une lecture après une action dans la page passe
+  par `eventually(check)` (même fichier), qui réessaie ses `assert` jusqu'à 5 s.
+- Bugs connus (`xfail`) : délais de 2 s au lieu de 5 s / 30 s (fixture `known_bug_timeouts`) ; pas de `timeout=`
+  explicite sur l'étape qui échoue.
 - HelloAsso : fixture `fake_helloasso` (faux serveur sur le port `8095`, `e2e/helpers/helloasso.py`) ; chaque test
   y charge ses propres paiements (`fake_helloasso.set([item(...)])`), le webhook est appelé avec
   `HELLOASSO_WEBHOOK_TOKEN`.

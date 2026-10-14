@@ -122,7 +122,7 @@ def test_course_attendance_sheets(page, tmp_path):
 def test_autonomous_attendance_sheet(page, tmp_path):
     _open_tab(page, "presence")
     expect(page.locator("#presence-autonome-summary")).not_to_contain_text("Total adhérents : 0")
-    with page.expect_download(timeout=10_000) as info:
+    with page.expect_download() as info:
         page.locator("#btn-download-autonome").click()
     assert _saved(info.value, tmp_path).stat().st_size > 0
 

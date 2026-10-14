@@ -54,5 +54,5 @@ def test_office_campaign(page, mailpit, competition):
     expect(page.locator("#comp-email-recipients-count")).to_have_text("2")
     page.locator("#comp-email-subject").fill("Convocation {name_competition}")
     page.locator("#comp-email-send").click()
-    expect(page.locator("#toast")).to_contain_text("envoyé(s) avec succès", timeout=5_000)
+    expect(page.locator("#toast")).to_contain_text("envoyé(s) avec succès")
     _assert_sent_to_selected(mailpit, competition)

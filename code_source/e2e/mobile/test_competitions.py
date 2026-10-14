@@ -3,7 +3,7 @@ import datetime
 
 from playwright.sync_api import expect
 
-from helpers.data import unique_name
+from helpers.data import eventually, unique_name
 from helpers.mobile import accept_dialogs, competition_card, open_app
 
 
@@ -32,8 +32,10 @@ def test_create_competition(mobile_page, test_data):
     expect(card).to_contain_text("Coachs : Severus Snape, Minerva McGonagall")
     expect(page.locator("#comp-form-card")).to_be_hidden()
 
-    stored = test_data.competition_by_name(nom)
-    assert (stored["date_competition"], stored["date_fin"], stored["prix"]) == ("2027-03-14", "2027-03-15", 18)
+    def stored():
+        doc = test_data.competition_by_name(nom)
+        assert (doc["date_competition"], doc["date_fin"], doc["prix"]) == ("2027-03-14", "2027-03-15", 18)
+    eventually(stored)
     page.reload()
     expect(competition_card(page, nom)).to_be_visible()
 
@@ -73,7 +75,10 @@ def test_delete_competition(mobile_page, test_data):
     page.locator("#f-delete").click()
     expect(page.locator("#toast")).to_contain_text("Compétition supprimée")
     expect(competition_card(page, nom)).to_have_count(0)
-    assert test_data.competition_by_name(nom) is None
+
+    def deleted():
+        assert test_data.competition_by_name(nom) is None
+    eventually(deleted)
 
 
 def test_archive_and_restore(mobile_page, test_data):
@@ -103,4 +108,7 @@ def test_archive_past_competitions(mobile_page, test_data):
     expect(competition_card(page, past)).to_have_count(0)
     expect(competition_card(page, upcoming)).to_be_visible()
     expect(button).to_be_hidden()
-    assert test_data.competition_by_name(past)["statut"] == "close"
+
+    def archived():
+        assert test_data.competition_by_name(past)["statut"] == "close"
+    eventually(archived)

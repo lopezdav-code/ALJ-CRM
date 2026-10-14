@@ -14,7 +14,7 @@ from helpers.bureau import (
     participant_row,
     select_competition,
 )
-from helpers.data import unique_name
+from helpers.data import eventually, unique_name
 from helpers.mobile import SEEDED_COMPETITION, accept_dialogs
 
 PAST_SEEDED = "Diagon Alley Bouldering Cup"
@@ -60,8 +60,10 @@ def test_create_competition(page, test_data):
     workspace = select_competition(page, nom)
     expect(workspace).to_contain_text("17 €")
     expect(workspace).to_contain_text("Severus Snape")
-    stored = test_data.competition_by_name(nom)
-    assert (stored["lieu"], stored["type"], stored["prix"]) == ("Saint-Étienne", "Difficulté", 17)
+    def stored():
+        doc = test_data.competition_by_name(nom)
+        assert (doc["lieu"], doc["type"], doc["prix"]) == ("Saint-Étienne", "Difficulté", 17)
+    eventually(stored)
 
 
 def test_edit_and_delete_competition(page, test_data):
@@ -81,7 +83,10 @@ def test_edit_and_delete_competition(page, test_data):
     select_competition(page, renamed)
     page.locator("#btn-del-comp").click()
     expect(competition_card(page, renamed)).to_have_count(0)
-    assert test_data.competition_by_name(renamed) is None
+
+    def deleted():
+        assert test_data.competition_by_name(renamed) is None
+    eventually(deleted)
 
 
 def test_search_and_date_filters(page):
@@ -113,8 +118,10 @@ def test_competitors_selection_and_attendance(page, test_data, members):
     expect(workspace.locator(".kpi-card").first).to_contain_text("2")
     participant_row(page, invited).locator(".part-present-chk").check()
     expect(workspace.locator(".kpi-card").nth(3)).to_contain_text("1 / 2")
-    stored = {p["adherent_id"]: p for p in test_data.competition(cid)["participants"]}
-    assert stored[invited["id"]]["selectionne"] is True and stored[invited["id"]]["present"] is True
+    def stored():
+        doc = next(p for p in test_data.competition(cid)["participants"] if p["adherent_id"] == invited["id"])
+        assert (doc["selectionne"], doc["present"]) == (True, True)
+    eventually(stored)
 
 
 @KNOWN_BUG_A6
@@ -127,12 +134,14 @@ def test_register_a_member(page, test_data, members):
     workspace.locator(".sub-tab-btn[data-subtab='add_adh']").click()
     page.locator("#adh-search-input").fill(outsider["nom"][:4].lower())
     result = page.locator("#adh-results-box .card").filter(has_text=outsider["prenom"])
-    result.locator(".add-adh-btn").click(timeout=5_000)
+    result.locator(".add-adh-btn").click()
     expect(page.locator("#toast")).to_contain_text("inscrit avec succès")
     workspace.locator(".sub-tab-btn[data-subtab='participants']").click()
     expect(participant_row(page, outsider)).to_be_visible()
-    [stored] = test_data.competition(cid)["participants"]
-    assert (stored["adherent_id"], stored["nom"], stored["prenom"]) == (outsider["id"], outsider["nom"], outsider["prenom"])
+    def stored():
+        [doc] = test_data.competition(cid)["participants"]
+        assert (doc["adherent_id"], doc["nom"], doc["prenom"]) == (outsider["id"], outsider["nom"], outsider["prenom"])
+    eventually(stored)
 
 
 def test_competition_csv_export(page, test_data, members, tmp_path):
@@ -233,6 +242,14 @@ def _stored(test_data, workflow, member):
     return next(p for p in test_data.competition(workflow["id"])["participants"] if p["adherent_id"] == member["id"])
 
 
+def _assert_stored(test_data, workflow, member, **expected):
+    """Waits until the participant's stored fields match `expected` (see eventually)."""
+    def check():
+        stored = _stored(test_data, workflow, member)
+        assert {key: stored[key] for key in expected} == expected
+    eventually(check)
+
+
 def test_manual_payment(page, test_data, workflow, dialogs):
     open_competitions(page)
     select_competition(page, workflow["nom"])
@@ -242,9 +259,8 @@ def test_manual_payment(page, test_data, workflow, dialogs):
     row.locator(".part-mark-paid-btn").click()
     expect(page.locator("#toast")).to_contain_text("Paiement manuel de 12.5 € enregistré")
     expect(participant_row(page, workflow["unpaid"])).to_contain_text("Payé (12.5 €)")
-    stored = _stored(test_data, workflow, workflow["unpaid"])
-    assert (stored["statut_paiement"], stored["montant_paye"], stored["commande_helloasso"]) == (
-        "paye", 12.5, "Règlement manuel")
+    _assert_stored(test_data, workflow, workflow["unpaid"], statut_paiement="paye", montant_paye=12.5,
+                   commande_helloasso="Règlement manuel")
 
 
 def test_paid_competitor_cannot_be_removed(page, workflow):
@@ -264,14 +280,12 @@ def test_withdrawal_of_paid_competitor(page, test_data, workflow, dialogs, decis
     row = participant_row(page, workflow["paid"])
     expect(row).to_contain_text(badge)
     expect(row.locator(".part-select-chk")).not_to_be_checked()
-    stored = _stored(test_data, workflow, workflow["paid"])
-    assert (stored["statut_paiement"], stored["selectionne"], stored["montant_paye"]) == (decision, False, 12)
+    _assert_stored(test_data, workflow, workflow["paid"], statut_paiement=decision, selectionne=False, montant_paye=12)
 
     # A withdrawal entered by mistake can be undone
     row.locator(".part-restore-paid-btn").click()
     expect(participant_row(page, workflow["paid"])).to_contain_text("Payé (12 €)")
-    stored = _stored(test_data, workflow, workflow["paid"])
-    assert (stored["statut_paiement"], stored["selectionne"]) == ("paye", True)
+    _assert_stored(test_data, workflow, workflow["paid"], statut_paiement="paye", selectionne=True)
 
 
 def test_withdrawal_needs_confirmation(page, test_data, workflow, dialogs):
@@ -291,7 +305,7 @@ def test_checked_in_competitor_is_locked(page, test_data, workflow):
     row = participant_row(page, workflow["paid"])
     expect(row).to_contain_text("Sur place")
     expect(row.locator(".part-action-select, .part-remove-btn")).to_have_count(0)
-    assert _stored(test_data, workflow, workflow["paid"])["present"] is True
+    _assert_stored(test_data, workflow, workflow["paid"], present=True)
 
 
 def test_remove_unpaid_competitor(page, test_data, workflow, dialogs):
@@ -299,5 +313,7 @@ def test_remove_unpaid_competitor(page, test_data, workflow, dialogs):
     select_competition(page, workflow["nom"])
     participant_row(page, workflow["unpaid"]).locator(".part-remove-btn").click()
     expect(participant_row(page, workflow["unpaid"])).to_have_count(0)
-    remaining = [p["adherent_id"] for p in test_data.competition(workflow["id"])["participants"]]
-    assert remaining == [workflow["paid"]["id"]]
+
+    def removed():
+        assert [p["adherent_id"] for p in test_data.competition(workflow["id"])["participants"]] == [workflow["paid"]["id"]]
+    eventually(removed)

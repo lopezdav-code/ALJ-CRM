@@ -13,15 +13,17 @@ import os
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import BrowserContext
+from playwright.sync_api import BrowserContext, expect
 
-from helpers import helloasso, stack
+from helpers import data as test_data_helpers, helloasso, stack
 from helpers.auth import login_as as _login_as
 from helpers.data import TestData
 from helpers.mailpit import Mailpit
 
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 PHONE_DEVICE = "Pixel 7"
+EXPECT_TIMEOUT = 5_000      # Playwright's default
+KNOWN_BUG_TIMEOUT = 2_000   # see known_bug_timeouts
 
 
 @pytest.fixture(scope="session")
@@ -64,8 +66,11 @@ def server(e2e_stack, fake_helloasso_server, e2e_logs, tmp_path_factory, request
     log_path = e2e_logs / "server.log"
     stack.seed(env, log_path)
     data = TestData(env)
-    data.save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
-    data.fill_geocache()
+    try:
+        data.save_setting("HELLOASSO_ANNUAL_CAMPAIGN", f"Event:{helloasso.COMPETITION_FORM}")
+        data.fill_geocache()
+    finally:
+        data.close()   # before the server starts: fill_geocache used its SQLite file
     srv = stack.ServerProcess(env, int(os.environ.get("E2E_PORT", "8090")), log_path)
     srv.start()
     yield srv
@@ -133,6 +138,24 @@ def mobile_page(mobile_context):
     yield from _checked_page(mobile_context)
 
 
+@pytest.fixture(autouse=True)
+def known_bug_timeouts(request):
+    """xfail tests fail by timing out at the bug: they wait 2 s instead of the 5 s (expect, eventually) /
+    30 s (actions) defaults. Explicit timeouts (HelloAsso sync…) still apply. A step must stay under
+    2 s for the XPASS to show once the bug is fixed."""
+    if request.node.get_closest_marker("xfail") is None:
+        yield
+        return
+    for name in ("page", "mobile_page"):
+        if name in request.fixturenames:
+            request.getfixturevalue(name).set_default_timeout(KNOWN_BUG_TIMEOUT)
+    expect.set_options(timeout=KNOWN_BUG_TIMEOUT)
+    test_data_helpers.EVENTUALLY_TIMEOUT = KNOWN_BUG_TIMEOUT / 1000
+    yield
+    expect.set_options(timeout=EXPECT_TIMEOUT)
+    test_data_helpers.EVENTUALLY_TIMEOUT = EXPECT_TIMEOUT / 1000
+
+
 @pytest.fixture
 def login_as():
     """login_as(page, "admin" | "coach" | "readonly" | "stranger") → Account."""
@@ -149,7 +172,9 @@ def mailpit(e2e_stack) -> Mailpit:
 @pytest.fixture(scope="session")
 def test_data(server) -> TestData:
     """Creates and reads competitions through the application's repository (helpers/data.py)."""
-    return TestData(server.env)
+    data = TestData(server.env)
+    yield data
+    data.close()
 
 
 @pytest.fixture

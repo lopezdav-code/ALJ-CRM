@@ -2,7 +2,7 @@
 import pytest
 from playwright.sync_api import expect
 
-from helpers.data import unique_name
+from helpers.data import eventually, unique_name
 from helpers.mobile import open_app, open_participants, participant_card
 
 
@@ -57,8 +57,10 @@ def test_select_invited_member(mobile_page, test_data, competition, members):
     expect(page.locator("#p-kpi-participe")).to_have_text("4")
     expect(page.locator("#p-kpi-attente")).to_have_text("3")
     expect(participant_card(page, invited)).to_contain_text("En attente")
-    stored = _participant(test_data, competition, invited)
-    assert stored["selectionne"] is True and stored["statut_paiement"] == "en_attente"
+    def stored():
+        doc = _participant(test_data, competition, invited)
+        assert (doc["selectionne"], doc["statut_paiement"]) == (True, "en_attente")
+    eventually(stored)
 
 
 def test_unselecting_paid_member_needs_a_decision(mobile_page, test_data, competition, members):
@@ -79,8 +81,10 @@ def test_unselecting_paid_member_needs_a_decision(mobile_page, test_data, compet
     expect(modal).to_be_hidden()
     expect(participant_card(page, paid)).to_contain_text("Annulé — perdu")
     expect(participant_card(page, paid)).to_contain_text("Injured")
-    stored = _participant(test_data, competition, paid)
-    assert (stored["selectionne"], stored["statut_paiement"], stored["note_paiement"]) == (False, "annule_perdu", "Injured")
+    def stored():
+        doc = _participant(test_data, competition, paid)
+        assert (doc["selectionne"], doc["statut_paiement"], doc["note_paiement"]) == (False, "annule_perdu", "Injured")
+    eventually(stored)
 
 
 def test_closing_cancel_modal_keeps_paid_member(mobile_page, competition, members):
@@ -102,7 +106,10 @@ def test_add_member_outside_the_list(mobile_page, test_data, competition, member
     result.get_by_role("button", name="Ajouter").click()
     expect(participant_card(page, outsider)).to_be_visible()
     expect(page.locator("#p-kpi-participe")).to_have_text("4")
-    assert _participant(test_data, competition, outsider)["selectionne"] is True
+
+    def added():
+        assert _participant(test_data, competition, outsider)["selectionne"] is True
+    eventually(added)
 
 
 def test_load_competition_group(mobile_page, test_data):
@@ -115,8 +122,10 @@ def test_load_competition_group(mobile_page, test_data):
     page.locator("#p-load-group").click()
     expect(page.locator("#p-list .card")).to_have_count(len(group))
     expect(page.locator("#p-kpi-participe")).to_have_text("0")
-    stored = test_data.competition(cid)["participants"]
-    assert {p["statut_paiement"] for p in stored} == {"non_invite"}
+
+    def loaded():
+        assert {p["statut_paiement"] for p in test_data.competition(cid)["participants"]} == {"non_invite"}
+    eventually(loaded)
 
     page.locator("#p-load-group").click()
     expect(page.locator("#toast")).to_contain_text("déjà présents")
