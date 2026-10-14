@@ -684,11 +684,27 @@ class SqliteRepository:
                 "champ_Code postal": str(fields.get("zip_code") or "").strip(),
                 "champ_Ville": str(fields.get("city") or "").strip(),
                 "champ_Pays": "France",
-                "payer_lastName": str(fields.get("last_name") or "").strip(),
-                "payer_firstName": str(fields.get("first_name") or "").strip(),
-                "payer_email": payer_email,
+                "payer_lastName": str(fields.get("payer_lastName") or fields.get("payer_last_name") or fields.get("last_name") or "").strip(),
+                "payer_firstName": str(fields.get("payer_firstName") or fields.get("payer_first_name") or fields.get("first_name") or "").strip(),
+                "payer_email": str(fields.get("payer_email") or payer_email).strip(),
                 "is_modified": "Non",
             }
+
+            if "email_secondary" in fields:
+                rec["champ_Deuxième adresse mail pour la réception des informations du club"] = str(fields.get("email_secondary") or "").strip()
+            if "licence_ffme" in fields:
+                rec["champ_Numéro de Licence FFME (6 chiffres)"] = str(fields.get("licence_ffme") or "").strip()
+            if "badge_rouge" in fields:
+                rec["badge_rouge"] = str(fields.get("badge_rouge") or "Non").strip()
+            if "autonomie_bloc" in fields:
+                rec["autonomie_bloc"] = str(fields.get("autonomie_bloc") or "Non").strip()
+            if "emergency1_name" in fields:
+                rec["champ_Personne à prévenir en cas d'urgence - NOM  et PRENOM en majuscule"] = str(fields.get("emergency1_name") or "").strip()
+            if "emergency1_phone" in fields:
+                rec["champ_Personne à prévenir en cas d'urgence - Téléphone"] = str(fields.get("emergency1_phone") or "").strip()
+            comment = fields.get("commentaires_correctif") if "commentaires_correctif" in fields else fields.get("commentaire")
+            if comment is not None:
+                rec["commentaires_correctif"] = str(comment).strip()
 
             cursor = conn.cursor()
             stats = schema_v2.sync_members_to_v2(cursor, [rec], season_name)

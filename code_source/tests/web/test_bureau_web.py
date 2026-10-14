@@ -453,6 +453,126 @@ class TestBureauFiles(unittest.TestCase):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn('apiFetch("/api/members/update"', html)
 
+    def test_member_add_ui_elements(self):
+        """La page adherents.html contient le bouton d'ajout et la modale complète d'ajout manuel."""
+        html = _read(os.path.join(BUREAU, "adherents.html"))
+        for elem in (
+            "btn-add-member", "member-add-modal", "add-modal-close", "add-cancel-btn",
+            "add-save-btn", "add-last-name", "add-first-name", "add-birth-date",
+            "add-gender", "add-tarifs-container", "add-status", "add-amount",
+            "add-licence", "add-badge-rouge", "add-autonomie-bloc",
+            "add-email-primary", "add-email-secondary", "add-phone",
+            "add-address", "add-zip", "add-city", "add-emergency-name",
+            "add-emergency-phone", "add-commentaire", "btn-insert-add-comment-date"
+        ):
+            self.assertIn(f'id="{elem}"', html)
+        self.assertIn('apiFetch("/api/members/create"', html)
+
+    def test_member_add_requires_admin_role(self):
+        """Les endpoints de création manuelle d'adhérents exigent le rôle admin."""
+        from infrastructure.api_auth import required_role
+        self.assertEqual(required_role("POST", "/api/members/create"), "admin")
+        self.assertEqual(required_role("POST", "/api/members/add"), "admin")
+
+    def test_member_add_endpoint_and_sqlite_persistence(self):
+        """add_member_api persiste le nouvel adhérent, la commande et l'achat dans SQLite."""
+        import tempfile
+        import shutil
+        from infrastructure.sqlite_repository import SqliteRepository
+        from server import add_member_api
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "test_member_add.db")
+        orig_db_path = SqliteRepository.get_db_path()
+        try:
+            SqliteRepository.set_db_path(db_path)
+            SqliteRepository.setup_database()
+            conn = SqliteRepository.get_connection()
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO seasons (id, name, is_active) VALUES (1, '2026-2027', 1)")
+            conn.commit()
+            conn.close()
+
+            payload = {
+                "season": "2026-2027",
+                "fields": {
+                    "last_name": "VALENTIN",
+                    "first_name": "Claire",
+                    "birth_date": "2010-05-14",
+                    "gender": "Femme",
+                    "tarif_name": "Cours Ados 1 (Lundi)",
+                    "status": "Validé",
+                    "amount": 195.0,
+                    "licence_ffme": "654321",
+                    "badge_rouge": "Oui",
+                    "autonomie_bloc": "Oui",
+                    "email_primary": "claire.valentin@example.com",
+                    "email_secondary": "parents.valentin@example.com",
+                    "phone": "06 11 22 33 44",
+                    "address": "15 rue des Alpes",
+                    "zip_code": "69330",
+                    "city": "Jonage",
+                    "emergency1_name": "VALENTIN Marc",
+                    "emergency1_phone": "06 99 88 77 66",
+                    "commentaires_correctif": "Inscription manuelle web bureau"
+                }
+            }
+
+            res = add_member_api(payload)
+            self.assertEqual(res.get("status"), "success")
+            self.assertTrue(res.get("order_ref", "").startswith("MANUEL-"))
+
+            # Vérification dans SQLite
+            conn = SqliteRepository.get_connection()
+            u = conn.execute("SELECT * FROM users WHERE last_name = 'VALENTIN'").fetchone()
+            self.assertIsNotNone(u)
+            self.assertEqual(u["first_name"], "Claire")
+            self.assertEqual(u["birth_date"], "2010-05-14")
+            self.assertEqual(u["gender"], "Femme")
+            self.assertEqual(u["licence_ffme"], "654321")
+            self.assertEqual(u["badge_rouge"], "Oui")
+            self.assertEqual(u["autonomie_bloc"], "Oui")
+            self.assertEqual(u["email_primary"], "claire.valentin@example.com")
+            self.assertEqual(u["email_secondary"], "parents.valentin@example.com")
+            self.assertEqual(u["phone"], "06 11 22 33 44")
+            self.assertEqual(u["address"], "15 rue des Alpes")
+            self.assertEqual(u["zip_code"], "69330")
+            self.assertEqual(u["city"], "Jonage")
+            self.assertEqual(u["emergency1_name"], "VALENTIN Marc")
+            self.assertEqual(u["emergency1_phone"], "06 99 88 77 66")
+
+            p = conn.execute("SELECT * FROM purchases WHERE user_id = ?", (u["id"],)).fetchone()
+            self.assertIsNotNone(p)
+            self.assertEqual(p["tarif_name"], "Cours Ados 1 (Lundi)")
+            self.assertEqual(float(p["amount"]), 195.0)
+            self.assertEqual(p["status_normalized"], "Validé")
+            self.assertEqual(p["commentaires_correctif"], "Inscription manuelle web bureau")
+
+            o = conn.execute("SELECT * FROM orders WHERE id = ?", (p["order_id"],)).fetchone()
+            self.assertIsNotNone(o)
+            self.assertEqual(o["order_ref"], res["order_ref"])
+            self.assertEqual(o["payer_email"], "claire.valentin@example.com")
+            conn.close()
+        finally:
+            SqliteRepository.set_db_path(orig_db_path)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_member_add_validation(self):
+        """add_member_api rejette les requêtes avec champs obligatoires manquants."""
+        from server import add_member_api
+
+        # Nom manquant
+        res = add_member_api({"fields": {"first_name": "Jean", "birth_date": "2000-01-01", "tarif_name": "Licence"}})
+        self.assertEqual(res.status_code, 400)
+
+        # Date de naissance manquante
+        res = add_member_api({"fields": {"last_name": "DUPONT", "first_name": "Jean", "tarif_name": "Licence"}})
+        self.assertEqual(res.status_code, 400)
+
+        # Tarif manquant
+        res = add_member_api({"fields": {"last_name": "DUPONT", "first_name": "Jean", "birth_date": "2000-01-01"}})
+        self.assertEqual(res.status_code, 400)
+
     def test_member_update_requires_admin_role(self):
         """L'endpoint /api/members/update exige le rôle admin."""
         from infrastructure.api_auth import required_role

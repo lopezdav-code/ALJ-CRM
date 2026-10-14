@@ -2127,6 +2127,56 @@ def update_member_api(data: Dict[str, Any] = Body(...)):
         return JSONResponse(status_code=400, content={"status": "error", "message": internal_error(e, "update_member_api")})
 
 
+@app.post("/api/members/create")
+@app.post("/api/members/add")
+def add_member_api(data: Dict[str, Any] = Body(...)):
+    """Ajoute manuellement un adhérent dans la base (saison active ou saison spécifiée)."""
+    try:
+        from infrastructure.sqlite_repository import SqliteRepository
+        from domain.constants import get_active_season
+
+        fields = data.get("fields") or data
+        season = str(data.get("season") or fields.get("season") or get_active_season()).strip()
+
+        last_name = str(fields.get("last_name") or "").strip()
+        first_name = str(fields.get("first_name") or "").strip()
+        birth_date = str(fields.get("birth_date") or "").strip()
+        tarif_name = str(fields.get("tarif_name") or "").strip()
+
+        if not last_name or not first_name:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "Le nom et le prénom de l'adhérent sont obligatoires."}
+            )
+        if not birth_date:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "La date de naissance est obligatoire."}
+            )
+        if not tarif_name:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "Le groupe (tarif) est obligatoire."}
+            )
+
+        success, res = SqliteRepository.add_manual_member(fields, season_name=season)
+        if not success:
+            return JSONResponse(status_code=400, content={"status": "error", "message": res})
+
+        from infrastructure.cloud_database import CloudDatabase
+        if CloudDatabase.is_enabled():
+            CloudDatabase.after_write()
+
+        return {
+            "status": "success",
+            "message": f"Adhérent {first_name} {last_name} ajouté avec succès.",
+            "order_ref": res,
+            "season": season
+        }
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": internal_error(e, "add_member_api")})
+
+
 # --------------------------------------------------------------------------
 # Renouvellement et Gestion OAuth2 Google (Gmail API, Drive & Firestore)
 # --------------------------------------------------------------------------
