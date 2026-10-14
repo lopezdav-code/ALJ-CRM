@@ -148,6 +148,12 @@ Existing member writes (`/api/members/update`, `/api/attestations/*`) are unchan
   - In a browser.
   - The cold start on Cloud Run (the first `/api/members` after scale-to-zero waits for the cache rebuild; S3, D3).
 - **Still loaded (removed in phase 3):** the Firestore SDK and `enablePersistence` on `index.html`.
+- **Rebase on main (9423f4b).**
+  - Main's display formatting moved from `buildMembersData` to `member_view`: `fmt_last_name`, `fmt_first_name`, `fmt_city`, `fmt_phone` (same rules as the JS ones), applied to names, city, phone and emergency contacts. The JS helpers stay in `alj-members.js` for the edit modal.
+  - New fields in the member rows: `raw_passports`, `raw_diplomas` (users), `commentaires_correctif` (purchases). `passeport_orange` is always `""`: no such column exists (the JS read it from Firestore, where it doesn't exist either).
+  - « Ajouter un adhérent » refreshed through `activeSub`, which is defined nowhere: after a successful create the page showed a network-error toast. It now calls `membersSync.refresh()`.
+  - Bureau competitions: « Retirer tous les non invités » deletes each participant through `DELETE …/participants/{aid}` instead of rewriting the array; coach role (D5). The e-mail recipient targeting reads the API member fields (`nom`, `prenom`, `email`, `email_secondaire`).
+  - The daily MyCompet batch (`/api/competitions/cron/fetch-results`) drops the competition cache when it ends, as the per-competition fetch does.
 
 ### Phase 0 — Foundations (before phase 1)
 
@@ -372,6 +378,7 @@ Consequences:
 | A26 | `FirestoreClient.update_fields` | Creates the document when it doesn't exist. A write racing a delete from another device (status change, link, comment) recreates a stub document with only the written fields. The routes check existence first, which narrows the window but doesn't close it. | **Still present.** |
 | A27 | `server.py` `POST /api/competitions/{id}/fetch-results` (main, 3ea9078 series) | Reads the competition, adds the MyCompet results to its participants, then rewrites the whole `participants` array with no precondition. A participant change made in between (coach, webhook payment) is lost. It also bypasses the service layer. | **Still present.** Fix: move it to `ParticipantService` and write per participant through `_update_participant` (optimistic lock). |
 | A28 | `api_auth.LOCAL_HOSTS` (main) | `"testserver"` (the FastAPI TestClient's host) was added to the hosts accepted by the local server without authentication. Production code is relaxed to suit tests: a local server then also accepts requests sent with `Host: testserver`. Tests should set `base_url="http://127.0.0.1"` instead. | **Still present.** Low risk (local server only), review with the author. |
+| A29 | `api_auth.PUBLIC_PATHS` (main, 635109d) | `POST /api/competitions/cron/fetch-results` is public: anyone can start the MyCompet scraping batch, and the `email` query parameter sends the summary e-mail to any address. **Security, prioritize.** | **Still present.** Fix: require a Cloud Scheduler OIDC token (or a shared secret header) instead of a public path, and drop or whitelist `email`. |
 
 ## Appendix B — Fields to migrate later (D4)
 

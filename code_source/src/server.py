@@ -1478,8 +1478,11 @@ async def api_cron_fetch_competition_results(
     Conçu pour être appelé par Google Cloud Scheduler (ex: tous les jours à 07h00) ou manuellement.
     """
     from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
-    res = await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
-    return res
+    from services.competition_store import invalidate_cache
+    try:
+        return await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
+    finally:
+        invalidate_cache()  # the batch writes competition documents directly
 
 
 @app.post("/api/competitions/{comp_id}/fetch-results")
