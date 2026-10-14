@@ -161,10 +161,10 @@ class TestFirestoreSync(unittest.TestCase):
         with open(rules_path, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn("rules_version = '2';", content)
-        self.assertIn("match /competitions/{competitionId}", content)
-        self.assertIn("match /participants/{participantId}", content)
-        self.assertIn("match /adherents/{adherentId}", content)
-        self.assertIn("match /planning/{creneauId}", content)
+        # Deny-all: the only rule matches every document and allows nothing (plan phase 3)
+        rules = [line.strip() for line in content.splitlines() if line.strip().startswith(("match ", "allow "))]
+        self.assertEqual(rules, ["match /databases/{database}/documents {", "match /{document=**} {",
+                                 "allow read, write: if false;"])
 
 
 if __name__ == "__main__":

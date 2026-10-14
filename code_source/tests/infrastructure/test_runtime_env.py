@@ -29,7 +29,7 @@ DEV_ENV = {
     "FIRESTORE_EMULATOR_HOST": "localhost:8081",
     "FIREBASE_AUTH_EMULATOR_HOST": "localhost:9099",
 }
-DEV_KEYS = list(DEV_ENV) + ["K_SERVICE", "ALJ_PUBLIC_FIRESTORE_EMULATOR", "ALJ_PUBLIC_AUTH_EMULATOR"]
+DEV_KEYS = list(DEV_ENV) + ["K_SERVICE", "ALJ_PUBLIC_AUTH_EMULATOR"]
 
 
 def _env(**values):
@@ -71,8 +71,7 @@ class TestDevMode(unittest.TestCase):
             self.assertEqual(runtime_env.emulator_token(), "owner")
             self.assertEqual(runtime_env.project_id_override(), "demo-alj")
             self.assertEqual(runtime_env.client_config(), {
-                "env": "dev", "projectId": "demo-alj",
-                "firestoreEmulator": "localhost:8081", "authEmulator": "http://localhost:9099",
+                "env": "dev", "projectId": "demo-alj", "authEmulator": "http://localhost:9099",
             })
 
     def test_rejected_on_cloud_run(self):

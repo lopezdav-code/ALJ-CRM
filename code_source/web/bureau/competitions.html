@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Bureau · Compétitions (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Bureau · Compétitions (v23)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🏆</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
+<script src="/static-web/alj-sync.js"></script>
 <style>
 /* Navigation principale des 4 parties */
 .main-tabs-nav {
@@ -179,7 +179,7 @@
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { initFirebase, apiFetch, csvSafe, fmtDay } from "/static-web/alj-core.js";
+import { apiFetch, csvSafe, fmtDay } from "/static-web/alj-core.js";
 
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = id => document.getElementById(id);
@@ -191,9 +191,12 @@ const DISCIPLINE_COLORS = {
   "Combiné": "#0D9488"
 };
 
+// Payment statuses of domain/competition_models.py ("annule" kept for older documents)
 const PAIEMENT_COLORS = {
   "paye": "#16A34A",
   "en_attente": "#D97706",
+  "annule_perdu": "#DC2626",
+  "annule_reporte": "#7C3AED",
   "annule": "#DC2626",
   "annule_reporte": "#7C3AED",
   "annule_perdu": "#DC2626",
@@ -203,11 +206,16 @@ const PAIEMENT_COLORS = {
 const PAIEMENT_LABELS = {
   "paye": "Payé",
   "en_attente": "En attente",
+  "annule_perdu": "Annulé — perdu",
+  "annule_reporte": "Annulé — report",
   "annule": "Annulé",
   "annule_reporte": "Annulé — report",
   "annule_perdu": "Annulé — perdu",
   "non_invite": "Non invité"
 };
+
+// API polls of the page (stopped when the user signs out or signs in again)
+let polls = [];
 
 function seasonOfDate(dStr) {
   if (!dStr) return "2026-2027";
@@ -233,7 +241,7 @@ function getCompCoachNames(comp, allCoaches = []) {
   }
   if (Array.isArray(comp.coach_ids) && comp.coach_ids.length > 0) {
     comp.coach_ids.forEach(cid => {
-      const found = allCoaches.find(co => String(co.id || co.docId) === String(cid));
+      const found = allCoaches.find(co => String(co.id) === String(cid));
       if (found && found.nom && !names.includes(found.nom.trim())) {
         names.push(found.nom.trim());
       }
@@ -241,7 +249,7 @@ function getCompCoachNames(comp, allCoaches = []) {
   }
   [comp.coach1_id, comp.coach2_id, comp.coach3_id].forEach(cid => {
     if (cid != null && String(cid).trim()) {
-      const found = allCoaches.find(co => String(co.id || co.docId) === String(cid));
+      const found = allCoaches.find(co => String(co.id) === String(cid));
       if (found && found.nom && !names.includes(found.nom.trim())) {
         names.push(found.nom.trim());
       }
@@ -250,12 +258,13 @@ function getCompCoachNames(comp, allCoaches = []) {
   return names;
 }
 
-startBureau({
+const shell = startBureau({
   page: "competitions",
   title: "Compétitions (Bureau Grand Écran)",
-  onReady: ({ user, role, isAdmin }) => {
+  onReady: ({ role }) => {
     const content = $("content");
-    const { db } = initFirebase();
+    // Competition writes are open to coaches, as on the mobile page (server rule)
+    const canEdit = role === "admin" || role === "coach";
 
     content.innerHTML = `
       <!-- Barre des 4 parties demandées -->
@@ -283,7 +292,7 @@ startBureau({
           <div class="comp-list-pane">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div class="section-h" style="margin:0;">🏆 Épreuves</div>
-              ${isAdmin ? `<button class="btn btn-primary btn-mini" id="btn-add-comp">➕ Nouvelle</button>` : ""}
+              ${canEdit ? `<button class="btn btn-primary btn-mini" id="btn-add-comp">➕ Nouvelle</button>` : ""}
             </div>
 
             <div style="display:flex; gap:6px;">
@@ -464,7 +473,7 @@ startBureau({
               <div class="section-h" style="margin:0;">🏃 Coachs du club</div>
             </div>
 
-            ${isAdmin ? `
+            ${canEdit ? `
               <div style="display:flex; gap:6px; margin-top:2px;">
                 <input type="text" id="coach-new-name" class="search-input" placeholder="Nom du coach…" style="flex:1;">
                 <button class="btn btn-primary btn-mini" id="btn-save-coach">+ Ajouter</button>
@@ -673,41 +682,79 @@ startBureau({
     let emailTemplates = [];
 
     // ==========================================
-    // Écoute temps réel Firestore
+    // Data from the API, reloaded every 20 s while the page is visible
     // ==========================================
-    db.collection("competitions").onSnapshot(snap => {
-      allComps = snap.docs.map(d => Object.assign({ docId: d.id }, d.data()));
-      allComps.sort((a, b) => String(b.date_competition || "").localeCompare(String(a.date_competition || "")));
+    function onCompsChanged() {
       renderCompsList();
       if (activeCompId) renderActiveCompWorkspace();
       if (currentMainSection === "bilan") renderBilanView();
       if (currentMainSection === "coachs") renderCoachsView();
-    }, err => {
-      console.error("Erreur compétitions Firestore :", err);
-      toast("❌ Erreur de chargement des compétitions : " + err.message);
-    });
+    }
+    function onSyncStatus(label) {
+      return (status, info) => {
+        if (status === "ok") {
+          shell.setStatus("☁️ À jour — " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+        } else if (status === "offline") {
+          shell.setStatus("📴 Hors ligne : données non actualisées");
+        } else if (info && info.status === 401) {
+          polls.forEach(p => p.stop());  // signed out
+        } else {
+          console.error(`API ${label} :`, info);
+          shell.setStatus(`⚠️ Chargement des ${label} impossible — nouvel essai automatique`);
+        }
+      };
+    }
+    polls.forEach(p => p.stop());
+    polls = [
+      ALJSync.poll("/api/competitions", {
+        fetch: apiFetch, onStatus: onSyncStatus("compétitions"),
+        onData: data => { allComps = data; onCompsChanged(); }
+      }),
+      ALJSync.poll("/api/competition-members", {
+        fetch: apiFetch, onStatus: onSyncStatus("adhérents"),
+        onData: data => {
+          allAdherents = data;
+          if (currentMainSection === "bilan") renderBilanView();
+          if (currentMainSection === "helloasso") renderHelloAssoView();
+        }
+      }),
+      ALJSync.poll("/api/helloasso/items", {
+        fetch: apiFetch, onStatus: onSyncStatus("paiements HelloAsso"),
+        onData: data => { allHelloassoItems = data; renderHelloAssoView(); }
+      }),
+      ALJSync.poll("/api/coaches", {
+        fetch: apiFetch, onStatus: onSyncStatus("coachs"),
+        onData: data => { allCoaches = data; renderCoachsView(); if (activeCompId) renderActiveCompWorkspace(); }
+      })
+    ];
+    /* Reloads everything now (after the user's own change). */
+    function syncNow() {
+      return Promise.all(polls.map(p => p.refresh()));
+    }
 
-    db.collection("adherents").onSnapshot(snap => {
-      allAdherents = snap.docs.map(d => Object.assign({ docId: d.id, id: d.id }, d.data()));
-      if (currentMainSection === "bilan") renderBilanView();
-      if (currentMainSection === "helloasso") renderHelloAssoView();
-    });
-
-    db.collection("helloasso_items").onSnapshot(snap => {
-      allHelloassoItems = snap.docs.map(d => Object.assign({ docId: d.id }, d.data()));
-      allHelloassoItems.sort((a, b) => {
-        const da = a.date_item || (a.order && a.order.date) || "";
-        const db_ = b.date_item || (b.order && b.order.date) || "";
-        return String(db_).localeCompare(String(da));
-      });
-      renderHelloAssoView();
-    });
-
-    db.collection("coaches").onSnapshot(snap => {
-      allCoaches = snap.docs.map(d => Object.assign({ docId: d.id }, d.data()));
-      allCoaches.sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || "")));
-      renderCoachsView();
-    });
+    // ==========================================
+    // Writes through the API (validation, roles and concurrent edits handled by the server)
+    // ==========================================
+    function compUrl(compId, suffix = "") {
+      return "/api/competitions/" + encodeURIComponent(String(compId)) + suffix;
+    }
+    async function apiWrite(method, url, body) {
+      const data = await ALJSync.request(apiFetch, method, url, body);
+      if (data && data.id != null && Array.isArray(data.participants)) applyComp(data);
+      else if (data && data.competition) applyComp(data.competition);
+      syncNow();
+      return data;
+    }
+    function writeFailed(err) {
+      console.error(err);
+      toast(err.status === undefined ? "📴 Réseau indisponible : modification non enregistrée."
+                                     : "❌ " + err.message, 8000);
+    }
+    function applyComp(doc) {
+      const i = allComps.findIndex(c => String(c.id) === String(doc.id));
+      if (i >= 0) allComps[i] = doc; else allComps.unshift(doc);
+      onCompsChanged();
+    }
 
     // ==========================================
     // Gestion de la navigation entre les 4 parties
@@ -769,7 +816,7 @@ startBureau({
       }
 
       container.innerHTML = filtered.map(c => {
-        const isSel = String(c.id || c.docId) === String(activeCompId);
+        const isSel = String(c.id) === String(activeCompId);
         const parts = c.participants || [];
         const nbSel = parts.filter(p => p.selectionne).length;
         const nbPayes = parts.filter(p => p.statut_paiement === "paye").length;
@@ -780,7 +827,7 @@ startBureau({
         const hasResults = Boolean(c.resultats_synced_at || parts.some(p => p.resultat_ffme || p.classement));
 
         return `
-          <div class="comp-card${isSel ? " active" : ""}" data-id="${esc(c.id || c.docId)}">
+          <div class="comp-card${isSel ? " active" : ""}" data-id="${esc(c.id)}">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
               <div class="comp-card-title">${hasResults ? '<span title="Résultats officiels récupérés" style="cursor:help; margin-right:4px;">🏆</span>' : ""}${esc(c.nom || "Épreuve sans nom")}</div>
               ${hasDiscipline ? `<span class="tag-badge" style="background:${discColor}22; color:${discColor}; border:1px solid ${discColor}55;">${esc(c.type)}</span>` : ""}
@@ -825,7 +872,7 @@ startBureau({
     });
 
     function getActiveComp() {
-      return allComps.find(c => String(c.id || c.docId) === String(activeCompId));
+      return allComps.find(c => String(c.id) === String(activeCompId));
     }
 
     function renderActiveCompWorkspace() {
@@ -881,11 +928,11 @@ startBureau({
             </div>
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-edit-comp">✏️ Modifier</button>` : ""}
+              ${canEdit ? `<button class="btn btn-muted btn-mini" id="btn-edit-comp">✏️ Modifier</button>` : ""}
               <button class="btn btn-muted btn-mini" id="btn-fetch-results" style="color:var(--blue); border-color:#BFDBFE;">🏆 Trouver les résultats</button>
               <button class="btn btn-primary btn-mini" id="btn-email-comp">✉️ Campagne e-mail</button>
               <button class="btn btn-muted btn-mini" id="btn-export-comp-csv">📥 Export CSV</button>
-              ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-del-comp" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>` : ""}
+              ${canEdit ? `<button class="btn btn-muted btn-mini" id="btn-del-comp" style="color:var(--red); border-color:#FECACA;">🗑️ Supprimer</button>` : ""}
             </div>
           </div>
         </div>
@@ -937,7 +984,7 @@ startBureau({
 
     async function fetchCompResults(comp, manualUrl = null) {
       if (!comp) return;
-      const compId = comp.id || comp.docId;
+      const compId = comp.id;
       const btn = $("btn-fetch-results");
       if (btn) {
         btn.disabled = true;
@@ -979,6 +1026,7 @@ startBureau({
 
         comp.url_resultats = data.url;
         comp.resultats_synced_at = new Date().toISOString();
+        syncNow();
         const resId = data.url ? data.url.split("/").pop() : "";
         toast(`🏆 ${data.matched_count} résultat(s) associé(s) sur ${data.total_scraped} compétiteur(s) ALJ trouvés (${resId}) !`, 7000);
         renderActiveCompWorkspace();
@@ -1054,7 +1102,7 @@ startBureau({
             </div>
           </div>
           <div>
-            ${isAdmin ? `
+            ${canEdit ? `
               <button class="btn btn-muted btn-mini" id="btn-remove-all-non-invites" ${nbNonInvites === 0 ? "disabled" : ""} style="color:var(--red); border-color:#FECACA; background:${nbNonInvites === 0 ? '#F8FAFC' : '#FEF2F2'}; cursor:${nbNonInvites === 0 ? 'not-allowed' : 'pointer'}; font-weight:600; padding:6px 12px; font-size:12px;" title="Retirer définitivement de cette compétition tous les athlètes non invités">
                 🗑️ Retirer tous les compétiteurs non invités (${nbNonInvites})
               </button>
@@ -1106,7 +1154,7 @@ startBureau({
                 <th>Paiement HelloAsso</th>
                 <th style="text-align:center;" title="Pointage de présence sur place le jour de l'épreuve">Présent</th>
                 <th>Contact</th>
-                ${isAdmin ? `<th style="text-align:center;" title="Retirer définitivement l'athlète de la compétition">Action</th>` : ""}
+                ${canEdit ? `<th style="text-align:center;" title="Retirer définitivement l'athlète de la compétition">Action</th>` : ""}
               </tr>
             </thead>
             <tbody id="parts-tbody">
@@ -1162,13 +1210,12 @@ startBureau({
         const msg = `Retirer les ${count} compétiteur${count > 1 ? "s" : ""} non invité${count > 1 ? "s" : ""} de cette compétition ?\n\n(L'adhérent reste dans la base du club et pourra être réinscrit à tout moment).`;
         if (!confirm(msg)) return;
 
-        const removeIds = new Set(toRemove.map(p => String(p.adherent_id)));
-        comp.participants = (comp.participants || []).filter(p => !removeIds.has(String(p.adherent_id)));
-
-        await saveCompParticipants(comp);
-        renderActiveCompWorkspace();
-        renderCompsList();
-        toast(`🗑️ ${count} compétiteur${count > 1 ? "s" : ""} non invité${count > 1 ? "s" : ""} retiré${count > 1 ? "s" : ""} de la compétition.`);
+        try {
+          for (const p of toRemove) {
+            await apiWrite("DELETE", compUrl(comp.id, "/participants/" + Number(p.adherent_id)));
+          }
+          toast(`🗑️ ${count} compétiteur${count > 1 ? "s" : ""} non invité${count > 1 ? "s" : ""} retiré${count > 1 ? "s" : ""} de la compétition.`);
+        } catch (err) { writeFailed(err); }
       });
 
       attachParticipantListeners(comp);
@@ -1246,7 +1293,7 @@ startBureau({
 
         // 2. Colonne Action (Workflow décisionnel sécurisé selon paiement et présence)
         let actionCell = "";
-        if (isAdmin) {
+        if (canEdit) {
           if (p.present) {
             // Pointé présent sur place : aucune action de retrait ou désistement possible
             actionCell = `
@@ -1289,10 +1336,10 @@ startBureau({
             <td class="cell-name">${esc(String(p.nom || "").toUpperCase())} ${esc(p.prenom || "")}</td>
             <td class="cell-sub">${esc(p.num_licence || "—")}</td>
             <td class="cell-sub">${esc(p.categorie || "—")}</td>
-            <td class="cell-sub">${esc(p.groupe || p.tarif || "—")}</td>
+            <td class="cell-sub">${esc(p.groupe || (allAdherents.find(a => String(a.id) === String(p.adherent_id)) || {}).creneau_groupe || p.tarif || "—")}</td>
             <td style="text-align:center;">${rankBadge}</td>
             <td style="text-align:center;">
-              <input type="checkbox" class="part-select-chk" ${p.selectionne ? "checked" : ""} style="accent-color:var(--blue); width:auto; cursor:pointer;" ${isAdmin ? "" : "disabled"}>
+              <input type="checkbox" class="part-select-chk" ${p.selectionne ? "checked" : ""} style="accent-color:var(--blue); width:auto; cursor:pointer;" ${canEdit ? "" : "disabled"}>
             </td>
             <td>
               ${paymentBadge}
@@ -1303,7 +1350,7 @@ startBureau({
             <td>
               ${p.phone ? `<a href="tel:${esc(p.phone)}" style="font-size:11.5px; text-decoration:none; color:var(--blue);">📞 ${esc(p.phone)}</a>` : "—"}
             </td>
-            ${isAdmin ? `<td style="text-align:center;">${actionCell}</td>` : ""}
+            ${canEdit ? `<td style="text-align:center;">${actionCell}</td>` : ""}
           </tr>
         `;
       }).join("");
@@ -1319,28 +1366,37 @@ startBureau({
         if (!part) return;
 
         row.querySelector(".part-select-chk")?.addEventListener("change", async (e) => {
-          part.selectionne = e.target.checked;
-          if (part.selectionne && part.statut_paiement === "non_invite") part.statut_paiement = "en_attente";
-          await saveCompParticipants(comp);
-          renderActiveCompWorkspace();
-          renderCompsList();
+          const checked = e.target.checked;
+          if (!checked && part.statut_paiement === "paye") {
+            e.target.checked = true;
+            await cancelPaidParticipant(comp, part);
+            return;
+          }
+          try {
+            await apiWrite("PATCH", compUrl(comp.id, "/participants/" + Number(aid)), { selectionne: checked });
+          } catch (err) {
+            e.target.checked = !checked;
+            if (err.code === "already_paid") await cancelPaidParticipant(comp, part);  // paid meanwhile
+            else writeFailed(err);
+          }
         });
 
         row.querySelector(".part-present-chk")?.addEventListener("change", async (e) => {
-          part.present = e.target.checked;
-          await saveCompParticipants(comp);
-          renderActiveCompWorkspace();
-          renderCompsList();
+          try {
+            await apiWrite("PATCH", compUrl(comp.id, "/participants/" + Number(aid)), { present: e.target.checked });
+          } catch (err) {
+            e.target.checked = !e.target.checked;
+            writeFailed(err);
+          }
         });
 
         // 1. Bouton ✕ Retirer (réservé aux athlètes non payés)
         row.querySelector(".part-remove-btn")?.addEventListener("click", async () => {
           if (!confirm(`Retirer ${part.prenom} ${part.nom} de cette compétition ?`)) return;
-          comp.participants = (comp.participants || []).filter(p => String(p.adherent_id) !== String(aid));
-          await saveCompParticipants(comp);
-          renderActiveCompWorkspace();
-          renderCompsList();
-          toast(`Athlète retiré de la compétition.`);
+          try {
+            await apiWrite("DELETE", compUrl(comp.id, "/participants/" + Number(aid)));
+            toast(`Athlète retiré de la compétition.`);
+          } catch (err) { writeFailed(err); }
         });
 
         // 2. Bouton 💶 Règlement manuel (pour les athlètes non payés)
@@ -1349,14 +1405,10 @@ startBureau({
           const saisie = prompt(`Enregistrer un paiement manuel pour ${part.prenom} ${part.nom}.\nMontant réglé en € :`, String(prixDefaut));
           if (saisie === null) return;
           const montant = parseFloat(saisie.replace(",", ".")) || prixDefaut;
-          part.statut_paiement = "paye";
-          part.montant_paye = montant;
-          part.commande_helloasso = "Règlement manuel";
-          part.selectionne = true;
-          await saveCompParticipants(comp);
-          renderActiveCompWorkspace();
-          renderCompsList();
-          toast(`✅ Paiement manuel de ${montant} € enregistré pour ${part.prenom}.`);
+          try {
+            await apiWrite("POST", compUrl(comp.id, "/participants/" + Number(aid) + "/manual-payment"), { montant });
+            toast(`✅ Paiement manuel de ${montant} € enregistré pour ${part.prenom}.`);
+          } catch (err) { writeFailed(err); }
         });
 
         // 3. Sélecteur de désistement (pour les athlètes ayant déjà payé)
@@ -1364,56 +1416,52 @@ startBureau({
           const action = e.target.value;
           if (!action) return;
 
-          if (action === "annule_reporte") {
-            const montant = part.montant_paye || comp.prix || 0;
-            if (!confirm(`Confirmer le désistement avec REPORT de l'avoir pour ${part.prenom} ${part.nom} ?\n\nLe montant réglé (${montant} €) restera en crédit sur le bilan de l'athlète.`)) {
-              e.target.value = "";
-              return;
-            }
-            part.statut_paiement = "annule_reporte";
-            part.selectionne = false;
-            await saveCompParticipants(comp);
-            renderActiveCompWorkspace();
-            renderCompsList();
-            toast(`🔄 Report d'avoir enregistré pour ${part.prenom}.`);
-          } else if (action === "annule_perdu") {
-            if (!confirm(`Confirmer le désistement ANNULÉ PERDU pour ${part.prenom} ${part.nom} ?\n\nLes frais d'inscription restent définitivement acquis au club/organisateur.`)) {
-              e.target.value = "";
-              return;
-            }
-            part.statut_paiement = "annule_perdu";
-            part.selectionne = false;
-            await saveCompParticipants(comp);
-            renderActiveCompWorkspace();
-            renderCompsList();
-            toast(`🚫 Désistement (annulé perdu) enregistré pour ${part.prenom}.`);
+          const reporte = action === "annule_reporte";
+          const question = reporte
+            ? `Confirmer le désistement avec REPORT de l'avoir pour ${part.prenom} ${part.nom} ?\n\nLe montant réglé (${part.montant_paye || comp.prix || 0} €) restera en crédit sur le bilan de l'athlète.`
+            : `Confirmer le désistement ANNULÉ PERDU pour ${part.prenom} ${part.nom} ?\n\nLes frais d'inscription restent définitivement acquis au club/organisateur.`;
+          const note = (prompt(question + "\n\nCommentaire obligatoire (motif du désistement) :") || "").trim();
+          if (!note) {
+            e.target.value = "";
+            toast("Désistement abandonné : un commentaire est obligatoire.");
+            return;
+          }
+          try {
+            await apiWrite("POST", compUrl(comp.id, "/participants/" + Number(aid) + "/cancel"),
+                           { mode: reporte ? "reporte" : "perdu", note });
+            toast(reporte ? `🔄 Report d'avoir enregistré pour ${part.prenom}.`
+                          : `🚫 Désistement (annulé perdu) enregistré pour ${part.prenom}.`);
+          } catch (err) {
+            e.target.value = "";
+            writeFailed(err);
           }
         });
 
         // 4. Bouton ↩️ Rétablir en statut Payé actif (si annulé par erreur)
         row.querySelector(".part-restore-paid-btn")?.addEventListener("click", async () => {
           if (!confirm(`Rétablir ${part.prenom} ${part.nom} en compétiteur actif (statut Payé) ?`)) return;
-          part.statut_paiement = "paye";
-          part.selectionne = true;
-          await saveCompParticipants(comp);
-          renderActiveCompWorkspace();
-          renderCompsList();
-          toast(`✅ ${part.prenom} rétabli en compétiteur actif.`);
+          try {
+            await apiWrite("POST", compUrl(comp.id, "/participants"), { adherent_id: Number(aid), selectionne: true });
+            toast(`✅ ${part.prenom} rétabli en compétiteur actif.`);
+          } catch (err) { writeFailed(err); }
         });
       });
     }
 
-    async function saveCompParticipants(comp) {
+    /* A participant who already paid is never refunded: the coach chooses whether the money
+       is carried over to a next competition (credit in the season balance) or lost, with a
+       required comment (same rule as the mobile page and the desktop app). */
+    async function cancelPaidParticipant(comp, part) {
+      const note = (prompt(`${part.prenom} ${part.nom} a déjà payé ${Number(part.montant_paye || 0).toFixed(2)} € `
+        + "(aucun remboursement).\n\nCommentaire obligatoire (motif de l'annulation) :") || "").trim();
+      if (!note) { toast("Annulation abandonnée : un commentaire est obligatoire."); return; }
+      const reporte = confirm("Reporter ce paiement sur une prochaine épreuve ?\n\n"
+        + "OK = report (crédit au bilan de la saison)\nAnnuler = argent encaissé définitivement (perdu)");
       try {
-        const docRef = db.collection("competitions").doc(String(comp.id || comp.docId));
-        await docRef.update({
-          participants: comp.participants || [],
-          updated_at: new Date().toISOString()
-        });
-      } catch (e) {
-        console.error("Erreur sauvegarde participants :", e);
-        toast("❌ Erreur de sauvegarde : " + e.message, 8000);
-      }
+        await apiWrite("POST", compUrl(comp.id, "/participants/" + Number(part.adherent_id) + "/cancel"),
+                       { mode: reporte ? "reporte" : "perdu", note });
+        toast(reporte ? "🗑 Participation annulée (paiement reporté)." : "🗑 Participation annulée (paiement perdu).");
+      } catch (err) { writeFailed(err); }
     }
 
     function renderAddAdherentTab(comp, pane) {
@@ -1438,7 +1486,7 @@ startBureau({
 
         const existingIds = new Set((comp.participants || []).map(p => String(p.adherent_id)));
         const matches = allAdherents.filter(a => 
-          `${a.last_name} ${a.first_name}`.toLowerCase().includes(q) ||
+          `${a.nom} ${a.prenom}`.toLowerCase().includes(q) ||
           String(a.licence_ffme || "").includes(q)
         ).slice(0, 15);
 
@@ -1448,17 +1496,17 @@ startBureau({
         }
 
         resultsBox.innerHTML = matches.map(a => {
-          const already = existingIds.has(String(a.id || a.user_id));
+          const already = existingIds.has(String(a.id));
           return `
             <div class="card" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
               <div>
-                <b style="color:#1E293B;">${esc(String(a.last_name || "").toUpperCase())} ${esc(a.first_name || "")}</b>
-                <div style="font-size:11.5px; color:#64748B;">🪪 ${esc(a.licence_ffme || "Sans licence")} · ${esc(a.category || a.tarif_name || "—")}</div>
+                <b style="color:#1E293B;">${esc(String(a.nom || "").toUpperCase())} ${esc(a.prenom || "")}</b>
+                <div style="font-size:11.5px; color:#64748B;">🪪 ${esc(a.licence_ffme || "Sans licence")} · ${esc(a.tarif || "—")}</div>
               </div>
               ${already ? `
                 <span class="muted" style="font-size:11px; font-weight:700;">Déjà inscrit</span>
               ` : `
-                <button class="btn btn-primary btn-mini add-adh-btn" data-aid="${esc(a.id || a.user_id)}">+ Inscrire</button>
+                <button class="btn btn-primary btn-mini add-adh-btn" data-aid="${esc(a.id)}">+ Inscrire</button>
               `}
             </div>
           `;
@@ -1467,30 +1515,12 @@ startBureau({
         resultsBox.querySelectorAll(".add-adh-btn").forEach(btn => {
           btn.addEventListener("click", async () => {
             const aid = btn.dataset.aid;
-            const targetAdh = allAdherents.find(a => String(a.id || a.user_id) === String(aid));
+            const targetAdh = allAdherents.find(a => String(a.id) === String(aid));
             if (!targetAdh) return;
-
-            const newPart = {
-              adherent_id: targetAdh.id || targetAdh.user_id,
-              nom: targetAdh.last_name || "",
-              prenom: targetAdh.first_name || "",
-              num_licence: targetAdh.licence_ffme || "",
-              categorie: targetAdh.category || "",
-              tarif: targetAdh.tarif_name || "",
-              groupe: targetAdh.creneau_groupe || "",
-              phone: targetAdh.phone || "",
-              selectionne: true,
-              present: false,
-              statut_paiement: "en_attente",
-              montant_paye: 0,
-              created_at: new Date().toISOString()
-            };
-
-            comp.participants = comp.participants || [];
-            comp.participants.push(newPart);
-            await saveCompParticipants(comp);
-            toast(`✅ ${targetAdh.first_name} ${targetAdh.last_name} inscrit avec succès !`);
-            renderAddAdherentTab(comp, $("sub-tab-pane"));
+            try {
+              await apiWrite("POST", compUrl(comp.id, "/participants"), { adherent_id: Number(aid), selectionne: true });
+              toast(`✅ ${targetAdh.prenom} ${targetAdh.nom} inscrit avec succès !`);
+            } catch (err) { writeFailed(err); }
           });
         });
       });
@@ -1608,11 +1638,11 @@ startBureau({
         const montantStr = !isNaN(info.montantNum) ? info.montantNum.toFixed(2) + " €" : "0 €";
 
         // Détection compétition rattachée
-        const targetComp = allComps.find(c => String(c.id || c.docId) === String(it.competition_id));
+        const targetComp = allComps.find(c => String(c.id) === String(it.competition_id));
         const compLabel = targetComp ? (targetComp.nom || "Épreuve") : (it.competition_id ? `ID #${it.competition_id}` : "—");
 
         // Détection adhérent rattaché
-        const targetAdh = allAdherents.find(a => String(a.id || a.user_id || a._doc_id || a.docId) === String(it.adherent_id));
+        const targetAdh = allAdherents.find(a => String(a.id) === String(it.adherent_id));
         const adhNom = targetAdh ? String(targetAdh.nom || targetAdh.last_name || "").toUpperCase() : "";
         const adhPrenom = targetAdh ? String(targetAdh.prenom || targetAdh.first_name || "") : "";
         const adhLabel = targetAdh
@@ -1623,7 +1653,7 @@ startBureau({
         const isIgn = isItemIgnored(it);
 
         return `
-          <tr data-item-id="${esc(it.id || it.docId || it.id_item)}" style="${isIgn ? 'opacity:0.75; background:#F8FAFC;' : ''}">
+          <tr data-item-id="${esc(it.id_item)}" style="${isIgn ? 'opacity:0.75; background:#F8FAFC;' : ''}">
             <td class="cell-sub">${esc(fmtDay(info.dateStr) || "—")}</td>
             <td class="cell-sub"><b>${esc(info.orderId)}</b></td>
             <td>
@@ -1660,7 +1690,7 @@ startBureau({
               </span>
             </td>
             <td style="text-align:center;">
-              <button class="btn btn-muted btn-mini btn-open-attach" data-item-id="${esc(it.id || it.docId || it.id_item)}">${isIgn ? '🔍 Voir / Réactiver' : '🔗 Rattacher'}</button>
+              <button class="btn btn-muted btn-mini btn-open-attach" data-item-id="${esc(it.id_item)}">${isIgn ? '🔍 Voir / Réactiver' : '🔗 Rattacher'}</button>
             </td>
           </tr>
         `;
@@ -1669,7 +1699,7 @@ startBureau({
       tbody.querySelectorAll(".btn-open-attach").forEach(btn => {
         btn.addEventListener("click", () => {
           const itemId = btn.dataset.itemId;
-          const item = allHelloassoItems.find(it => String(it.id || it.docId || it.id_item) === String(itemId));
+          const item = allHelloassoItems.find(it => String(it.id_item) === String(itemId));
           if (item) openAttachModal(item);
         });
       });
@@ -1760,18 +1790,12 @@ startBureau({
       // Sélecteur de compétitions
       const compSelect = $("attach-comp-select");
       compSelect.innerHTML = `<option value="">-- Choisir une compétition --</option>` +
-        allComps.map(c => `<option value="${esc(c.id || c.docId)}" ${String(c.id || c.docId) === String(item.competition_id) ? "selected" : ""}>${esc(c.nom)} (${esc(fmtDay(c.date_competition) || "")})</option>`).join("");
+        allComps.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(item.competition_id) ? "selected" : ""}>${esc(c.nom)} (${esc(fmtDay(c.date_competition) || "")})</option>`).join("");
 
       // Sélecteur d'adhérents
       const adhSelect = $("attach-adh-select");
       adhSelect.innerHTML = `<option value="">-- Choisir un adhérent du club --</option>` +
-        allAdherents.map(a => {
-          const aid = String(a.id || a.user_id || a._doc_id || a.docId);
-          const anom = String(a.nom || a.last_name || "").toUpperCase();
-          const aprenom = String(a.prenom || a.first_name || "");
-          const alic = a.licence_ffme || a.num_licence || "Sans licence";
-          return `<option value="${esc(aid)}" ${aid === String(item.adherent_id) ? "selected" : ""}>${esc(anom)} ${esc(aprenom)} (${esc(alic)})</option>`;
-        }).join("");
+        allAdherents.map(a => `<option value="${esc(a.id)}" ${String(a.id) === String(item.adherent_id) ? "selected" : ""}>${esc(String(a.nom || "").toUpperCase())} ${esc(a.prenom || "")} (${esc(a.licence_ffme || "Sans licence")})</option>`).join("");
 
       modal.style.display = "flex";
     }
@@ -1781,44 +1805,26 @@ startBureau({
 
     $("ha-attach-ignore-btn")?.addEventListener("click", async () => {
       if (!currentAttachItem) return;
-      const isIgn = isItemIgnored(currentAttachItem);
-      const docId = String(currentAttachItem.id || currentAttachItem.docId || currentAttachItem.id_item);
+      const item = currentAttachItem;
+      const url = "/api/helloasso/items/" + encodeURIComponent(String(item.id_item)) + "/ignore";
 
-      if (isIgn) {
+      if (isItemIgnored(item)) {
         if (!confirm("Voulez-vous réactiver cette ligne et la sortir de l'état ignoré ?")) return;
         try {
-          await db.collection("helloasso_items").doc(docId).set({
-            ignore: false,
-            ignore_motif: "",
-            ignored_at: null,
-            ignored_by: null,
-            updated_at: new Date().toISOString()
-          }, { merge: true });
+          await apiWrite("PUT", url, { ignore: false, commentaire: item.commentaire || "" });
           toast("↩️ Ligne réactivée avec succès !");
           $("ha-attach-modal").style.display = "none";
-          renderHelloAssoView();
-        } catch (err) {
-          toast("❌ Erreur : " + err.message, 8000);
-        }
+        } catch (err) { writeFailed(err); }
       } else {
         const comment = $("attach-comment-input").value.trim();
         const motif = comment || prompt("Motif pour ignorer cette ligne (ex: annulé, doublon, test) :", "annulé");
         if (motif === null) return;
         try {
-          await db.collection("helloasso_items").doc(docId).set({
-            ignore: true,
-            ignore_motif: motif || "annulé",
-            commentaire: motif || "annulé",
-            ignored_at: new Date().toISOString(),
-            ignored_by: user?.email || "bureau",
-            updated_at: new Date().toISOString()
-          }, { merge: true });
+          // The server records who ignored it, and refuses (409) a line linked meanwhile
+          await apiWrite("PUT", url, { ignore: true, motif: motif || "annulé", commentaire: motif || "annulé" });
           toast("🚫 Ligne marquée comme ignorée.");
           $("ha-attach-modal").style.display = "none";
-          renderHelloAssoView();
-        } catch (err) {
-          toast("❌ Erreur : " + err.message, 8000);
-        }
+        } catch (err) { writeFailed(err); }
       }
     });
 
@@ -1833,59 +1839,13 @@ startBureau({
         return;
       }
 
-      const docId = String(currentAttachItem.id || currentAttachItem.docId || currentAttachItem.id_item);
-      const montantNum = Number(currentAttachItem.amount || currentAttachItem.montant || 0) / (currentAttachItem.amount ? 100 : 1);
-
       try {
-        // 1. Mettre à jour l'item HelloAsso
-        await db.collection("helloasso_items").doc(docId).set({
-          competition_id: compId,
-          adherent_id: adhId,
-          source: "manuel",
-          commentaire: comment,
-          updated_at: new Date().toISOString()
-        }, { merge: true });
-
-        // 2. Répercuter sur la compétition choisie
-        const comp = allComps.find(c => String(c.id || c.docId) === String(compId));
-        if (comp) {
-          comp.participants = comp.participants || [];
-          let part = comp.participants.find(p => String(p.adherent_id) === String(adhId));
-          const targetAdh = allAdherents.find(a => String(a.id || a.user_id) === String(adhId)) || {};
-
-          if (part) {
-            part.selectionne = true;
-            part.statut_paiement = "paye";
-            part.montant_paye = montantNum;
-            part.commande_helloasso = currentAttachItem.order?.id || currentAttachItem.order_ref || "";
-          } else {
-            comp.participants.push({
-              adherent_id: adhId,
-              nom: targetAdh.last_name || "",
-              prenom: targetAdh.first_name || "",
-              num_licence: targetAdh.licence_ffme || "",
-              categorie: targetAdh.category || "",
-              tarif: targetAdh.tarif_name || "",
-              groupe: targetAdh.creneau_groupe || "",
-              phone: targetAdh.phone || "",
-              selectionne: true,
-              present: false,
-              statut_paiement: "paye",
-              montant_paye: montantNum,
-              commande_helloasso: currentAttachItem.order?.id || currentAttachItem.order_ref || "",
-              created_at: new Date().toISOString()
-            });
-          }
-          await saveCompParticipants(comp);
-        }
-
+        // The server also selects the member and records the payment on the competition
+        await apiWrite("PUT", "/api/helloasso/items/" + encodeURIComponent(String(currentAttachItem.id_item)) + "/link",
+                       { competition_id: Number(compId), adherent_id: Number(adhId), commentaire: comment });
         toast("✅ Rattachement enregistré et reporté sur le compétiteur !");
         $("ha-attach-modal").style.display = "none";
-        renderHelloAssoView();
-      } catch (err) {
-        console.error("Erreur rattachement HelloAsso :", err);
-        toast("❌ Erreur : " + err.message, 8000);
-      }
+      } catch (err) { writeFailed(err); }
     });
 
     // ==========================================
@@ -1937,14 +1897,14 @@ startBureau({
 
           const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
           if (!athleteStats[aid]) {
-            const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
+            const adh = allAdherents.find(a => String(a.id) === String(p.adherent_id)) || {};
             athleteStats[aid] = {
               id: aid,
-              nom: p.nom || adh.last_name || "",
-              prenom: p.prenom || adh.first_name || "",
+              nom: p.nom || adh.nom || "",
+              prenom: p.prenom || adh.prenom || "",
               licence: p.num_licence || adh.licence_ffme || "—",
-              categorie: p.categorie || adh.category || adh.tarif_name || "—",
-              email: p.email || adh.email_primary || adh.email || "",
+              categorie: p.categorie || adh.tarif || "—",
+              email: p.email || adh.email || "",
               phone: p.phone || adh.phone || "",
               nb_comps: 0,
               total_du: 0,
@@ -1962,7 +1922,7 @@ startBureau({
           athleteStats[aid].total_du += montantDu;
           athleteStats[aid].total_paye += paye;
           athleteStats[aid].competitions.push({
-            comp_id: comp.id || comp.docId,
+            comp_id: comp.id,
             nom: comp.nom || "Épreuve sans nom",
             date: comp.date_competition,
             lieu: comp.lieu,
@@ -2202,10 +2162,10 @@ startBureau({
 
           const aid = String(p.adherent_id || `${p.nom}_${p.prenom}`);
           if (!athleteStats[aid]) {
-            const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
+            const adh = allAdherents.find(a => String(a.id) === String(p.adherent_id)) || {};
             athleteStats[aid] = {
-              nom: p.nom || adh.last_name || "",
-              prenom: p.prenom || adh.first_name || "",
+              nom: p.nom || adh.nom || "",
+              prenom: p.prenom || adh.prenom || "",
               licence: p.num_licence || adh.licence_ffme || "",
               nb_comps: 0,
               total_du: 0,
@@ -2267,16 +2227,16 @@ startBureau({
       }
 
       listContainer.innerHTML = allCoaches.map(co => {
-        const isSel = String(co.id || co.docId) === String(activeCoachId);
+        const isSel = String(co.id) === String(activeCoachId);
         // Compétitions encadrées
         const coachComps = allComps.filter(c => {
           const ids = (c.coach_ids || []).map(String);
           const names = (c.coaches || []).map(s => String(s).toLowerCase());
-          return ids.includes(String(co.id || co.docId)) || names.includes(String(co.nom || "").toLowerCase());
+          return ids.includes(String(co.id)) || names.includes(String(co.nom || "").toLowerCase());
         });
 
         return `
-          <div class="comp-card${isSel ? " active" : ""}" data-coach-id="${esc(co.id || co.docId)}">
+          <div class="comp-card${isSel ? " active" : ""}" data-coach-id="${esc(co.id)}">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div class="comp-card-title">🏃 ${esc(co.nom || "Coach sans nom")}</div>
               <span class="tag-badge" style="background:#EFF6FF; color:var(--blue);">${coachComps.length} épreuve${coachComps.length > 1 ? 's' : ''}</span>
@@ -2293,9 +2253,9 @@ startBureau({
       });
 
       // Rendu de l'espace de travail du coach sélectionné
-      const coach = allCoaches.find(co => String(co.id || co.docId) === String(activeCoachId)) || allCoaches[0];
+      const coach = allCoaches.find(co => String(co.id) === String(activeCoachId)) || allCoaches[0];
       if (coach && !activeCoachId) {
-        activeCoachId = coach.id || coach.docId;
+        activeCoachId = coach.id;
       }
 
       if (!coach) {
@@ -2306,7 +2266,7 @@ startBureau({
       const assignedComps = allComps.filter(c => {
         const ids = (c.coach_ids || []).map(String);
         const names = (c.coaches || []).map(s => String(s).toLowerCase());
-        return ids.includes(String(coach.id || coach.docId)) || names.includes(String(coach.nom || "").toLowerCase());
+        return ids.includes(String(coach.id)) || names.includes(String(coach.nom || "").toLowerCase());
       });
 
       workspace.innerHTML = `
@@ -2316,7 +2276,7 @@ startBureau({
               <div style="font-size:18px; font-weight:800; color:#1E293B;">🏃 Coach : ${esc(coach.nom)}</div>
               <p class="muted" style="margin:4px 0 0; font-size:12.5px;">Liste des épreuves suivies ou encadrées par cet entraîneur.</p>
             </div>
-            ${isAdmin ? `<button class="btn btn-muted btn-mini" id="btn-del-coach" style="color:var(--red); border-color:#FECACA;">🗑️ Retirer le coach</button>` : ""}
+            ${canEdit ? `<button class="btn btn-muted btn-mini" id="btn-del-coach" style="color:var(--red); border-color:#FECACA;">🗑️ Retirer le coach</button>` : ""}
           </div>
         </div>
 
@@ -2342,7 +2302,7 @@ startBureau({
                       </div>
                     </div>
                     <div>
-                      <button class="btn btn-muted btn-mini btn-goto-comp" data-cid="${esc(c.id || c.docId)}">🔍 Voir l'épreuve</button>
+                      <button class="btn btn-muted btn-mini btn-goto-comp" data-cid="${esc(c.id)}">🔍 Voir l'épreuve</button>
                     </div>
                   </div>
                 `;
@@ -2362,12 +2322,13 @@ startBureau({
       $("btn-del-coach")?.addEventListener("click", async () => {
         if (!confirm(`Supprimer le coach « ${coach.nom} » ?`)) return;
         try {
-          await db.collection("coaches").doc(String(coach.id || coach.docId)).delete();
+          // The server also removes the coach from every competition
+          await apiWrite("DELETE", "/api/coaches/" + encodeURIComponent(String(coach.id)));
+          allCoaches = allCoaches.filter(co => String(co.id) !== String(coach.id));
           activeCoachId = null;
+          renderCoachsView();
           toast("🗑️ Coach supprimé.");
-        } catch (err) {
-          toast("❌ Erreur suppression : " + err.message);
-        }
+        } catch (err) { writeFailed(err); }
       });
     }
 
@@ -2379,15 +2340,10 @@ startBureau({
         return;
       }
       try {
-        await db.collection("coaches").add({
-          nom: name,
-          updated_at: new Date().toISOString()
-        });
+        await apiWrite("POST", "/api/coaches", { nom: name });
         nameInput.value = "";
         toast("✅ Coach ajouté avec succès !");
-      } catch (err) {
-        toast("❌ Erreur ajout coach : " + err.message);
-      }
+      } catch (err) { writeFailed(err); }
     });
 
     // ==========================================
@@ -2424,7 +2380,7 @@ startBureau({
       const selNamesSet = new Set(selectedNames.map(s => String(s).toLowerCase().trim()));
 
       box.innerHTML = allCoaches.map(co => {
-        const id = String(co.id || co.docId);
+        const id = String(co.id);
         const name = String(co.nom || "");
         const checked = selIdsSet.has(id) || selNamesSet.has(name.toLowerCase().trim());
         return `
@@ -2453,7 +2409,7 @@ startBureau({
     }
 
     function openEditCompModal(c) {
-      editCompId = c.id || c.docId;
+      editCompId = c.id;
       $("comp-modal-title").textContent = "✏️ Modifier la compétition";
       $("f-nom").value = c.nom || "";
       $("f-date").value = c.date_competition || "";
@@ -2487,58 +2443,45 @@ startBureau({
       const idffme = $("f-idffme").value.trim();
       const urlResultats = $("f-url-resultats").value.trim();
 
-      const selectedCoachIds = [];
-      const selectedCoachNames = [];
-      document.querySelectorAll(".comp-coach-chk:checked").forEach(chk => {
-        selectedCoachIds.push(chk.value);
-        selectedCoachNames.push(chk.dataset.name);
-      });
+      const selectedCoachIds = Array.from(document.querySelectorAll(".comp-coach-chk:checked"),
+                                          chk => Number(chk.value));
 
       if (!nom || !date) {
         toast("⚠️ Nom et date obligatoires.");
         return;
       }
+      if (selectedCoachIds.length > 3) {
+        toast("⚠️ 3 coachs au maximum par compétition.");
+        return;
+      }
 
+      // lieu and type are pass-through fields (plan appendix B)
+      const body = { nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
+                     url_resultats: urlResultats, coach_ids: selectedCoachIds };
       try {
         if (editCompId) {
-          await db.collection("competitions").doc(String(editCompId)).update({
-            nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
-            url_resultats: urlResultats,
-            coach_ids: selectedCoachIds,
-            coaches: selectedCoachNames,
-            updated_at: new Date().toISOString()
-          });
+          await apiWrite("PATCH", compUrl(editCompId), body);
           toast("✅ Compétition mise à jour !");
         } else {
-          const newDoc = await db.collection("competitions").add({
-            nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
-            url_resultats: urlResultats,
-            coach_ids: selectedCoachIds,
-            coaches: selectedCoachNames,
-            participants: [],
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-          activeCompId = newDoc.id;
+          const created = await apiWrite("POST", "/api/competitions", body);
+          activeCompId = String(created.id);
+          onCompsChanged();
           toast("✅ Compétition créée avec succès !");
         }
         closeCompModal();
-      } catch (err) {
-        console.error("Erreur enregistrement compétition :", err);
-        toast("❌ Erreur : " + err.message, 8000);
-      }
+      } catch (err) { writeFailed(err); }
     });
 
     async function deleteActiveComp(c) {
       if (!confirm(`Supprimer définitivement la compétition « ${c.nom} » et toutes ses inscriptions ?`)) return;
       try {
-        await db.collection("competitions").doc(String(c.id || c.docId)).delete();
+        await apiWrite("DELETE", compUrl(c.id));
+        allComps = allComps.filter(x => String(x.id) !== String(c.id));
         activeCompId = null;
+        onCompsChanged();
         renderActiveCompWorkspace();
         toast("🗑️ Compétition supprimée.");
-      } catch (err) {
-        toast("❌ Erreur de suppression : " + err.message, 8000);
-      }
+      } catch (err) { writeFailed(err); }
     }
 
     // ==========================================
@@ -2574,12 +2517,12 @@ startBureau({
       if (radioSelected) radioSelected.checked = true;
 
       function toRecipient(p) {
-        const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
-        const email = adh.email_primary || adh.email_secondary || p.email || "";
+        const adh = allAdherents.find(a => String(a.id) === String(p.adherent_id)) || {};
+        const email = adh.email || adh.email_secondaire || p.email || "";
         return {
           id: p.adherent_id,
-          first_name: p.prenom || adh.first_name || "",
-          last_name: p.nom || adh.last_name || "",
+          first_name: p.prenom || adh.prenom || "",
+          last_name: p.nom || adh.nom || "",
           email: email.trim(),
           num_licence: p.num_licence || adh.licence_ffme || ""
         };
@@ -2687,7 +2630,7 @@ startBureau({
           body: JSON.stringify({
             subject: $("comp-email-subject").value.trim(),
             body: $("comp-email-body").value.trim(),
-            competition_id: comp.id || comp.docId,
+            competition_id: comp.id,
             recipients: validRecipients
           })
         });

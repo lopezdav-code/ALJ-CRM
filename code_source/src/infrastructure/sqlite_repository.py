@@ -549,6 +549,47 @@ class SqliteRepository:
         return [Member.from_dict(row) for row in cls.load_direct_data(season_filter=season_filter)]
 
     @classmethod
+    def list_seasons(cls) -> list:
+        """Seasons as [{name, is_active}], most recent first."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            rows = conn.execute("SELECT name, is_active FROM seasons WHERE name IS NOT NULL AND name != ''"
+                                " ORDER BY name DESC").fetchall()
+            return [{"name": r["name"], "is_active": bool(r["is_active"])} for r in rows]
+        finally:
+            conn.close()
+
+    @classmethod
+    def list_member_rows(cls, season_name: str) -> list:
+        """One row per purchase of the season (users ⨝ orders ⨝ purchases), with the fields of
+        the web member pages. Unlike v_adherents_legacy, carries `purchase_id` (needed by
+        /api/members/update) and skips the insurance-option subqueries."""
+        cls.setup_database()
+        conn = cls.get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT u.id AS user_id, p.id AS purchase_id,
+                       u.last_name, u.first_name, u.birth_date, u.gender,
+                       u.address, u.zip_code, u.city, u.phone, u.email_primary, u.email_secondary,
+                       u.emergency1_name, u.emergency1_phone, u.emergency2_name, u.emergency2_phone,
+                       u.licence_ffme, u.health_commitment, u.photo_auth, u.badge_rouge, u.autonomie_bloc,
+                       u.raw_passports, u.raw_diplomas,
+                       o.payer_first_name, o.payer_last_name, o.payer_email, o.order_ref, o.order_date,
+                       p.tarif_name, p.amount, p.status, p.document_sante, p.email_sent_date,
+                       p.commentaires_correctif,
+                       s.name AS season_name
+                FROM purchases p
+                JOIN users u ON u.id = p.user_id
+                JOIN orders o ON o.id = p.order_id
+                JOIN seasons s ON s.id = o.season_id
+                WHERE s.name = ?
+            """, (season_name,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    @classmethod
     def export_to_excel(cls, file_path: str) -> bool:
         """
         Phase 9 — Exporte les adhérents de la saison active vers un fichier Excel,

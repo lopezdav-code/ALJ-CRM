@@ -65,6 +65,7 @@ call gcloud run deploy %SERVICE_NAME% ^
     --cpu 1 ^
     --min-instances 0 ^
     --max-instances 2 ^
+    --session-affinity ^
     --timeout 300
 
 if %errorlevel% neq 0 (

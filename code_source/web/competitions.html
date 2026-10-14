@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Gestion des Compétitions (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Gestion des Compétitions (v23)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,9 +15,9 @@
 <script src="/static-web/alj-vue.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
+<script src="/static-web/alj-sync.js"></script>
 <style>
   :root {
     --bg: #F1F5F9; --card: #FFFFFF; --ink: #1E293B; --muted: #64748B;
@@ -159,11 +159,11 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v22</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v23</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="annuaire-link" href="/index?vue=pwa" title="Annuaire des adhérents" style="display:none;align-items:center;text-decoration:none">📇</a>
-  <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
+  <button class="icon-btn" id="refresh-btn" title="Recharger les données">🔄</button>
   <button class="icon-btn" id="config-btn" title="Compte / Configuration">⚙️</button>
 </header>
 
@@ -173,8 +173,8 @@
     <div class="card setup-box">
       <h2>🔐 Connexion</h2>
       <p>Cette application est réservée aux coachs et gestionnaires du club. Les données sont
-         synchronisées en <b>temps réel</b> via Google Cloud Firestore : chaque modification
-         (sélections, épreuves, pointages) est instantanément visible par tous les appareils.</p>
+         synchronisées automatiquement : chaque modification (sélections, épreuves, pointages)
+         est visible sur tous les appareils en quelques secondes.</p>
       <div id="setup-not-logged">
         <div class="btn-row">
           <button class="btn btn-primary" id="login-btn" style="flex:2">🔑 Se connecter avec Google</button>
@@ -345,7 +345,7 @@
       <div style="font-weight:700; color:#1E293B; margin-bottom:4px;">🔄 Campagne annuelle HelloAsso & Miroir</div>
       <div style="font-size:12px; color:#64748B; line-height:1.5;">
         Un seul formulaire HelloAsso pour toutes les compétitions de la saison.
-        Les paiements reçus sont synchronisés ici en temps réel.
+        Les paiements reçus sont synchronisés ici automatiquement.
         Vous pouvez vérifier les paiements et rattacher manuellement ceux qui sont en attente d'attribution à un compétiteur ou une épreuve.
       </div>
     </div>
@@ -576,17 +576,19 @@
 <script>
 "use strict";
 
-/* ===================== Firebase (Auth + Firestore temps réel) ===================== */
-// Project configuration and emulator (dev): /static-web/alj-firebase.js
-const { auth, db: fsdb } = ALJFirebase.init();
+/* ===================== Firebase (sign-in) ===================== */
+// Project configuration and emulator (dev): /static-web/alj-firebase.js. Firebase only signs
+// the user in (ID token); every read and write goes through the API (/api/competitions…).
+const { auth } = ALJFirebase.init();
 
 let user = null;                 // compte Firebase Auth connecté
 let comps = [];                  // documents de la collection "competitions"
 let coaches = [];                // documents de la collection "coaches"
 let adherents = [];              // documents de la collection "adherents"
-let snapshotsReady = 0;          // nombre de premières snapshots reçues
-let listeners = [];              // fonctions de désabonnement onSnapshot
+let polls = [];                  // API polls (ALJSync), stopped on logout
+let loaded = new Set();          // resources received at least once (or read from the snapshot)
 let lastSyncAt = null;
+let isOffline = false;           // last poll failed for lack of network: writes are refused
 let editCompId = null;           // id de la compétition en cours d'édition
 let editSourcePage = null;       // page d'où l'édition a été déclenchée
 let helloassoItems = [];         // documents de la collection "helloasso_items"
@@ -618,7 +620,12 @@ async function apiFetch(url, opts = {}) {
   return res;
 }
 async function apiErrorText(res) {
-  try { const d = await res.clone().json(); if (d && d.message) return d.message; } catch (e) {}
+  try {
+    const d = await res.clone().json();
+    if (d && d.message) return d.message;
+    // Request rejected by the server's validation (422): list the reasons
+    if (d && Array.isArray(d.detail)) return d.detail.map(x => x.msg).join(" ; ");
+  } catch (e) {}
   return res.status === 401 ? "Authentification requise : reconnectez-vous."
        : res.status === 403 ? "Accès refusé pour ce compte."
        : "Impossible de contacter l'API (HTTP " + res.status + ").";
@@ -731,7 +738,7 @@ function applyRolePermissions() {
 
   if (user) {
     const roleTxt = isCoach ? "👤 Coach" : "👁 Consultation";
-    setSyncInfo(`${roleTxt} (${user.email || ""}) — temps réel`);
+    setSyncInfo(`${roleTxt} (${user.email || ""}) — synchro auto`);
   }
 }
 
@@ -813,12 +820,13 @@ auth.onAuthStateChanged(async u => {
     $("#setup-logged").style.display = "block";
     applyRolePermissions();
     if (isAuthorizedUser() && isSetupPageActive()) showPage("comps");
-    startListeners();
+    startSync();
   } else {
-    stopListeners();
+    stopSync();
+    ALJSync.snapshot.clearAll();  // no participant data left on the phone after logout
     $("#setup-not-logged").style.display = "block";
     $("#setup-logged").style.display = "none";
-    snapshotsReady = 0;
+    loaded = new Set();
     comps = []; coaches = []; adherents = []; helloassoItems = [];
     applyRolePermissions();
     setSyncInfo("Non connecté");
@@ -826,69 +834,72 @@ auth.onAuthStateChanged(async u => {
   }
 });
 
-/* ===================== Écoute temps réel Firestore ===================== */
-function startListeners() {
-  stopListeners();
-  snapshotsReady = 0;
-  listeners.push(fsdb.collection("competitions").onSnapshot(
-    snap => { comps = normalizeCompDocs(snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id }))); onSnapshotArrived("competitions"); },
-    err => onSnapshotError("competitions", err)));
-  listeners.push(fsdb.collection("coaches").onSnapshot(
-    snap => { coaches = snap.docs.map(d => d.data()); onSnapshotArrived("coaches"); },
-    err => onSnapshotError("coaches", err)));
-  listeners.push(fsdb.collection("adherents").onSnapshot(
-    snap => { adherents = snap.docs.map(d => d.data()); onSnapshotArrived("adherents"); },
-    err => onSnapshotError("adherents", err)));
-
-  if (isCoachUser()) {
-    listeners.push(fsdb.collection("helloasso_items").onSnapshot(
-      snap => { helloassoItems = snap.docs.map(d => Object.assign({}, d.data(), { docId: d.id })); onSnapshotArrived("helloasso_items"); },
-      err => onSnapshotError("helloasso_items", err)));
+/* ===================== Synchronisation par l'API (polling) ===================== */
+/* Each resource is reloaded every 20 s while the page is visible, when it becomes visible
+   again, and right after the user's own changes (syncNow). Competitions and coaches are
+   also kept on the phone (ALJSync.snapshot) for read-only viewing without network. */
+const SNAPSHOT_RESOURCES = ["competitions", "coaches"];
+const SYNC_SOURCES = {
+  competitions: { url: "/api/competitions", set: d => { comps = d; } },
+  coaches: { url: "/api/coaches", set: d => { coaches = d; } },
+  members: { url: "/api/competition-members", set: d => { adherents = d; } },
+  helloasso: { url: "/api/helloasso/items", set: d => { helloassoItems = d; } }
+};
+function resourcesNeeded() {
+  const names = ["competitions", "coaches", "members"];
+  return isCoachUser() ? names.concat("helloasso") : names;
+}
+function startSync() {
+  stopSync();
+  loaded = new Set();
+  const uid = user && user.uid;
+  for (const name of SNAPSHOT_RESOURCES) {
+    const snap = ALJSync.snapshot.load(name, uid);
+    if (!snap) continue;
+    SYNC_SOURCES[name].set(snap.data);
+    loaded.add(name);
+    lastSyncAt = new Date(snap.savedAt);
+  }
+  if (loaded.size) renderAll();
+  for (const name of resourcesNeeded()) {
+    const src = SYNC_SOURCES[name];
+    polls.push(ALJSync.poll(src.url, {
+      fetch: apiFetch,
+      onData: data => {
+        src.set(data);
+        if (SNAPSHOT_RESOURCES.includes(name)) ALJSync.snapshot.save(name, uid, data);
+        loaded.add(name);
+        renderAll();
+        if (isSetupPageActive() && isAuthorizedUser()) showPage("comps");
+      },
+      onStatus: (status, info) => onSyncStatus(name, status, info)
+    }));
   }
 }
-function stopListeners() {
-  listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
-  listeners = [];
+function stopSync() {
+  polls.forEach(p => p.stop());
+  polls = [];
 }
-/* Dédoublonnage par identifiant métier : une épreuve créée historiquement sur la
-   page web porte un identifiant Firestore aléatoire ; si le bureau a recopié la
-   même épreuve vers l'identifiant canonique String(id), la version la plus
-   récente (updated_at) gagne. */
-function normalizeCompDocs(docs) {
-  const kept = {};
-  for (const d of docs) {
-    const key = String(d.id != null ? d.id : d.docId);
-    const cur = kept[key];
-    if (!cur || String(d.updated_at || "") > String(cur.updated_at || "")) kept[key] = d;
-  }
-  return Object.values(kept);
+/* Reloads everything now (after the user's own change): others' changes come with it. */
+function syncNow() {
+  return Promise.all(polls.map(p => p.refresh()));
 }
-function onSnapshotArrived(name) {
-  snapshotsReady++;
-  lastSyncAt = new Date();
-  const needed = isCoachUser() ? 4 : 3;
-  if (snapshotsReady >= needed) {
-    setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate(lastSyncAt.toISOString()));
-    renderAll();
-    if (isSetupPageActive()) showPage("comps");
-  } else {
-    renderAll();
+function onSyncStatus(name, status, info) {
+  if (status === "ok") {
+    isOffline = false;
+    lastSyncAt = new Date();
+    setSyncInfo("☁️ À jour — " + fmtDate(lastSyncAt.toISOString()));
+    return;
   }
-}
-function onSnapshotError(name, err) {
-  console.error("Firestore " + name + " :", err);
-  snapshotsReady++; // une collection en échec ne bloque pas le rendu des autres
-  if (err.code === "permission-denied") {
-    setSyncInfo("🔒 Accès restreint (" + name + ")");
-  } else {
-    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
-    toast("❌ Firestore : " + (err.message || err), 9000);
+  if (status === "offline") {
+    isOffline = true;
+    const since = lastSyncAt ? " — données du " + fmtDate(lastSyncAt.toISOString()) : "";
+    setSyncInfo("📴 Hors ligne" + since + " (lecture seule)");
+    return;
   }
-  const needed = isCoachUser() ? 4 : 3;
-  if (snapshotsReady >= needed) {
-    renderAll();
-    if (isSetupPageActive()) showPage("comps");
-  }
+  console.error("API " + name + " :", info);
+  if (info && (info.status === 401 || info.status === 403)) setSyncInfo("🔒 Accès restreint (" + name + ")");
+  else setSyncInfo("⚠️ Serveur injoignable — nouvel essai automatique");
 }
 /* Page active absente (premier rendu) ou page de connexion : la liste des
    compétitions doit s'afficher dès que l'utilisateur est reconnu (F5). */
@@ -897,7 +908,7 @@ function isSetupPageActive() {
   return !a || a.id === "page-setup";
 }
 
-/* ===================== Accès aux données (Firestore) ===================== */
+/* ===================== Accès aux données ===================== */
 function findComp(compId) {
   if (!compId) return null;
   return comps.find(c => String(c.id) === String(compId) || String(c.docId) === String(compId)) || null;
@@ -919,107 +930,42 @@ function sortedCompetitions() {
     String(b.date_competition || "").localeCompare(String(a.date_competition || ""), "fr") ||
     (Number(b.id) || 0) - (Number(a.id) || 0));
 }
-function newParticipant(adherentId, selected, statut = null) {
-  const a = findAdherent(adherentId) || {};
-  const isSelected = !!selected;
-  const stat = statut || (isSelected ? "en_attente" : "non_invite");
-  return {
-    participant_id: null,
-    adherent_id: Number(adherentId),
-    nom: String(a.nom || "").toUpperCase(),
-    prenom: a.prenom || "",
-    num_licence: a.licence_ffme || "",
-    email: a.email || "",
-    phone: a.phone || "",
-    selectionne: isSelected,
-    statut_paiement: stat,
-    montant_paye: 0,
-    commande_helloasso: "",
-    note_paiement: "",
-    urgence_nom: a.emergency_name || "",
-    urgence_tel: a.emergency_phone || "",
-    updated_at: new Date().toISOString()
-  };
+/* ===================== Écritures par l'API ===================== */
+/* Every change goes through the API: validation, roles and concurrent edits (another
+   coach, the desktop app, the HelloAsso webhook) are handled by the server. When the
+   answer carries the updated competition it is shown at once; everything is then reloaded. */
+function compUrl(compId, suffix = "") {
+  return "/api/competitions/" + encodeURIComponent(String(compId)) + suffix;
 }
-/* Règle de bascule « Participe » (miroir de domain.competition_models.statut_paiement_apres_bascule) :
-   un participant non invité coché passe « en attente » ; un « en attente » décoché repasse
-   « non invité » ; un annulé re-coché repasse « payé ». « payé » décoché = décision du coach
-   (modal reporter/encaisser) — None ici. */
-function statutApresBascule(statut, checked) {
-  statut = statut || "non_invite";
-  if (checked) {
-    if (statut === "non_invite") return "en_attente";
-    if (statut === "annule_perdu" || statut === "annule_reporte") return "paye";
-    return null;
+async function apiWrite(method, url, body) {
+  if (isOffline || navigator.onLine === false) {
+    toast("📴 Hors ligne : modification impossible (lecture seule).", 6000);
+    throw new Error("offline");
   }
-  if (statut === "en_attente") return "non_invite";
-  return null;
-}
-/* Écriture transactionnelle d'une épreuve (protection contre les modifications
-   simultanées). La transaction relit le document À JOUR sur le serveur, applique
-   `mutate(doc)` puis l'écrit ; si un autre coach, l'application de bureau ou le
-   webhook HelloAsso a modifié l'épreuve entre-temps, Firestore rejoue
-   automatiquement la transaction sur la nouvelle version. `mutate` doit donc
-   être rejouable : il ne part que du document reçu (jamais du cache local `comps`)
-   et renvoie le document à écrire, ou null s'il n'y a rien à faire.
-   Écrit toujours l'identifiant canonique String(comp.id) (même convention que
-   l'application de bureau) ; un éventuel document hérité (ID aléatoire) est
-   supprimé dans la même transaction. Renvoie true si une écriture a eu lieu. */
-async function txCompetitionDoc(comp, mutate) {
-  const canon = String(comp.id);
-  const canonRef = fsdb.collection("competitions").doc(canon);
-  const legacyRef = (comp.docId && String(comp.docId) !== canon)
-    ? fsdb.collection("competitions").doc(String(comp.docId)) : null;
+  let data;
   try {
-    const written = await fsdb.runTransaction(async tx => {
-      const snap = await tx.get(canonRef);
-      const legacySnap = legacyRef ? await tx.get(legacyRef) : null;
-      let base = null;
-      if (snap.exists) base = snap.data();
-      else if (legacySnap && legacySnap.exists) base = legacySnap.data();
-      if (!base) throw new Error("Compétition introuvable (supprimée entre-temps ?)");
-      const full = mutate(Object.assign({}, base));
-      if (!full) return false;
-      delete full.docId;
-      full.updated_at = new Date().toISOString();
-      tx.set(canonRef, full);
-      if (legacySnap && legacySnap.exists) tx.delete(legacyRef);
-      return true;
-    });
-    if (legacyRef) comp.docId = canon;
-    return written;
+    data = await ALJSync.request(apiFetch, method, url, body);
   } catch (e) {
-    console.error(e);
-    if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
-    else toast("❌ " + (e.message || e), 9000);
+    if (e.status === undefined) {  // never reached the server
+      toast("📴 Réseau indisponible : modification non enregistrée.", 6000);
+      throw new Error("offline");
+    }
     throw e;
   }
+  if (data && data.id != null && Array.isArray(data.participants)) applyCompDoc(data);
+  else if (data && data.competition) applyCompDoc(data.competition);
+  syncNow();
+  return data;
 }
-/* Mise à jour des informations de l'épreuve (nom, date, coachs…) : les champs
-   de `patch` sont appliqués sur la version serveur, les participants à jour
-   sont conservés. */
-function updateCompetitionDoc(comp, patch) {
-  return txCompetitionDoc(comp, doc => Object.assign(doc, patch));
+/* Toast for a failed write (the offline case was already announced by apiWrite). */
+function writeFailed(e) {
+  console.error(e);
+  if (e.message !== "offline") toast("❌ " + (e.message || e), 9000);
 }
-/* Compteurs dérivés du tableau des participants (mêmes règles que
-   CompetitionFirestoreRepository._recompute_counters côté bureau). */
-function participantCounters(parts) {
-  return {
-    nb_participants: parts.length,
-    nb_selectionnes: parts.filter(p => p.selectionne).length,
-    nb_payes: parts.filter(p => (p.statut_paiement || "") === "paye").length,
-    total_collecte: Math.round(parts.reduce((acc, p) => acc + Number(p.montant_paye || 0), 0) * 100) / 100
-  };
-}
-/* Modification transactionnelle des participants : `fn(parts)` reçoit une copie
-   du tableau À JOUR et renvoie le nouveau tableau (ou null = rien à faire). */
-function mutateParticipants(comp, fn) {
-  return txCompetitionDoc(comp, doc => {
-    const parts = (doc.participants || []).map(p => Object.assign({}, p));
-    const next = fn(parts);
-    if (!next) return null;
-    return Object.assign(doc, { participants: next }, participantCounters(next));
-  });
+function applyCompDoc(doc) {
+  const i = comps.findIndex(c => String(c.id) === String(doc.id));
+  if (i >= 0) comps[i] = doc; else comps.push(doc);
+  renderAll();
 }
 
 /* ===================== Rendu : compétitions ===================== */
@@ -1047,9 +993,9 @@ async function setCompArchived(id, archived) {
   const c = findComp(id);
   if (!c) return;
   try {
-    await updateCompetitionDoc(c, { statut: archived ? STATUT_ARCHIVE : "en_preparation" });
+    await apiWrite("PATCH", compUrl(c.id), { statut: archived ? STATUT_ARCHIVE : "en_preparation" });
     toast(archived ? `📦 « ${c.nom} » archivée.` : `♻️ « ${c.nom} » désarchivée.`);
-  } catch (e) { /* message déjà affiché par txCompetitionDoc */ }
+  } catch (e) { writeFailed(e); }
 }
 async function archivePastComps() {
   if (!isCoachUser()) { toast("🔒 Archivage réservé aux entraîneurs et gestionnaires."); return; }
@@ -1058,11 +1004,11 @@ async function archivePastComps() {
   if (!confirm(`Archiver ${past.length} compétition${past.length > 1 ? "s" : ""} passée${past.length > 1 ? "s" : ""} ?\n\n` +
                past.map(c => "• " + c.nom + " (" + c.date_competition + ")").join("\n") +
                "\n\nElles resteront consultables via « Afficher les archives » et comptées dans la balance.")) return;
-  let ok = 0;
-  for (const c of past) {
-    try { await updateCompetitionDoc(c, { statut: STATUT_ARCHIVE }); ok++; } catch (e) { /* toast déjà affiché */ }
-  }
-  toast(`📦 ${ok} compétition${ok > 1 ? "s" : ""} archivée${ok > 1 ? "s" : ""}.`);
+  try {
+    const r = await apiWrite("POST", "/api/competitions/archive-past");
+    const ok = (r.archived || []).length;
+    toast(`📦 ${ok} compétition${ok > 1 ? "s" : ""} archivée${ok > 1 ? "s" : ""}.`);
+  } catch (e) { writeFailed(e); }
 }
 const STATUT_COLORS = { en_preparation: "#64748B", en_cours: "#D97706", close: "#16A34A" };
 const PAIEMENT_LABELS = {
@@ -1248,46 +1194,29 @@ function readCoachSelection() {
     .map(sel => $(sel).value ? Number($(sel).value) : null)
     .filter(v => v !== null);
 }
+function compFormBody() {
+  return {
+    nom: $("#f-nom").value.trim(),
+    id_ffme: $("#f-idffme").value.trim(),
+    date_competition: $("#f-date").value || "",
+    date_fin: dateFinValue(),
+    prix: parseFloat($("#f-prix").value || "0") || 0,
+    statut: $("#f-statut").value,
+    coach_ids: readCoachSelection()
+  };
+}
 async function createCompetition() {
   if (!isCoachUser()) {
     toast("🔒 Création non autorisée en mode consultation.");
     return;
   }
-  const nom = $("#f-nom").value.trim();
-  if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
-  const coachIds = readCoachSelection();
-  const nowIso = new Date().toISOString();
-  const newId = Date.now();
+  const body = compFormBody();
+  if (!body.nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
   try {
-    await fsdb.collection("competitions").doc(String(newId)).set({
-      id: newId,
-      nom: nom,
-      id_ffme: $("#f-idffme").value.trim(),
-      date_competition: $("#f-date").value || "",
-      date_fin: dateFinValue(),
-      prix: parseFloat($("#f-prix").value || "0") || 0,
-      statut: $("#f-statut").value,
-      coach_ids: coachIds,
-      coaches: coachNames(coachIds),
-      coach1_id: coachIds[0] != null ? coachIds[0] : null,
-      coach2_id: coachIds[1] != null ? coachIds[1] : null,
-      coach3_id: coachIds[2] != null ? coachIds[2] : null,
-      helloasso_ref: "",
-      nb_participants: 0,
-      nb_selectionnes: 0,
-      nb_payes: 0,
-      total_collecte: 0,
-      participants: [],
-      created_at: nowIso,
-      updated_at: nowIso
-    });
+    await apiWrite("POST", "/api/competitions", body);
     resetCompForm();
-    toast("✅ Compétition créée — synchronisée en temps réel.");
-  } catch (e) { /* déjà toasté par updateCompetitionDoc ? non : ici set */
-    console.error(e);
-    if (e.code === "permission-denied") toast("🔒 Écriture refusée : votre compte n'a pas le rôle coach/admin.", 9000);
-    else toast("❌ " + (e.message || e), 9000);
-  }
+    toast("✅ Compétition créée.");
+  } catch (e) { writeFailed(e); }
 }
 async function updateCompetition() {
   if (!isCoachUser()) {
@@ -1297,35 +1226,19 @@ async function updateCompetition() {
   if (!editCompId) return;
   const c = findComp(editCompId);
   if (!c) return;
-  const nom = $("#f-nom").value.trim();
-  if (!nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
-  const coachIds = readCoachSelection();
+  const body = compFormBody();
+  if (!body.nom) { toast("⚠️ Le nom de l'épreuve est obligatoire."); return; }
   const sourcePage = editSourcePage;
   const savedCompId = editCompId;
   try {
-    await updateCompetitionDoc(c, {
-      nom: nom,
-      id_ffme: $("#f-idffme").value.trim(),
-      date_competition: $("#f-date").value || "",
-      date_fin: dateFinValue(),
-      prix: parseFloat($("#f-prix").value || "0") || 0,
-      statut: $("#f-statut").value,
-      coach_ids: coachIds,
-      coaches: coachNames(coachIds),
-      coach1_id: coachIds[0] != null ? coachIds[0] : null,
-      coach2_id: coachIds[1] != null ? coachIds[1] : null,
-      coach3_id: coachIds[2] != null ? coachIds[2] : null,
-    });
+    await apiWrite("PATCH", compUrl(c.id), body);
     renderComps();
     resetCompForm();
     toast("✅ Compétition mise à jour.");
     if (sourcePage === "participants") {
       openParticipants(savedCompId);
     }
-  } catch (e) {
-    console.error("Erreur mise à jour compétition :", e);
-    toast("❌ " + (e.message || e), 9000);
-  }
+  } catch (e) { writeFailed(e); }
 }
 async function deleteCompetition() {
   if (!isCoachUser()) {
@@ -1337,19 +1250,13 @@ async function deleteCompetition() {
   const c = findComp(editCompId);
   if (!c) return;
   try {
-    const canon = String(c.id);
-    await fsdb.collection("competitions").doc(canon).delete();
-    if (c.docId && c.docId !== canon) {
-      try { await fsdb.collection("competitions").doc(String(c.docId)).delete(); } catch (e) {}
-    }
+    await apiWrite("DELETE", compUrl(c.id));
+    comps = comps.filter(x => String(x.id) !== String(c.id));
     resetCompForm();
     renderComps();
     showPage("comps");
     toast("🗑 Compétition supprimée.");
-  } catch (e) {
-    console.error(e);
-    toast("❌ " + (e.message || e), 9000);
-  }
+  } catch (e) { writeFailed(e); }
 }
 
 /* ===================== Rendu : compétiteurs ===================== */
@@ -1362,7 +1269,7 @@ function competitionAdherents(compId) {
     const adh = findAdherent(p.adherent_id) || {};
     return Object.assign({}, p, {
       competition_id: c.id,
-      tarif: adh.tarif || "",
+      tarif: adh.tarif || p.tarif || "",
       groupe: adh.creneau_groupe || "",
       date_synchro_helloasso: p.updated_at || ""
     });
@@ -1464,39 +1371,34 @@ async function toggleSelection(compId, adherentId, checked) {
   }
   const c = findComp(compId);
   if (!c) return;
-  const parts = (c.participants || []).slice();
-  const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
-  const existing = idx >= 0 ? parts[idx] : null;
+  const existing = (c.participants || []).find(p => Number(p.adherent_id) === Number(adherentId)) || null;
   if (!checked && existing && existing.statut_paiement === "paye") {
     // Compétiteur ayant payé : décision du coach (report ou encaissement) + commentaire obligatoire
     openCancelModal(compId, adherentId, c);
     return;
   }
-  let devenuPaye = false;
   try {
-    await mutateParticipants(c, parts => {
-      devenuPaye = false;
-      const i = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
-      if (!checked && i >= 0 && parts[i].statut_paiement === "paye") {
-        // Payé entre-temps (webhook HelloAsso) : décision du coach requise
-        devenuPaye = true;
-        return null;
-      }
-      const newStatut = statutApresBascule(i >= 0 ? parts[i].statut_paiement : "non_invite", checked);
-      if (i >= 0) parts[i] = Object.assign({}, parts[i], {
-        selectionne: !!checked,
-        statut_paiement: newStatut || (parts[i].statut_paiement || "non_invite"),
-        updated_at: new Date().toISOString()
-      });
-      else parts.push(newParticipant(adherentId, checked));
-      return parts;
-    });
-  } catch (e) { renderParticipants(); return; }
-  if (devenuPaye) openCancelModal(compId, adherentId, findComp(compId) || c);
+    if (existing) {
+      await apiWrite("PATCH", compUrl(c.id, "/participants/" + Number(adherentId)), { selectionne: !!checked });
+    } else {
+      await apiWrite("POST", compUrl(c.id, "/participants"), { adherent_id: Number(adherentId), selectionne: !!checked });
+    }
+  } catch (e) {
+    if (e.code === "already_paid") {
+      // Paid meanwhile (HelloAsso webhook): the coach decides what happens to the money
+      await syncNow();
+      openCancelModal(compId, adherentId, findComp(compId) || c);
+      return;
+    }
+    writeFailed(e);
+    renderParticipants();
+  }
 }
 
 /* ============ Modal d'annulation d'un participant ayant payé ============ */
 let cancelModalCtx = null;
+// Cancellation choice (payment status) -> API mode
+const CANCEL_MODES = { annule_reporte: "reporte", annule_perdu: "perdu" };
 function openCancelModal(compId, adherentId, c) {
   const p = ((c.participants || []).find(x => Number(x.adherent_id) === Number(adherentId))) || {};
   cancelModalCtx = { compId, adherentId };
@@ -1525,20 +1427,12 @@ async function applyCancelModal() {
   cancelModalCtx = null;
   $("#cancel-modal").style.display = "none";
   try {
-    await mutateParticipants(c, parts => {
-      const idx = parts.findIndex(p => Number(p.adherent_id) === Number(ctx.adherentId));
-      if (idx < 0) return null;
-      parts[idx] = Object.assign({}, parts[idx], {
-        selectionne: false,
-        statut_paiement: statut,
-        note_paiement: note,
-        updated_at: new Date().toISOString()
-      });
-      return parts;
-    });
+    await apiWrite("POST", compUrl(c.id, "/participants/" + Number(ctx.adherentId) + "/cancel"),
+                   { mode: CANCEL_MODES[statut], note });
     toast("🗑 Participation annulée (" + PAIEMENT_LABELS[statut] + ").");
   } catch (e) {
     cancelModalCtx = ctx;
+    writeFailed(e);
   }
 }
 function listAdherents() {
@@ -1555,25 +1449,14 @@ async function loadCompetitionGroup() {
   if (!compId) return;
   const c = findComp(compId);
   if (!c) return;
-  const group = adherents.filter(a => normKey(a.tarif).includes("competition"));
-  let added = 0;
   try {
-    await mutateParticipants(c, parts => {
-      added = 0;
-      for (const a of group) {
-        if (!parts.some(p => Number(p.adherent_id) === Number(a.id))) {
-          parts.push(newParticipant(a.id, false, "non_invite"));
-          added++;
-        }
-      }
-      return added ? parts : null;
-    });
+    const added = (await apiWrite("POST", compUrl(c.id, "/load-group"))).added || 0;
     if (added === 0) {
       toast("ℹ️ Tous les membres du groupe « Compétition » sont déjà présents dans la liste.");
       return;
     }
     toast(`🧗 ${added} compétiteur(s) du groupe « Compétition » ajouté(s) à la liste.`);
-  } catch (e) {}
+  } catch (e) { writeFailed(e); }
 }
 function renderSearchResults() {
   const compId = currentCompId();
@@ -1604,14 +1487,9 @@ async function addAdherent(compId, adherentId) {
   const c = findComp(compId);
   if (!c) return;
   try {
-    await mutateParticipants(c, parts => {
-      const idx = parts.findIndex(p => Number(p.adherent_id) === Number(adherentId));
-      if (idx >= 0) parts[idx] = Object.assign({}, parts[idx], { selectionne: true, updated_at: new Date().toISOString() });
-      else parts.push(newParticipant(adherentId, true));
-      return parts;
-    });
+    await apiWrite("POST", compUrl(c.id, "/participants"), { adherent_id: Number(adherentId), selectionne: true });
     toast("➕ Adhérent ajouté à la compétition.");
-  } catch (e) {}
+  } catch (e) { writeFailed(e); }
 }
 async function deleteParticipant(compId, adherentId, nomComplet) {
   /* Retrait d'un compétiteur réservé à l'application de bureau (bouton corbeille
@@ -1620,12 +1498,9 @@ async function deleteParticipant(compId, adherentId, nomComplet) {
   const c = findComp(compId);
   if (!c) return;
   try {
-    await mutateParticipants(c, parts => {
-      const kept = parts.filter(p => Number(p.adherent_id) !== Number(adherentId));
-      return kept.length !== parts.length ? kept : null;
-    });
+    await apiWrite("DELETE", compUrl(c.id, "/participants/" + Number(adherentId)));
     toast("🗑 Compétiteur retiré de l'épreuve.");
-  } catch (e) {}
+  } catch (e) { writeFailed(e); }
 }
 
 /* ===================== Navigation : détail d'une épreuve ===================== */
@@ -1689,18 +1564,10 @@ async function createCoach() {
   const nom = $("#f-coach-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
   try {
-    const newId = Date.now();
-    await fsdb.collection("coaches").doc(String(newId)).set({
-      id: newId,
-      nom: nom,
-      updated_at: new Date().toISOString()
-    });
+    await apiWrite("POST", "/api/coaches", { nom });
     resetCoachForm();
     toast("✅ Coach ajouté.");
-  } catch (e) {
-    console.error(e);
-    toast("⚠️ " + (e.message || e), 9000);
-  }
+  } catch (e) { writeFailed(e); }
 }
 
 async function updateCoach() {
@@ -1708,44 +1575,27 @@ async function updateCoach() {
   const nom = $("#f-coach-nom").value.trim();
   if (!nom) { toast("⚠️ Le nom du coach est obligatoire."); return; }
   try {
-    await fsdb.collection("coaches").doc(String(editCoachId)).update({
-      nom: nom,
-      updated_at: new Date().toISOString()
-    });
-    // Répercuter le nom dans les compétitions qui l'affichent
-    for (const c of comps) {
-      const ids = c.coach_ids || [];
-      if (ids.some(cid => String(cid) === String(editCoachId))) {
-        await updateCompetitionDoc(c, { coaches: coachNames(ids) });
-      }
-    }
+    // The server also renames the coach in their competitions
+    await apiWrite("PUT", "/api/coaches/" + encodeURIComponent(String(editCoachId)), { nom });
     const coachId = editCoachId;
+    coaches = coaches.map(c => String(c.id) === String(coachId) ? Object.assign({}, c, { nom }) : c);
     resetCoachForm();
     openEditCoach(coachId);
     toast("✅ Coach mis à jour.");
-  } catch (e) {
-    console.error(e);
-    toast("⚠️ " + (e.message || e), 9000);
-  }
+  } catch (e) { writeFailed(e); }
 }
 
 async function deleteCoach() {
   if (!editCoachId) return;
   if (!confirm("Supprimer ce coach ? Il sera retiré de toutes les compétitions associées.")) return;
   try {
-    await fsdb.collection("coaches").doc(String(editCoachId)).delete();
-    for (const c of comps) {
-      const ids = (c.coach_ids || []).filter(cid => String(cid) !== String(editCoachId));
-      if (ids.length !== (c.coach_ids || []).length) {
-        await updateCompetitionDoc(c, { coach_ids: ids, coaches: coachNames(ids) });
-      }
-    }
+    // The server also removes the coach from every competition
+    await apiWrite("DELETE", "/api/coaches/" + encodeURIComponent(String(editCoachId)));
+    const coachId = editCoachId;
+    coaches = coaches.filter(c => String(c.id) !== String(coachId));
     resetCoachForm();
     toast("🗑 Coach supprimé.");
-  } catch (e) {
-    console.error(e);
-    toast("⚠️ " + (e.message || e), 9000);
-  }
+  } catch (e) { writeFailed(e); }
 }
 
 function renderAll() {
@@ -2119,33 +1969,16 @@ async function toggleIgnoreItem() {
     $("#ha-modal-comment").focus();
     return;
   }
-  const ref = fsdb.collection("helloasso_items").doc(String(it.id_item || it.docId));
-  const nowIso = new Date().toISOString();
-  const who = (auth.currentUser && auth.currentUser.email) || "";
   const btn = $("#ha-modal-ignore-btn");
   btn.disabled = true;
   try {
-    await fsdb.runTransaction(async tx => {
-      const snap = await tx.get(ref);
-      if (!snap.exists) throw new Error("Article introuvable dans Firestore.");
-      const cur = snap.data() || {};
-      if (wasIgnored) {
-        tx.update(ref, { ignore: false, ignore_motif: "", ignored_at: null, ignored_by: null,
-                         commentaire: note, updated_at: nowIso });
-      } else {
-        if (cur.competition_id != null && cur.adherent_id != null) {
-          throw new Error("Cette ligne vient d'être rattachée à un compétiteur : elle ne peut pas être ignorée.");
-        }
-        tx.update(ref, { ignore: true, ignore_motif: note, commentaire: note, ignored_at: nowIso, ignored_by: who,
-                         competition_id: null, adherent_id: null, source: null,
-                         link_updated_at: nowIso, updated_at: nowIso });
-      }
-    });
+    await apiWrite("PUT", "/api/helloasso/items/" + encodeURIComponent(String(it.id_item)) + "/ignore",
+                   wasIgnored ? { ignore: false, commentaire: note }
+                              : { ignore: true, motif: note, commentaire: note });
     toast(wasIgnored ? "↩️ La ligne n'est plus ignorée." : "🚫 Ligne ignorée.");
     closeAttachModal();
   } catch (err) {
-    console.error("Erreur ignorer/réactiver :", err);
-    toast("❌ " + (err.message || err), 9000);
+    writeFailed(err);
   } finally {
     btn.disabled = false;
   }
@@ -2169,59 +2002,13 @@ async function saveAttachment() {
   btn.textContent = "💾 Enregistrement…";
 
   try {
-    const canonId = String(it.id_item || it.docId);
-    const nowIso = new Date().toISOString();
-
-    // 1. Mettre à jour helloasso_items
-    await fsdb.collection("helloasso_items").doc(canonId).update({
-      competition_id: compId,
-      adherent_id: adhId,
-      source: isLinked ? "manuel" : null,
-      commentaire: note,
-      ignore: false,
-      link_updated_at: nowIso,
-      updated_at: nowIso
-    });
-
-    // 2. Si rattaché à une compétition et un adhérent, reporter sur la compétition
-    if (isLinked) {
-      const c = findComp(compId);
-      if (c) {
-        const itemAmount = parseFloat(it.montant || 0);
-        const orderRef = String(it.order_id || "").trim();
-        await mutateParticipants(c, parts => {
-          const pIdx = parts.findIndex(p => Number(p.adherent_id) === adhId);
-          if (pIdx >= 0) {
-            const prev = parts[pIdx];
-            const orders = (prev.commande_helloasso ? prev.commande_helloasso.split(", ") : []).map(s => s.trim()).filter(Boolean);
-            if (orderRef && !orders.includes(orderRef)) orders.push(orderRef);
-            const currentMontant = Number(prev.montant_paye || 0);
-            const newMontant = currentMontant > 0 ? (currentMontant + itemAmount) : itemAmount;
-
-            parts[pIdx] = Object.assign({}, prev, {
-              selectionne: true,
-              statut_paiement: "paye",
-              montant_paye: Math.round(newMontant * 100) / 100,
-              commande_helloasso: orders.join(", "),
-              updated_at: nowIso
-            });
-          } else {
-            const newP = newParticipant(adhId, true, "paye");
-            newP.montant_paye = Math.round(itemAmount * 100) / 100;
-            newP.commande_helloasso = orderRef;
-            newP.updated_at = nowIso;
-            parts.push(newP);
-          }
-          return parts;
-        });
-      }
-    }
-
+    // The server also selects the member and records the payment when both are chosen
+    await apiWrite("PUT", "/api/helloasso/items/" + encodeURIComponent(String(it.id_item)) + "/link",
+                   { competition_id: compId, adherent_id: adhId, commentaire: note });
     toast(isLinked ? "✅ Paiement HelloAsso rattaché avec succès !" : "💾 Enregistré (paiement non rattaché).");
     closeAttachModal();
   } catch (err) {
-    console.error("Erreur enregistrement rattachement :", err);
-    toast("❌ " + (err.message || err), 9000);
+    writeFailed(err);
   } finally {
     btn.disabled = false;
     btn.textContent = "💾 Enregistrer le rattachement";
@@ -2290,7 +2077,7 @@ function computeBalances() {
 }
 
 function renderBalancePage() {
-  if (snapshotsReady < 3) return;
+  if (!loaded.has("competitions")) return;
   const searchQuery = ($("#bal-search").value || "").trim();
   
   const rows = computeBalances();
@@ -2594,7 +2381,7 @@ function wireEvents() {
   document.querySelectorAll("nav button").forEach(b =>
     b.addEventListener("click", () => showPage(b.dataset.page)));
   $("#refresh-btn").addEventListener("click", () => {
-    if (user) { startListeners(); setSyncInfo("🔄 Rechargement Firestore…"); }
+    if (user) { syncNow(); setSyncInfo("🔄 Rechargement…"); }
     else showPage("setup");
   });
   $("#config-btn").addEventListener("click", () => showPage("setup"));
@@ -2677,10 +2464,6 @@ async function forceWebUpdate() {
   checkWebVersion();
 
   wireEvents();
-
-  // Cache hors-ligne Firestore (les écritures en attente sont renvoyées dès le retour du réseau)
-  try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
-  catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 
   // Retour de Google après la redirection OAuth : access_token dans le fragment (#…)
   // → connexion Firebase avec le credential Google (pas de domaine tiers impliqué)

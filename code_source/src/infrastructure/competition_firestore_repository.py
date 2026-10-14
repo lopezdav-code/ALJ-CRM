@@ -33,13 +33,17 @@ from domain.competition_models import (
     PAIEMENT_NON_INVITE,
     PAIEMENT_ANNULE_PERDU,
     PAIEMENT_ANNULE_REPORTE,
+    PAIEMENT_PAYE,
     PAIEMENT_STATUTS_ANNULES,
+    STATUT_CLOSE,
     statut_paiement_apres_bascule,
 )
 from domain.constants import get_active_season
 from domain.age_rules import parse_birth_date, age_at, get_season_start_date
+from domain import member_view
 from domain.utils import normalize_string
 from infrastructure.firestore_client import (
+    META_KEYS,
     FirestoreClient,
     FirestoreConflictError,
     FirestoreError,
@@ -50,12 +54,24 @@ from infrastructure.sqlite_repository import SqliteRepository
 # participant ajouté explicitement (même sémantique que l'ancienne base SQLite).
 DEFAULT_STATUT_NOUVEAU_PARTICIPANT = PAIEMENT_EN_ATTENTE
 
+# Order reference of a payment recorded by hand on the bureau page (cheque, cash)
+MANUAL_PAYMENT_REF = "Règlement manuel"
+
 _ADHERENTS_CACHE_TTL = 30.0
 
 # Verrouillage optimiste des participants : nombre de tentatives (relecture +
 # ré-application de la modification) quand un autre poste, la page web ou le
 # webhook HelloAsso a modifié l'épreuve entre la lecture et l'écriture.
 _MAX_WRITE_ATTEMPTS = 5
+
+
+class ParticipantAlreadyPaid(Exception):
+    """Unselecting a participant who already paid requires the coach's cancellation
+    decision (money lost or carried over), not a plain toggle."""
+
+
+class ItemAlreadyLinked(Exception):
+    """A HelloAsso item linked to a competition and a member cannot be ignored."""
 
 
 class CompetitionFirestoreRepository:
@@ -77,6 +93,31 @@ class CompetitionFirestoreRepository:
     @classmethod
     def _now_iso(cls) -> str:
         return datetime.datetime.now().isoformat(timespec="seconds")
+
+    @classmethod
+    def _now_display(cls) -> str:
+        """Timestamp format of the HelloAsso mirror and payment dates."""
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _comp_sort_key(date_competition, competition_id) -> tuple:
+        """Competitions are ordered by date, then id (creation order)."""
+        return str(date_competition or ""), int(competition_id or 0)
+
+    @staticmethod
+    def _with_retries(what: str, attempt):
+        """Runs `attempt()` again (re-reading inside it) when its conditional write lost a
+        race (FirestoreConflictError), up to _MAX_WRITE_ATTEMPTS times."""
+        for n in range(_MAX_WRITE_ATTEMPTS):
+            try:
+                return attempt()
+            except FirestoreConflictError:
+                if n == _MAX_WRITE_ATTEMPTS - 1:
+                    raise
+                print(f"🔁 [FIRESTORE] {what} modifié(e) entre-temps : "
+                      f"nouvelle tentative ({n + 2}/{_MAX_WRITE_ATTEMPTS})")
+                time.sleep(0.2 * (n + 1))
+        return None
 
     @classmethod
     def _new_id(cls) -> int:
@@ -109,8 +150,7 @@ class CompetitionFirestoreRepository:
             if doc_id == key:
                 continue
             try:
-                clean = {k: v for k, v in doc.items() if k != "_doc_id"}
-                FirestoreClient.upsert_document(cls.COLLECTION_COMPETITIONS, key, clean)
+                FirestoreClient.upsert_document(cls.COLLECTION_COMPETITIONS, key, cls._clean_doc(doc))
                 FirestoreClient.delete_document(cls.COLLECTION_COMPETITIONS, doc_id)
                 doc["_doc_id"] = key
             except FirestoreError as e:
@@ -127,9 +167,20 @@ class CompetitionFirestoreRepository:
         matches = [d for d in cls._list_comp_docs() if str(d.get("id")) == wanted]
         return matches[0] if matches else None
 
+    @staticmethod
+    def _coach_slots(coach_ids: List[int]) -> Dict[str, Optional[int]]:
+        """coach1_id..coach3_id from an ordered id list (see plan cleanup C2)."""
+        ids = list(coach_ids) + [None] * 3
+        return {"coach1_id": ids[0], "coach2_id": ids[1], "coach3_id": ids[2]}
+
+    @staticmethod
+    def _coach_names(coach_ids, coaches: Dict[int, str]) -> List[str]:
+        return [coaches[cid] for cid in coach_ids if cid is not None and cid in coaches]
+
     @classmethod
     def _comp_from_doc(cls, doc: Dict[str, Any]) -> Competition:
         coach_ids = [int(cid) for cid in (doc.get("coach_ids") or []) if cid is not None]
+        from_list = cls._coach_slots(coach_ids)
         row = {
             "id": doc.get("id"),
             "id_ffme": doc.get("id_ffme"),
@@ -139,13 +190,14 @@ class CompetitionFirestoreRepository:
             "prix": doc.get("prix"),
             "statut": doc.get("statut"),
             "helloasso_ref": doc.get("helloasso_ref"),
+            "url_resultats": doc.get("url_resultats"),
+            "resultats_synced_at": doc.get("resultats_synced_at"),
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
-            "coach1_id": doc.get("coach1_id") or (coach_ids[0] if len(coach_ids) > 0 else None),
-            "coach2_id": doc.get("coach2_id") or (coach_ids[1] if len(coach_ids) > 1 else None),
-            "coach3_id": doc.get("coach3_id") or (coach_ids[2] if len(coach_ids) > 2 else None),
             "_doc_id": doc.get("_doc_id"),
         }
+        for slot, fallback in from_list.items():
+            row[slot] = doc.get(slot) or fallback
         return Competition.from_row(row)
 
     @classmethod
@@ -165,6 +217,8 @@ class CompetitionFirestoreRepository:
             "prix": float(comp.prix or 0.0),
             "statut": comp.statut or "en_preparation",
             "helloasso_ref": comp.helloasso_ref or "",
+            "url_resultats": comp.url_resultats or "",
+            "resultats_synced_at": comp.resultats_synced_at or "",
             "coaches": coach_names,
             "coach_ids": coach_ids,
             "coach1_id": comp.coach1_id,
@@ -182,7 +236,7 @@ class CompetitionFirestoreRepository:
         return {
             "nb_participants": len(parts),
             "nb_selectionnes": sum(1 for p in parts if p.get("selectionne")),
-            "nb_payes": sum(1 for p in parts if (p.get("statut_paiement") or "") == "paye"),
+            "nb_payes": sum(1 for p in parts if (p.get("statut_paiement") or "") == PAIEMENT_PAYE),
             "total_collecte": round(sum(float(p.get("montant_paye") or 0.0) for p in parts), 2),
         }
 
@@ -340,26 +394,14 @@ class CompetitionFirestoreRepository:
 
     @staticmethod
     def _read_planning_groups(main_conn) -> Dict[str, str]:
-        """{tarif normalisé -> groupe de créneau} depuis la table planning."""
-        pairs: Dict[str, str] = {}
+        """{tarif normalisé -> groupe de créneau} depuis la table planning (same rule as the
+        member pages, domain.member_view: a tariff in two groups belongs to the first by id)."""
         try:
-            for pr in main_conn.execute("SELECT groupe, helloasso_tarifs FROM planning").fetchall():
-                groupe = str(pr["groupe"] or "").strip()
-                if not groupe:
-                    continue
-                try:
-                    tarifs = json.loads(str(pr["helloasso_tarifs"] or "[]"))
-                except (ValueError, TypeError):
-                    tarifs = []
-                for t in tarifs or []:
-                    t = str(t or "").strip()
-                    if t:
-                        pairs[normalize_string(t)] = groupe
+            rows = [dict(r) for r in main_conn.execute(
+                "SELECT id, groupe, helloasso_tarifs FROM planning").fetchall()]
         except Exception:
-            pass
-        return pairs
-
-    COLLECTION_PLANNING = "planning"
+            return {}
+        return {k: slot["groupe"] for k, slot in member_view.tarif_slots(rows).items()}
 
     @classmethod
     def list_planning_groups(cls) -> Dict[str, str]:
@@ -419,7 +461,6 @@ class CompetitionFirestoreRepository:
     @classmethod
     def list_adherents(cls, search: str = "", competition_only: bool = False) -> list:
         """Liste les adhérents de l'annuaire Firestore (recherche insensible aux accents)."""
-        from domain.utils import normalize_string
         q = normalize_string(search) if search else ""
         result = []
         for doc in cls._adherents_raw():
@@ -446,7 +487,7 @@ class CompetitionFirestoreRepository:
     def list_competitions(cls) -> List[Competition]:
         docs = cls._list_comp_docs()
         comps = [cls._comp_from_doc(d) for d in docs]
-        comps.sort(key=lambda c: (c.date_competition or "", int(c.id or 0)), reverse=True)
+        comps.sort(key=lambda c: cls._comp_sort_key(c.date_competition, c.id), reverse=True)
         return comps
 
     @classmethod
@@ -455,15 +496,50 @@ class CompetitionFirestoreRepository:
         return cls._comp_from_doc(doc) if doc else None
 
     @classmethod
-    def save_competition(cls, comp: Competition) -> int:
-        """Insère ou met à jour une épreuve ; retourne son identifiant."""
+    def _clean_doc(cls, doc: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in doc.items() if k not in META_KEYS}
+
+    @classmethod
+    def list_competition_docs(cls) -> List[Dict[str, Any]]:
+        """Competition documents as stored (participants and counters included), most
+        recent first: the shape the web pages use."""
+        docs = [cls._clean_doc(d) for d in cls._list_comp_docs()]
+        docs.sort(key=lambda d: cls._comp_sort_key(d.get("date_competition"), d.get("id")), reverse=True)
+        return docs
+
+    @classmethod
+    def get_competition_doc(cls, competition_id: int) -> Optional[Dict[str, Any]]:
+        doc = cls._load_comp_doc(competition_id)
+        return cls._clean_doc(doc) if doc else None
+
+    @classmethod
+    def archive_past_competitions(cls, today_iso: str) -> List[int]:
+        """Closes every competition that ended before `today_iso` (YYYY-MM-DD); competitions
+        without a date are never past. Returns the ids archived."""
+        archived = []
+        for doc in cls._list_comp_docs():
+            end = str(doc.get("date_fin") or doc.get("date_competition") or "")
+            if doc.get("id") is None or not end or end >= today_iso:
+                continue
+            if (doc.get("statut") or "") == STATUT_CLOSE:
+                continue
+            if cls.set_competition_status(doc["id"], STATUT_CLOSE):
+                archived.append(doc["id"])
+        return archived
+
+    @classmethod
+    def save_competition(cls, comp: Competition, extra: Optional[Dict[str, Any]] = None) -> int:
+        """Insère ou met à jour une épreuve ; retourne son identifiant.
+
+        `extra`: fields outside the domain model, stored as given (pass-through fields
+        of the bureau page, see docs/plan_api_only_front.md appendix B)."""
         existing = cls._load_comp_doc(comp.id) if comp.id else None
         if comp.id is None:
             comp.id = cls._new_id()
         coaches = cls._coaches_map()
-        coach_names = [coaches[cid] for cid in (comp.coach1_id, comp.coach2_id, comp.coach3_id)
-                       if cid is not None and cid in coaches]
+        coach_names = cls._coach_names((comp.coach1_id, comp.coach2_id, comp.coach3_id), coaches)
         doc = cls._build_comp_doc(existing, comp, coach_names)
+        doc.update(extra or {})
         if existing and (existing.get("_doc_id") or str(comp.id)) == str(comp.id):
             # Épreuve existante : mise à jour partielle des seules informations de
             # l'épreuve. Le tableau des participants et ses compteurs ne sont pas
@@ -546,6 +622,12 @@ class CompetitionFirestoreRepository:
         }
 
     @classmethod
+    def _new_participant(cls, adherent_id: int, selectionne: bool) -> Dict[str, Any]:
+        """New participant row for a member, copied from the `adherents` directory."""
+        adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
+        return cls._new_participant_map(adh, selectionne)
+
+    @classmethod
     def _mutate_participants(cls, competition_id: int, mutate) -> Optional[Dict[str, Any]]:
         """Charge le document, applique `mutate(parts)`, réécrit le tableau.
 
@@ -557,7 +639,7 @@ class CompetitionFirestoreRepository:
         `mutate` ré-appliqué sur la version à jour (jusqu'à `_MAX_WRITE_ATTEMPTS`
         fois). `mutate` doit donc pouvoir être rejoué : il ne dépend que de la
         liste reçue. Le document renvoyé contient les participants écrits."""
-        for attempt in range(_MAX_WRITE_ATTEMPTS):
+        def attempt():
             doc = cls._load_comp_doc(competition_id)
             if not doc:
                 return None
@@ -565,37 +647,50 @@ class CompetitionFirestoreRepository:
             new_parts = mutate(parts)
             if new_parts is None:
                 return None
-            try:
-                cls._save_parts(doc, new_parts)
-            except FirestoreConflictError:
-                if attempt == _MAX_WRITE_ATTEMPTS - 1:
-                    raise
-                print(f"🔁 [FIRESTORE] Épreuve #{competition_id} modifiée entre-temps : "
-                      f"nouvelle tentative ({attempt + 2}/{_MAX_WRITE_ATTEMPTS})")
-                time.sleep(0.2 * (attempt + 1))
-                continue
+            cls._save_parts(doc, new_parts)
             doc["participants"] = new_parts
             return doc
-        return None
+        return cls._with_retries(f"Épreuve #{competition_id}", attempt)
+
+    @classmethod
+    def _update_participant(cls, competition_id: int, adherent_id: int, change,
+                            add_missing: Optional[bool] = None) -> Optional[Dict[str, Any]]:
+        """Applies `change(p)` to the member's participant row(s), stamping `updated_at`
+        first (`change` may override it). `change` returns False to leave a row as it was.
+
+        Member not listed: a new row is added with `selectionne=add_missing`, or nothing is
+        written when `add_missing` is None. Returns the written document, or None when
+        nothing was written (unknown competition, member not listed, nothing changed)."""
+        def mutate(parts):
+            found = changed = False
+            for p in parts:
+                if p.get("adherent_id") != adherent_id:
+                    continue
+                found = True
+                before = dict(p)
+                p["updated_at"] = cls._now_iso()
+                if change(p) is False:
+                    p.clear()
+                    p.update(before)
+                else:
+                    changed = True
+            if not found and add_missing is not None:
+                parts.append(cls._new_participant(adherent_id, add_missing))
+                changed = True
+            return parts if changed else None
+        return cls._mutate_participants(competition_id, mutate)
 
     @classmethod
     def add_participant(cls, competition_id: int, adherent_id: int,
                         selectionne: bool = True) -> int:
         """Ajoute un adhérent à une compétition (idempotent) ; retourne l'identifiant
         de la ligne participant (existante ou nouvelle)."""
-        def mutate(parts):
-            for p in parts:
-                if p.get("adherent_id") == adherent_id:
-                    if selectionne:
-                        p["selectionne"] = True
-                        if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
-                            p["statut_paiement"] = "paye"   # réactivation : l'argent est déjà là
-                        p["updated_at"] = cls._now_iso()
-                    return parts
-            adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
-            parts.append(cls._new_participant_map(adh, selectionne))
-            return parts
-        doc = cls._mutate_participants(competition_id, mutate)
+        def change(p):
+            if selectionne:
+                p["selectionne"] = True
+                if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                    p["statut_paiement"] = PAIEMENT_PAYE   # réactivation : l'argent est déjà là
+        doc = cls._update_participant(competition_id, adherent_id, change, add_missing=selectionne)
         if doc is None:
             return 0
         for p in doc.get("participants") or []:
@@ -611,33 +706,41 @@ class CompetitionFirestoreRepository:
         return cls._mutate_participants(competition_id, mutate) is not None
 
     @classmethod
-    def set_selection(cls, competition_id: int, adherent_id: int, selectionne: bool) -> bool:
-        def mutate(parts):
-            for p in parts:
-                if p.get("adherent_id") == adherent_id:
-                    p["selectionne"] = bool(selectionne)
-                    nouveau = statut_paiement_apres_bascule(p.get("statut_paiement"), selectionne)
-                    if nouveau:
-                        p["statut_paiement"] = nouveau
-                    p["updated_at"] = cls._now_iso()
-                    return parts
-            adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
-            parts.append(cls._new_participant_map(adh, selectionne))
-            return parts
-        cls._mutate_participants(competition_id, mutate)
+    def set_selection(cls, competition_id: int, adherent_id: int, selectionne: bool,
+                      refuse_unselect_paid: bool = False) -> bool:
+        """`refuse_unselect_paid`: raise ParticipantAlreadyPaid instead of unselecting a
+        participant who paid (checked on the fresh document, so a payment recorded
+        meanwhile by the webhook is seen)."""
+        def change(p):
+            if (refuse_unselect_paid and not selectionne
+                    and (p.get("statut_paiement") or "") == PAIEMENT_PAYE):
+                raise ParticipantAlreadyPaid(adherent_id)
+            p["selectionne"] = bool(selectionne)
+            nouveau = statut_paiement_apres_bascule(p.get("statut_paiement"), selectionne)
+            if nouveau:
+                p["statut_paiement"] = nouveau
+        cls._update_participant(competition_id, adherent_id, change, add_missing=selectionne)
         return True
 
     @classmethod
+    def set_present(cls, competition_id: int, adherent_id: int, present: bool) -> bool:
+        """Attendance flag (pass-through field of the bureau page, appendix B of the plan)."""
+        return cls._update_participant(competition_id, adherent_id,
+                                       lambda p: p.update(present=bool(present))) is not None
+
+    @classmethod
     def set_payment_status(cls, competition_id: int, adherent_id: int, statut_paiement: str) -> bool:
-        def mutate(parts):
-            changed = False
-            for p in parts:
-                if p.get("adherent_id") == adherent_id:
-                    p["statut_paiement"] = statut_paiement
-                    p["updated_at"] = cls._now_iso()
-                    changed = True
-            return parts if changed else None
-        return cls._mutate_participants(competition_id, mutate) is not None
+        return cls._update_participant(competition_id, adherent_id,
+                                       lambda p: p.update(statut_paiement=statut_paiement)) is not None
+
+    @classmethod
+    def record_manual_payment(cls, competition_id: int, adherent_id: int, montant: float) -> bool:
+        """Payment received outside HelloAsso (cheque, cash): the participant is selected and
+        paid. Returns False when the member is not listed on the competition."""
+        def change(p):
+            p.update(selectionne=True, statut_paiement=PAIEMENT_PAYE,
+                     montant_paye=float(montant), commande_helloasso=MANUAL_PAYMENT_REF)
+        return cls._update_participant(competition_id, adherent_id, change) is not None
 
     @classmethod
     def mark_cancelled(cls, competition_id: int, adherent_id: int,
@@ -651,39 +754,28 @@ class CompetitionFirestoreRepository:
         if statut_annulation not in PAIEMENT_STATUTS_ANNULES:
             statut_annulation = PAIEMENT_ANNULE_PERDU
 
-        def mutate(parts):
-            changed = False
-            for p in parts:
-                if p.get("adherent_id") == adherent_id:
-                    p["selectionne"] = False
-                    p["statut_paiement"] = statut_annulation
-                    if note:
-                        p["note_paiement"] = str(note)
-                    p["updated_at"] = cls._now_iso()
-                    changed = True
-            return parts if changed else None
-        return cls._mutate_participants(competition_id, mutate) is not None
+        def change(p):
+            p["selectionne"] = False
+            p["statut_paiement"] = statut_annulation
+            if note:
+                p["note_paiement"] = str(note)
+        return cls._update_participant(competition_id, adherent_id, change) is not None
 
     @classmethod
     def apply_helloasso_payment(cls, competition_id: int, adherent_id: int,
                                 montant_paye: float, date_synchro: str = "",
                                 order_ref: str = "") -> bool:
-        date_val = date_synchro or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        def mutate(parts):
-            changed = False
-            for p in parts:
-                if p.get("adherent_id") == adherent_id:
-                    if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
-                        # Annulation explicite du coach : la re-synchronisation
-                        # HelloAsso ne doit pas l'écraser.
-                        return parts if changed else None
-                    p["statut_paiement"] = "paye"
-                    p["montant_paye"] = float(montant_paye or 0.0)
-                    p["commande_helloasso"] = str(order_ref or "")
-                    p["updated_at"] = date_val
-                    changed = True
-            return parts if changed else None
-        return cls._mutate_participants(competition_id, mutate) is not None
+        date_val = date_synchro or cls._now_display()
+        def change(p):
+            if (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
+                # Annulation explicite du coach : la re-synchronisation
+                # HelloAsso ne doit pas l'écraser.
+                return False
+            p["statut_paiement"] = PAIEMENT_PAYE
+            p["montant_paye"] = float(montant_paye or 0.0)
+            p["commande_helloasso"] = str(order_ref or "")
+            p["updated_at"] = date_val
+        return cls._update_participant(competition_id, adherent_id, change) is not None
 
     @classmethod
     def load_competition_group_into(cls, competition_id: int) -> int:
@@ -720,11 +812,17 @@ class CompetitionFirestoreRepository:
         start = y if m >= 8 else y - 1
         return f"{start}-{start + 1}"
 
+    @staticmethod
+    def _bilan_student(p: Dict[str, Any], adherent: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """Identity of a member in the season report: participant row, else directory."""
+        a = adherent or {}
+        return {k: p.get(k) or a.get(k) or "" for k in ("nom", "prenom", "num_licence", "tarif")}
+
     @classmethod
     def get_bilan(cls, season: str = "") -> dict:
         docs = cls._list_comp_docs()
         comps = [cls._comp_from_doc(d) for d in docs]
-        comps.sort(key=lambda c: (c.date_competition or "", int(c.id or 0)))
+        comps.sort(key=lambda c: cls._comp_sort_key(c.date_competition, c.id))
         adh = cls._adherent_map()
         if season:
             comps = [c for c in comps if cls.season_of_date(c.date_competition) == season]
@@ -746,13 +844,7 @@ class CompetitionFirestoreRepository:
                     key = p.get("adherent_id")
                     if key is None:
                         continue
-                    a = adh.get(key) or {}
-                    students.setdefault(key, {
-                        "nom": p.get("nom") or a.get("nom") or "",
-                        "prenom": p.get("prenom") or a.get("prenom") or "",
-                        "num_licence": p.get("num_licence") or a.get("num_licence") or "",
-                        "tarif": p.get("tarif") or a.get("tarif") or "",
-                    })
+                    students.setdefault(key, cls._bilan_student(p, adh.get(key)))
                     payments_map[(key, c.id)] = {"montant_paye": montant, "prix": 0.0}
                     continue
 
@@ -765,13 +857,7 @@ class CompetitionFirestoreRepository:
                 key = p.get("adherent_id")
                 if key is None:
                     continue
-                a = adh.get(key) or {}
-                students.setdefault(key, {
-                    "nom": p.get("nom") or a.get("nom") or "",
-                    "prenom": p.get("prenom") or a.get("prenom") or "",
-                    "num_licence": p.get("num_licence") or a.get("num_licence") or "",
-                    "tarif": p.get("tarif") or a.get("tarif") or "",
-                })
+                students.setdefault(key, cls._bilan_student(p, adh.get(key)))
                 participants_map[(key, c.id)] = statut
                 payments_map[(key, c.id)] = {
                     "montant_paye": montant,
@@ -806,6 +892,17 @@ class CompetitionFirestoreRepository:
     # ------------------------------------------------------------------
     # Miroir HelloAsso (documents avec rattachement embarqué)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _link_fields(competition_id, adherent_id, source, now: str) -> Dict[str, Any]:
+        """Fields of an item's link to a participant (None everywhere: no link)."""
+        return {"competition_id": competition_id, "adherent_id": adherent_id,
+                "source": source, "link_updated_at": now}
+
+    @staticmethod
+    def _is_paid_item(item: Dict[str, Any]) -> bool:
+        from domain.competition_matching import STATUTS_PAYES
+        return str(item.get("etat") or "").lower() in {str(s).lower() for s in STATUTS_PAYES}
+
     @classmethod
     def _items_map(cls) -> Dict[int, Dict[str, Any]]:
         """{id_item: document miroir} — une seule lecture de la collection."""
@@ -824,7 +921,7 @@ class CompetitionFirestoreRepository:
         """Upsert du miroir : ce que dit HelloAsso remplace la copie, en préservant
         le commentaire et le rattachement (liens) de chaque article."""
         existing = cls._items_map()
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = cls._now_display()
         writes = []
         written = 0
         # Champs appartenant à HelloAsso : pour un article déjà connu, seuls eux
@@ -889,24 +986,68 @@ class CompetitionFirestoreRepository:
     @classmethod
     def set_item_link(cls, id_item: int, competition_id, adherent_id,
                       source: str = "manuel") -> bool:
-        FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), {
-            "competition_id": competition_id,
-            "adherent_id": adherent_id,
-            "source": source,
-            "link_updated_at": cls._now_iso(),
-        })
+        FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item),
+                                      cls._link_fields(competition_id, adherent_id, source,
+                                                       cls._now_iso()))
         return True
+
+    @classmethod
+    def save_manual_link(cls, id_item: int, competition_id: Optional[int],
+                         adherent_id: Optional[int], commentaire: str = "") -> bool:
+        """Link chosen by a coach (one write). A partial choice (competition or member only)
+        is stored without a source; choosing both marks the link `manuel`, which the
+        automatic matching never overwrites. Also lifts an `ignore` flag."""
+        linked = competition_id is not None and adherent_id is not None
+        now = cls._now_iso()
+        patch = cls._link_fields(competition_id, adherent_id, "manuel" if linked else None, now)
+        patch.update({"commentaire": str(commentaire or ""), "ignore": False, "updated_at": now})
+        FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), patch)
+        return True
+
+    @classmethod
+    def set_item_ignored(cls, id_item: int, ignore: bool, motif: str = "",
+                         commentaire: str = "", by: str = "") -> bool:
+        """Ignores (test, purchase unrelated to a competition…) or restores a HelloAsso item.
+
+        Written with a precondition on the version read: an item linked meanwhile (webhook,
+        another coach) raises ItemAlreadyLinked instead of being ignored. Returns False when
+        the item does not exist."""
+        def attempt():
+            doc = FirestoreClient.get_document(cls.COLLECTION_ITEMS, str(id_item))
+            if doc is None:
+                return False
+            now = cls._now_iso()
+            if ignore:
+                if doc.get("competition_id") is not None and doc.get("adherent_id") is not None:
+                    raise ItemAlreadyLinked(id_item)
+                patch = cls._link_fields(None, None, None, now)
+                patch.update({"ignore": True, "ignore_motif": str(motif or ""),
+                              "commentaire": str(commentaire or motif or ""),
+                              "ignored_at": now, "ignored_by": str(by or ""), "updated_at": now})
+            else:
+                patch = {"ignore": False, "ignore_motif": "", "ignored_at": None,
+                         "ignored_by": None, "commentaire": str(commentaire or ""),
+                         "updated_at": now}
+            FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), patch,
+                                          expected_update_time=doc.get("_update_time"))
+            return True
+        return bool(cls._with_retries(f"Article HelloAsso #{id_item}", attempt))
+
+    @classmethod
+    def list_item_docs(cls) -> List[Dict[str, Any]]:
+        """HelloAsso mirror documents as stored (links, comments and ignore flags included),
+        most recent first: the shape the web pages use."""
+        docs = [cls._clean_doc(d) for d in cls._items_map().values()]
+        docs.sort(key=lambda d: (str(d.get("date_item") or ""), int(d.get("id_item") or 0)),
+                  reverse=True)
+        return docs
 
     @classmethod
     def clear_item_link(cls, id_item: int) -> bool:
         """Efface le rattachement d'un article (choix « Ignorer »)."""
         try:
-            FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item), {
-                "competition_id": None,
-                "adherent_id": None,
-                "source": None,
-                "link_updated_at": cls._now_iso(),
-            })
+            FirestoreClient.update_fields(cls.COLLECTION_ITEMS, str(id_item),
+                                          cls._link_fields(None, None, None, cls._now_iso()))
             return True
         except FirestoreError:
             return False
@@ -916,36 +1057,25 @@ class CompetitionFirestoreRepository:
         """Remplace tous les liens 'auto' par le calcul courant ; les liens
         'manuel' sont intacts. `links` : retour de auto_link_items()."""
         items = cls._items_map()
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = cls._now_display()
         writes = []
         for iid, doc in items.items():
             source = doc.get("source")
             if str(source or "") == "manuel" or doc.get("ignore") is True:
                 continue
-            new = dict(doc)
             link = (links or {}).get(iid)
-            if link is not None:
-                new["competition_id"] = link.get("competition_id")
-                new["adherent_id"] = link.get("adherent_id")
-                new["source"] = "auto"
-            else:
-                new["competition_id"] = None
-                new["adherent_id"] = None
-                new["source"] = None
-            new["link_updated_at"] = now
-            if new != doc:
-                link_fields = ["competition_id", "adherent_id", "source", "link_updated_at"]
+            fields = (cls._link_fields(link.get("competition_id"), link.get("adherent_id"), "auto", now)
+                      if link is not None else cls._link_fields(None, None, None, now))
+            if any(doc.get(k) != v for k, v in fields.items()):
                 writes.append({"path": f"{cls.COLLECTION_ITEMS}/{iid}",
-                               "data": {k: new[k] for k in link_fields},
-                               "update_fields": link_fields})
+                               "data": fields, "update_fields": list(fields)})
         if writes:
             FirestoreClient.batch_upsert(writes)
         return len(writes)
 
     @classmethod
     def get_item(cls, id_item: int) -> Optional[Dict[str, Any]]:
-        doc = FirestoreClient.get_document(cls.COLLECTION_ITEMS, str(id_item))
-        return doc
+        return FirestoreClient.get_document(cls.COLLECTION_ITEMS, str(id_item))
 
     @classmethod
     def save_item_comment(cls, id_item: int, comment: str) -> bool:
@@ -1003,12 +1133,10 @@ class CompetitionFirestoreRepository:
 
     @classmethod
     def list_unlinked_items(cls) -> list:
-        from domain.competition_matching import STATUTS_PAYES
-        paid = {str(s).lower() for s in STATUTS_PAYES}
         adh = {a["id"]: a for a in cls.list_adherents()}
         result = []
         for it in cls.list_mirror_items():
-            if str(it.get("etat") or "").lower() not in paid:
+            if not cls._is_paid_item(it):
                 continue
             if it.get("competition_id") is not None and it.get("adherent_id") is not None:
                 continue
@@ -1051,11 +1179,9 @@ class CompetitionFirestoreRepository:
     def apply_links_to_participants(cls) -> int:
         """Reporte les liens valides sur les participants (groupé par épreuve :
         une lecture + une écriture Firestore par compétition concernée)."""
-        from domain.competition_matching import STATUTS_PAYES
-        paid = {str(s).lower() for s in STATUTS_PAYES}
         groupes: Dict[tuple, Dict[str, Any]] = {}
         for it in cls._items_map().values():
-            if str(it.get("etat") or "").lower() not in paid:
+            if not cls._is_paid_item(it):
                 continue
             comp_id = it.get("competition_id")
             adherent_id = it.get("adherent_id")
@@ -1072,7 +1198,7 @@ class CompetitionFirestoreRepository:
         for (comp_id, adherent_id) in groupes:
             by_comp.setdefault(comp_id, []).append(adherent_id)
 
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = cls._now_display()
         applied = 0
         for comp_id, adherent_ids in by_comp.items():
             done = {"count": 0}
@@ -1084,16 +1210,14 @@ class CompetitionFirestoreRepository:
                     g = groupes[(comp_id, adherent_id)]
                     p = index.get(adherent_id)
                     if p is None:
-                        adh = cls._adherent_map().get(adherent_id) or {"id": adherent_id}
-                        p = cls._new_participant_map(adh, True)
-                        p["updated_at"] = now
+                        p = cls._new_participant(adherent_id, True)
                         parts.append(p)
                         index[adherent_id] = p
                     elif (p.get("statut_paiement") or "") in PAIEMENT_STATUTS_ANNULES:
                         continue
                     else:
                         p["selectionne"] = True
-                    p["statut_paiement"] = "paye"
+                    p["statut_paiement"] = PAIEMENT_PAYE
                     p["montant_paye"] = round(g["montant"], 2)
                     p["commande_helloasso"] = ", ".join(g["orders"])
                     p["updated_at"] = now
@@ -1117,24 +1241,22 @@ class CompetitionFirestoreRepository:
     @classmethod
     def list_coaches(cls) -> list:
         docs = FirestoreClient.list_documents(cls.COLLECTION_COACHES)
-        result = [{"id": d.get("id"), "nom": str(d.get("nom") or "")} for d in docs
-                  if d.get("id") is not None]
+        result = [cls._coach_dict(d) for d in docs if d.get("id") is not None]
         result.sort(key=lambda c: (c["nom"] or "").lower())
         return result
+
+    @staticmethod
+    def _coach_dict(doc: Dict[str, Any]) -> dict:
+        return {"id": doc.get("id"), "nom": str(doc.get("nom") or "")}
 
     @classmethod
     def get_coach(cls, coach_id: int) -> Optional[dict]:
         doc = FirestoreClient.get_document(cls.COLLECTION_COACHES, str(coach_id))
-        if not doc:
-            return None
-        return {"id": doc.get("id"), "nom": str(doc.get("nom") or "")}
+        return cls._coach_dict(doc) if doc else None
 
     @classmethod
     def save_coach(cls, nom: str, coach_id: int = None) -> int:
-        if coach_id:
-            ret_id = coach_id
-        else:
-            ret_id = cls._new_id()
+        ret_id = coach_id or cls._new_id()
         FirestoreClient.upsert_document(cls.COLLECTION_COACHES, str(ret_id),
                                         {"id": ret_id, "nom": nom, "updated_at": cls._now_iso()})
         if coach_id:
@@ -1144,42 +1266,35 @@ class CompetitionFirestoreRepository:
     @classmethod
     def delete_coach(cls, coach_id: int) -> bool:
         existed = FirestoreClient.delete_document(cls.COLLECTION_COACHES, str(coach_id))
-        for doc in cls._list_comp_docs():
-            if coach_id not in (doc.get("coach_ids") or []):
-                continue
-            new_ids = [cid for cid in doc.get("coach_ids") or [] if cid != coach_id]
-            coaches = cls._coaches_map()
-            patch = {
-                "coach_ids": new_ids,
-                "coach1_id": new_ids[0] if len(new_ids) > 0 else None,
-                "coach2_id": new_ids[1] if len(new_ids) > 1 else None,
-                "coach3_id": new_ids[2] if len(new_ids) > 2 else None,
-                "coaches": [coaches[cid] for cid in new_ids if cid in coaches],
-                "updated_at": cls._now_iso(),
-            }
-            try:
-                FirestoreClient.update_fields(cls.COLLECTION_COMPETITIONS,
-                                              str(doc.get("id")), patch)
-            except FirestoreError as e:
-                print(f"⚠️ [FIRESTORE] Retrait du coach #{coach_id} sur l'épreuve "
-                      f"#{doc.get('id')} impossible : {e}")
+        coaches = cls._coaches_map()
+
+        def patch(ids):
+            new_ids = [cid for cid in ids if cid != coach_id]
+            return {"coach_ids": new_ids, **cls._coach_slots(new_ids),
+                    "coaches": cls._coach_names(new_ids, coaches)}
+        cls._patch_competitions_of_coach(coach_id, patch, "Retrait du coach")
         return existed
 
     @classmethod
     def _refresh_coach_names(cls, coach_id: int, nom: str):
+        coaches = {**cls._coaches_map(), coach_id: nom}
+        cls._patch_competitions_of_coach(
+            coach_id, lambda ids: {"coaches": cls._coach_names(ids, coaches)},
+            "Mise à jour du nom du coach")
+
+    @classmethod
+    def _patch_competitions_of_coach(cls, coach_id: int, make_patch, what: str):
+        """Applies `make_patch(coach_ids)` to every competition of the coach. One write per
+        competition, no rollback: a failure is logged and the others still go through (A10)."""
         for doc in cls._list_comp_docs():
             ids = doc.get("coach_ids") or []
             if coach_id not in ids:
                 continue
-            coaches = cls._coaches_map()
-            coaches[coach_id] = nom
-            patch = {"coaches": [coaches[cid] for cid in ids if cid in coaches],
-                     "updated_at": cls._now_iso()}
             try:
-                FirestoreClient.update_fields(cls.COLLECTION_COMPETITIONS,
-                                              str(doc.get("id")), patch)
+                FirestoreClient.update_fields(cls.COLLECTION_COMPETITIONS, str(doc.get("id")),
+                                              {**make_patch(ids), "updated_at": cls._now_iso()})
             except FirestoreError as e:
-                print(f"⚠️ [FIRESTORE] Mise à jour du nom du coach sur l'épreuve "
+                print(f"⚠️ [FIRESTORE] {what} #{coach_id} sur l'épreuve "
                       f"#{doc.get('id')} impossible : {e}")
 
     @classmethod

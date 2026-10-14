@@ -50,12 +50,25 @@ from infrastructure.cloud_database import CloudDatabase
 from starlette.concurrency import run_in_threadpool
 
 
+# Routes that only read/write Firestore collections (competitions, coaches, projections,
+# HelloAsso mirror) through CompetitionFirestoreRepository: they never touch the SQLite
+# cache, so they must not wait for its refresh (a full rebuild after a cold start).
+FIRESTORE_ONLY_PREFIXES = ("/api/competitions", "/api/coaches", "/api/competition-members",
+                           "/api/helloasso/items")
+
+
+def uses_sqlite_cache(path: str) -> bool:
+    """True for the data routes served from the SQLite cache of the crm_* collections."""
+    if any(path == p or path.startswith(p + "/") for p in FIRESTORE_ONLY_PREFIXES):
+        return False
+    return path.startswith("/api/") or path in ("/map", "/pivot")
+
+
 async def cloud_db_middleware(request, call_next):
     """Base principale dans Firestore : le cache SQLite du serveur est mis à jour
     avant les routes de données, et les écritures sont envoyées juste après.
     Enregistré avant le contrôle d'accès : il ne s'exécute qu'après lui."""
-    path = request.url.path
-    relevant = path.startswith("/api/") or path in ("/map", "/pivot")
+    relevant = uses_sqlite_cache(request.url.path)
     # Cloud Run, or local dev on the emulator: the cache follows Firestore as in production
     server_mode = os.environ.get("K_SERVICE") or runtime_env.is_dev()
     if relevant and server_mode and CloudDatabase.is_enabled():
@@ -85,6 +98,16 @@ async def security_headers_middleware(request, call_next):
 
 
 app.middleware("http")(security_headers_middleware)  # outermost
+
+# Data routes of the web front end (competitions, coaches, HelloAsso links, members): src/api/
+from api import (coaches, competition_members, competitions, helloasso_items, members,
+                 participants, seasons)
+from api.responses import service_error_handler
+from services.errors import ServiceError
+for _api in (competitions, participants, coaches, competition_members, helloasso_items,
+             members, seasons):
+    app.include_router(_api.router)
+app.add_exception_handler(ServiceError, service_error_handler)
 
 GENERIC_ERROR = "Erreur interne du serveur (détails dans les journaux)."
 
@@ -1455,8 +1478,11 @@ async def api_cron_fetch_competition_results(
     Conçu pour être appelé par Google Cloud Scheduler (ex: tous les jours à 07h00) ou manuellement.
     """
     from infrastructure.competition_results_batch_service import CompetitionResultsBatchService
-    res = await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
-    return res
+    from services.competition_store import invalidate_cache
+    try:
+        return await run_in_threadpool(CompetitionResultsBatchService.run_daily_batch, force=force, to_email=email)
+    finally:
+        invalidate_cache()  # the batch writes competition documents directly
 
 
 @app.post("/api/competitions/{comp_id}/fetch-results")
@@ -1547,6 +1573,9 @@ async def api_fetch_competition_results(comp_id: str, payload: Dict[str, Any] = 
             })
         except Exception as e:
             print(f"⚠️ [MYCOMPET] Erreur mise à jour Firestore : {e}")
+        finally:
+            from services.competition_store import invalidate_cache
+            invalidate_cache()  # results visible on the next poll of the competition pages
 
     # Sauvegarde miroir dans la base SQLite locale si disponible
     try:

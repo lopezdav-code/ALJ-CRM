@@ -34,16 +34,17 @@ Les collections `adherents` et `planning` (annuaire lu par la PWA et le webhook)
 
 ## Annuaire web (`web/index.html`, URL `/index`)
 
-- Lit directement les collections `crm_seasons`, `crm_users`, `crm_orders`,
-  `crm_purchases` et `crm_planning` et reconstruit la vue `v_adherents_legacy`
-  (purchases ⨝ users ⨝ orders ⨝ seasons) dans le navigateur.
-- Réservé aux coachs/admins (règle `crm_*`). Connexion Google commune avec
+- Lit `GET /api/seasons` et `GET /api/members?season=` (une saison à la fois). La liste
+  est calculée sur le serveur (`domain/member_view.py`) depuis son cache SQLite des
+  collections `crm_*` ; le navigateur ne lit plus Firestore.
+- Réservé aux coachs/admins (rôle vérifié par l'API). Connexion Google commune avec
   `/competitions` : le bouton « Se connecter » passe par `/competitions?login=1`
   (URI de redirection OAuth déjà autorisée) puis revient sur l'annuaire
   (`sessionStorage.alj_after_login`).
-- Lecture incrémentale : 1er chargement complet (mis en cache hors-ligne par le SDK),
-  ensuite seuls les documents dont `_modified_at` ≥ dernier vu − 5 min sont relus.
-  Le bouton 🔄 force une relecture complète.
+- Actualisation toutes les 20 s quand la page est visible (`alj-members-sync.js`,
+  ETag/304) ; le bouton 🔄 recharge immédiatement. Pas de copie hors ligne : l'annuaire
+  nécessite le réseau. L'ancienne copie hors ligne du SDK Firestore (IndexedDB) est
+  effacée au démarrage par `alj-firebase.js`.
 - Même numéro de version que `competitions.html` (meta `alj-web-version`, titre,
   badge, `CACHE_NAME` de `sw.js`).
 
@@ -83,5 +84,7 @@ bascule n'y figurent pas).
 
 ## Droits (firestore.rules)
 
-`crm_*` : lecture coachs (état civil, contacts d'urgence et santé compris), écriture
-admins. L'application de bureau et Cloud Run passent par IAM.
+Aucun accès client (`allow read, write: if false` sur tous les documents) : les pages
+web passent par l'API, qui vérifie les rôles (`api_auth.py`). L'application de bureau
+(jeton OAuth du club) et Cloud Run (compte de service) passent par IAM, auquel les
+règles ne s'appliquent pas. Ordre de déploiement : README, section Cloud Run.

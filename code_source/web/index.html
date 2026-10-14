@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : identique à celle de competitions.html et à CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Annuaire des adhérents (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Annuaire des adhérents (v23)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,9 +15,10 @@
 <script src="/static-web/alj-vue.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
+<script src="/static-web/alj-sync.js"></script>
+<script src="/static-web/alj-members-sync.js"></script>
 <style>
   /* Charte identique à competitions.html */
   :root {
@@ -139,11 +140,11 @@
 
 <header>
   <div class="title">
-    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v22</span></b>
+    <b>🧗 ALJ Escalade — Annuaire <span class="web-version" id="web-version">v23</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="comps-link" href="/competitions" title="Gestion des compétitions">🏆</a>
-  <button class="icon-btn" id="refresh-btn" title="Recharger depuis Firestore">🔄</button>
+  <button class="icon-btn" id="refresh-btn" title="Recharger l'annuaire">🔄</button>
   <button class="icon-btn" id="config-btn" title="Compte">⚙️</button>
 </header>
 
@@ -153,9 +154,9 @@
     <div class="card setup-box">
       <h2>🔐 Connexion</h2>
       <p>L'annuaire des adhérents est réservé aux coachs et gestionnaires du club. Les données
-         sont lues en <b>temps réel</b> dans la base du club (Google Cloud Firestore) : toute
-         modification faite dans l'application de bureau apparaît ici automatiquement.
-         Cette page est en <b>lecture seule</b>.</p>
+         sont lues dans la base du club et actualisées automatiquement (environ toutes les
+         20 secondes) : toute modification faite dans l'application de bureau apparaît ici.
+         Cette page est en <b>lecture seule</b> et nécessite une connexion internet.</p>
       <div id="setup-not-logged">
         <div class="btn-row">
           <button class="btn btn-primary" id="login-btn" style="flex:2">🔑 Se connecter avec Google</button>
@@ -232,23 +233,18 @@
 <script>
 "use strict";
 
-/* ===================== Firebase (Auth + Firestore) ===================== */
-// Project configuration and emulator (dev): /static-web/alj-firebase.js
-const { auth, db: fsdb } = ALJFirebase.init();
+/* ===================== Firebase (sign-in) ===================== */
+// Project configuration and emulator (dev): /static-web/alj-firebase.js. Firebase only signs
+// the user in (ID token); the data comes from the API.
+const { auth } = ALJFirebase.init();
 
-/* Base principale des adhérents (ex-database.db) : collections crm_<table>.
-   L'annuaire reconstruit la vue v_adherents_legacy :
-   purchases ⨝ users ⨝ orders ⨝ seasons (+ planning pour les créneaux). */
-const CRM = ["crm_seasons", "crm_users", "crm_orders", "crm_purchases", "crm_planning"];
+/* Member list from the API (/api/members, one season), computed on the server.
+   Online only: no offline copy of member data (plan D2). */
 const FILTER_KEY = "alj_annuaire_filters";
 
 let user = null;
 let userClaims = {};
-let listeners = [];
-let raw = {};          // { collection: Map(docId -> data) }
-let ready = new Set(); // collections reçues au moins une fois
-let lastSyncAt = null;
-let renderTimer = null;
+let membersSync = null;
 
 let DATA = { members: [], creneaux: [], seasons: [], activeSeason: "", itemsCache: [], filterCache: null };
 let filters = Object.assign({ status: "", season: "", groups: {}, others: {}, search: "" },
@@ -285,7 +281,7 @@ function isSetupPageActive() {
   return !a || a.id === "page-setup";
 }
 
-/* ===================== Rôles (mêmes listes que competitions.html / firestore.rules) ===================== */
+/* ===================== Rôles (display only; same lists as competitions.html and api_auth.py) ===================== */
 const COACH_EMAILS = [
   "lopez.dav@gmail.com",
   "stephane.loridant@orange.fr"
@@ -344,13 +340,13 @@ auth.onAuthStateChanged(async u => {
     applyRole();
     if (isCoachUser()) {
       if (isSetupPageActive()) showPage("members");
-      startListeners(false);
+      startSync();
     } else {
-      stopListeners();
+      stopSync();
       setSyncInfo("⛔ Accès réservé aux coachs");
     }
   } else {
-    stopListeners();
+    stopSync();
     $("#setup-not-logged").style.display = "block";
     $("#setup-logged").style.display = "none";
     applyRole();
@@ -359,160 +355,60 @@ auth.onAuthStateChanged(async u => {
   }
 });
 
-/* ===================== Lecture Firestore (incrémentale) ===================== */
-/* Au premier chargement, chaque collection est lue en entier puis conservée dans
-   le cache hors-ligne de Firestore. Aux chargements suivants, seules les fiches
-   modifiées depuis (champ _modified_at) sont relues : peu de lectures facturées.
-   Le bouton 🔄 force une relecture complète. */
-function stopListeners() {
-  listeners.forEach(unsub => { try { unsub(); } catch (e) {} });
-  listeners = [];
+/* ===================== Chargement depuis l'API ===================== */
+/* Authenticated call to the server API (Firebase ID token). */
+async function apiFetch(url, opts = {}) {
+  const send = async (forceRefresh) => {
+    const headers = Object.assign({}, opts.headers || {});
+    if (user) headers["Authorization"] = "Bearer " + await user.getIdToken(forceRefresh);
+    return fetch(url, Object.assign({}, opts, { headers }));
+  };
+  let res = await send(false);
+  if (res.status === 401 && user) res = await send(true);
+  return res;
 }
-function tsMillis(v) {
-  if (!v) return 0;
-  if (typeof v.toMillis === "function") return v.toMillis();
-  const t = Date.parse(v); return isNaN(t) ? 0 : t;
+function startSync() {
+  stopSync();
+  setSyncInfo("Chargement de la base…");
+  membersSync = ALJMembersSync.start({
+    fetch: apiFetch,
+    season: currentSeason,
+    onData: data => {
+      rebuild(data);
+      setSyncInfo("☁️ À jour — " + fmtDate(new Date().toISOString()));
+      $("#refresh-btn").classList.remove("spin");
+    },
+    onStatus: onSyncStatus
+  });
 }
-async function startListeners(full) {
-  stopListeners();
-  raw = {}; ready = new Set();
-  setSyncInfo(full ? "Relecture complète de la base…" : "Chargement de la base…");
-  for (const name of CRM) {
-    const col = fsdb.collection(name);
-    const map = new Map();
-    raw[name] = map;
-    let watermark = 0;
-    if (!full) {
-      try {
-        const cached = await col.get({ source: "cache" });
-        cached.forEach(d => { const x = d.data(); map.set(d.id, x); watermark = Math.max(watermark, tsMillis(x._modified_at)); });
-      } catch (e) { /* pas de cache */ }
-    }
-    let query = col;
-    if (watermark > 0) {
-      // marge de 5 min pour les horloges / écritures en cours
-      query = col.where("_modified_at", ">=", firebase.firestore.Timestamp.fromMillis(watermark - 300000));
-    }
-    listeners.push(query.onSnapshot(
-      snap => {
-        snap.docChanges().forEach(ch => {
-          if (ch.type === "removed" && watermark === 0) map.delete(ch.doc.id);
-          else if (ch.type !== "removed") map.set(ch.doc.id, ch.doc.data());
-        });
-        onSnapshotArrived(name, snap.metadata.fromCache);
-      },
-      err => onSnapshotError(name, err)));
-  }
+function stopSync() {
+  if (membersSync) membersSync.stop();
+  membersSync = null;
 }
-function onSnapshotArrived(name, fromCache) {
-  ready.add(name);
-  if (!fromCache) lastSyncAt = new Date();
-  if (ready.size < CRM.length) { setSyncInfo(`Chargement de la base… (${ready.size}/${CRM.length})`); return; }
-  clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => {
-    rebuild();
-    setSyncInfo("☁️ Firestore temps réel — maj " + fmtDate((lastSyncAt || new Date()).toISOString()));
-    $("#refresh-btn").classList.remove("spin");
-  }, 150);
-}
-function onSnapshotError(name, err) {
-  console.error("Firestore " + name + " :", err);
+function onSyncStatus(status, info) {
   $("#refresh-btn").classList.remove("spin");
-  if (err.code === "permission-denied") {
+  if (status === "offline") {
+    setSyncInfo("📴 Hors ligne : l'annuaire nécessite une connexion");
+  } else if (info && info.status === 401) {
+    stopSync();
+  } else if (info && info.status === 403) {
     setSyncInfo("🔒 Accès refusé à la base des adhérents");
     $("#count-line").textContent = "Accès refusé : l'annuaire est réservé aux coachs.";
-  } else {
-    setSyncInfo("⚠️ Erreur Firestore : " + (err.code || ""));
-    toast("❌ Firestore : " + (err.message || err), 9000);
+  } else if (status !== "ok") {
+    console.error("API adhérents :", info);
+    setSyncInfo("⚠️ Chargement impossible — nouvel essai automatique");
   }
 }
 
-/* ===================== Reconstruction de la vue adhérents ===================== */
-const STATUS_MAP = {
-  "processed": "Traité", "validated": "Validé", "validé": "Validé", "valide": "Validé",
-  "terminé": "Terminé", "termine": "Terminé", "annulé": "Annulé", "annule": "Annulé",
-  "canceled": "Annulé", "en cours": "En cours",
-};
+/* ===================== Statuts ===================== */
 const STATUS_COLORS = { "Validé": "#16A34A", "Traité": "#2563EB", "Terminé": "#8B5CF6", "En cours": "#D97706", "Annulé": "#DC2626" };
-function normalizeStatus(s) {
-  const r = String(s || "").trim();
-  return STATUS_MAP[r.toLowerCase()] || r;
-}
-function normalizeGender(val) {
-  const s = String(val || "").trim().toLowerCase();
-  if (s === "f" || s === "femme" || s === "féminin" || s === "feminin") return "Femme";
-  if (s === "h" || s === "m" || s === "homme" || s === "masculin") return "Homme";
-  return String(val || "").trim();
-}
-function alive(map) {
-  const out = [];
-  for (const [id, d] of map) if (d && d._deleted !== true) out.push(Object.assign({ _id: id }, d));
-  return out;
-}
-function byId(list) {
-  const o = {};
-  for (const d of list) o[String(d.id != null ? d.id : d._id)] = d;
-  return o;
-}
 
-function buildData() {
-  const seasons = alive(raw.crm_seasons);
-  const seasonById = byId(seasons);
-  const users = byId(alive(raw.crm_users));
-  const orders = byId(alive(raw.crm_orders));
-  const members = [];
-  for (const p of alive(raw.crm_purchases)) {
-    const u = users[String(p.user_id)], o = orders[String(p.order_id)];
-    if (!u || !o) continue;
-    const s = seasonById[String(o.season_id)];
-    if (!s) continue;
-    members.push({
-      user_id: u.id, last_name: u.last_name || "", first_name: u.first_name || "",
-      birth_date: u.birth_date || "", gender: normalizeGender(u.gender), address: u.address || "",
-      zip_code: u.zip_code || "", city: u.city || "", phone: u.phone || "",
-      email_primary: u.email_primary || "", email_secondary: u.email_secondary || "",
-      emergency1_name: u.emergency1_name || "", emergency1_phone: u.emergency1_phone || "",
-      emergency2_name: u.emergency2_name || "", emergency2_phone: u.emergency2_phone || "",
-      licence_ffme: u.licence_ffme || "", health_commitment: u.health_commitment || "",
-      photo_auth: u.photo_auth || "", badge_rouge: u.badge_rouge || "", autonomie_bloc: u.autonomie_bloc || "",
-      payer: [o.payer_first_name, o.payer_last_name].filter(Boolean).join(" "), payer_email: o.payer_email || "",
-      order_ref: o.order_ref || "", order_date: o.order_date || "",
-      tarif_name: p.tarif_name || "", amount: p.amount, status: p.status || "",
-      status_norm: normalizeStatus(p.status), document_sante: p.document_sante || "",
-      season_name: s.name || "",
-    });
-  }
-  const coll = new Intl.Collator("fr", { sensitivity: "base" });
-  members.sort((a, b) => coll.compare(a.last_name, b.last_name) || coll.compare(a.first_name, b.first_name));
-
-  const seasonNames = seasons.map(s => s.name).filter(Boolean).sort().reverse();
-  const act = seasons.find(s => String(s.is_active) === "1" || s.is_active === true);
-  const activeSeason = act ? act.name : (seasonNames[0] || "");
-
-  // Un groupe de créneau peut regrouper plusieurs tarifs HelloAsso
-  const creneaux = [], byName = {};
-  const planning = alive(raw.crm_planning).sort((a, b) => Number(a.id) - Number(b.id));
-  for (const item of planning) {
-    const g = String(item.groupe || "").trim();
-    if (!g) continue;
-    let c = byName[g];
-    if (!c) { c = { groupe: g, tarifs: [] }; byName[g] = c; creneaux.push(c); }
-    let tarifs = [];
-    try { tarifs = JSON.parse(item.helloasso_tarifs || "[]"); } catch (e) { tarifs = []; }
-    for (const t of tarifs) {
-      const ts = String(t || "").trim();
-      if (ts && !c.tarifs.includes(ts)) c.tarifs.push(ts);
-    }
-  }
-  creneaux.sort((a, b) => a.groupe.localeCompare(b.groupe, "fr"));
-  return { members, seasons: seasonNames, activeSeason, creneaux };
-}
-
-function rebuild() {
-  const built = buildData();
-  DATA = Object.assign(DATA, built);
+function rebuild(data) {
+  DATA = Object.assign(DATA, {
+    members: data.members, creneaux: data.creneaux, seasons: data.seasons, activeSeason: data.activeSeason
+  });
   DATA.itemsCache = buildCreneauItems(DATA.creneaux);
-  if (!DATA.seasons.includes(currentSeason)) currentSeason = DATA.activeSeason || DATA.seasons[0] || "";
+  currentSeason = data.season;
   computeFilterCache();
   for (const it of DATA.itemsCache)
     if (it.kind === "group" && filters.groups[it.raw] === undefined)
@@ -788,7 +684,7 @@ function wireEvents() {
   $("#refresh-btn").addEventListener("click", () => {
     if (!isCoachUser()) { showPage("setup"); return; }
     $("#refresh-btn").classList.add("spin");
-    startListeners(true);
+    if (membersSync) membersSync.refresh(); else startSync();
   });
   $("#config-btn").addEventListener("click", () => showPage("setup"));
   $("#login-btn").addEventListener("click", login);
@@ -797,6 +693,7 @@ function wireEvents() {
   $("#urgency-search").addEventListener("input", renderUrgency);
   $("#season-select").addEventListener("change", e => {
     currentSeason = e.target.value; saveFilters();
+    if (membersSync) membersSync.setSeason(currentSeason);  // the API sends one season at a time
     computeFilterCache(); renderFilters(); applyFilters(); renderUrgency();
   });
   $("#cren-all").addEventListener("click", () => setAllCreneaux(true));
@@ -844,8 +741,6 @@ async function forceWebUpdate() {
   checkWebVersion();
   wireEvents();
   $("#search").value = filters.search || "";
-  try { await fsdb.enablePersistence({ synchronizeTabs: true }); }
-  catch (e) { console.warn("Persistance Firestore indisponible :", e); }
 })();
 </script>
 </body>

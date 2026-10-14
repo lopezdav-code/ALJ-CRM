@@ -4,25 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Bureau · Adhérents (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Bureau · Adhérents (v23)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
+<script src="/static-web/alj-sync.js"></script>
+<script src="/static-web/alj-members-sync.js"></script>
 </head>
 <body>
 <div id="shell"></div>
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { initFirebase, apiFetch, fmtDay } from "/static-web/alj-core.js";
+import { apiFetch, fmtDay } from "/static-web/alj-core.js";
 import {
-  startMembersListener,
   normKey,
   fmtDate,
   telHref,
@@ -1209,9 +1209,7 @@ startBureau({
         if (res.ok) {
           toast(`✅ Adhérent ${firstName} ${lastName} créé avec succès !`);
           closeAddMemberModal();
-          if (activeSub && activeSub.refresh) {
-            activeSub.refresh(true);
-          }
+          membersSync.refresh();
         } else {
           const errData = await res.json().catch(() => ({}));
           toast("❌ Échec de la création : " + (errData.message || res.statusText), 9000);
@@ -1463,6 +1461,7 @@ startBureau({
 
           renderDetailPanel(m);
           refreshDisplay();
+          membersSync.refresh();  // server view (slot group, status) replaces the local guess
           closeEditMemberModal();
           toast(`✅ Fiche de ${m.first_name} ${m.last_name} mise à jour avec succès !`);
         } else {
@@ -1770,6 +1769,7 @@ startBureau({
     seasonSelect.addEventListener("change", e => {
       currentSeason = e.target.value;
       saveFilters();
+      membersSync.setSeason(currentSeason);  // the API sends one season at a time
       filterCache = computeFilterCache(rawMembersData.members, rawMembersData.creneaux, itemsCache, currentSeason);
       renderFilterChips();
       renderFilterCreneaux();
@@ -1818,21 +1818,25 @@ startBureau({
       }
     }
 
-    // Connexion Firestore et écoute temps réel
-    const { db } = initFirebase();
-    const activeSub = startMembersListener(db, {
+    // Member list from the API (one season), reloaded every 20 s while the page is visible
+    function setSyncInfo(msg) {
+      const syncEl = document.getElementById("sync-info");
+      if (syncEl) syncEl.textContent = msg;
+    }
+    const membersSync = ALJMembersSync.start({
+      fetch: apiFetch,
+      season: currentSeason,
       onData: data => {
         rawMembersData = data;
         itemsCache = buildCreneauItems(data.creneaux);
+        setSyncInfo("☁️ À jour — " + fmtDate(new Date().toISOString()));
 
         // Initialisation de la saison
         seasonSelect.innerHTML = data.seasons.map(s => `
           <option value="${esc(s)}">${esc(s)}${s === data.activeSeason ? " (active)" : ""}</option>
         `).join("");
 
-        if (!data.seasons.includes(currentSeason)) {
-          currentSeason = data.activeSeason || data.seasons[0] || "";
-        }
+        currentSeason = data.season;
         seasonSelect.value = currentSeason;
 
         filterCache = computeFilterCache(data.members, data.creneaux, itemsCache, currentSeason);
@@ -1854,12 +1858,14 @@ startBureau({
         renderFilterCreneaux();
         refreshDisplay();
       },
-      onStatus: msg => {
-        const syncEl = document.getElementById("sync-info");
-        if (syncEl) syncEl.textContent = msg;
-      },
-      onError: err => {
-        console.error("Erreur de synchronisation des adhérents :", err);
+      onStatus: (status, info) => {
+        if (status === "offline") setSyncInfo("📴 Hors ligne : liste non actualisée");
+        else if (info && info.status === 401) membersSync.stop();  // signed out
+        else if (info && info.status === 403) setSyncInfo("🔒 Accès réservé aux coachs");
+        else if (status !== "ok") {
+          console.error("Erreur de chargement des adhérents :", info);
+          setSyncInfo("⚠️ Chargement des adhérents impossible — nouvel essai automatique");
+        }
       }
     });
 
@@ -1873,7 +1879,7 @@ startBureau({
           const d = await res.json();
           if (res.ok && d.status === "success") {
             toast("✅ Base de données locale synchronisée depuis Firestore !");
-            if (activeSub && activeSub.refresh) activeSub.refresh(true);
+            membersSync.refresh();
           } else {
             toast(`❌ Échec : ${d.message || 'Erreur de synchronisation'}`);
           }

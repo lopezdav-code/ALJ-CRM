@@ -10,6 +10,14 @@ for _stream in (sys.stdout, sys.stderr):
 
 import pytest
 
+# Shared test helpers (tests/support/): importable by every test module, which pytest
+# imports in importlib mode (no automatic sys.path entry for the tests folders).
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.join(os.path.dirname(_TESTS_DIR), "src")
+for _path in (_SRC_DIR, _TESTS_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
 # Dev mode variables (dev/dev.env): removed so the tests stay in production mode
 # even if the developer loaded them into their shell.
 _DEV_ENV_KEYS = ("ALJ_ENV", "FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_HOST",

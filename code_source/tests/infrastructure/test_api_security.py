@@ -1,6 +1,6 @@
 """
 Tests de sécurité de l'API Cloud Run :
-- authentification par jeton d'identité Firebase + rôles (miroir de firestore.rules) ;
+- authentification par jeton d'identité Firebase + rôles (seul juge des droits : firestore.rules refuse tout client) ;
 - vérification des notifications webhook HelloAsso (jeton secret, relecture API).
 """
 
@@ -89,6 +89,26 @@ class TestRoles(unittest.TestCase):
         self.assertEqual(r("GET", "/api/planning"), "coach")
         self.assertEqual(r("GET", "/annuaire-pirate"), "coach")
 
+    def test_readonly_reads(self):
+        """Competition views are readable by readonly; their writes and every other route are not."""
+        r = api_auth.required_role
+        for path in ("/api/competitions", "/api/competitions/123", "/api/coaches",
+                     "/api/competition-members"):
+            self.assertEqual(r("GET", path), "readonly", path)
+            self.assertEqual(r("HEAD", path), "readonly", path)
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            self.assertEqual(r(method, "/api/competitions/123"), "coach", method)
+            self.assertEqual(r(method, "/api/coaches"), "coach", method)
+        for path in ("/api/competitions-pirate", "/api/members", "/api/helloasso/items",
+                     "/api/email-templates"):
+            self.assertEqual(r("GET", path), "coach", path)
+        for method, path in (("POST", "/api/competitions/archive-past"),
+                             ("POST", "/api/competitions/1/participants/2/cancel"),
+                             ("POST", "/api/competitions/1/load-group"),
+                             ("PUT", "/api/helloasso/items/5/link"),
+                             ("PUT", "/api/helloasso/items/5/ignore")):
+            self.assertEqual(r(method, path), "coach", path)
+
     def test_roles_for_claims(self):
         f = api_auth.roles_for_claims
         self.assertEqual(f({"email": "Bureau@ALJ-Escalade.fr", "email_verified": True}),
@@ -105,21 +125,15 @@ class TestRoles(unittest.TestCase):
         self.assertTrue(api_auth.has_role({"admin": True}, "coach"))
         self.assertFalse(api_auth.has_role({"readonly": True}, "coach"))
 
-    def test_lists_match_firestore_rules_and_pwa(self):
-        """Les listes Python doivent rester identiques à firestore.rules et à la PWA."""
+    def test_rules_hold_no_role_list(self):
+        """firestore.rules denies every client: roles live in api_auth.py only (plan phase 3)."""
         with open(os.path.join(_code_root, "firestore.rules"), encoding="utf-8") as f:
             rules = f.read()
+        self.assertNotIn("@", rules)
+        self.assertNotIn("request.auth", rules)
 
-        def rule_emails(func):
-            body = re.search(r"function %s\(\)\s*\{(.*?)\n    \}" % func, rules, re.S).group(1)
-            return {e for e in re.findall(r"'([^'@\s]+@[^'\s]+)'", body) if "*" not in e}
-
-        self.assertEqual(rule_emails("isAdmin"), set(api_auth.ADMIN_EMAILS))
-        self.assertEqual(rule_emails("isCoach"), set(api_auth.COACH_EMAILS))
-        self.assertEqual(rule_emails("isReadOnly"), set(api_auth.READONLY_EMAILS))
-        for d in api_auth.ADMIN_EMAIL_DOMAINS:
-            self.assertIn(d.replace(".", "\\\\."), rules)
-
+    def test_display_lists_match_api(self):
+        """The pages' role lists (display only) stay identical to the API's."""
         for page in ("competitions.html", "index.html", os.path.join("shared", "alj-core.js")):
             with open(os.path.join(_code_root, "web", page), encoding="utf-8") as f:
                 html = f.read()
@@ -192,6 +206,17 @@ class TestAuthMiddleware(_CertsMixin, unittest.TestCase):
         self.assertEqual(self.get("/docs").status_code, 401)
         self.assertEqual(self.client.post("/api/send-email", json={}).status_code, 401)
         self.assertEqual(self.client.post("/api/helloasso/sync").status_code, 401)
+
+    def test_readonly_role_end_to_end(self):
+        """Readonly can read competitions, and nothing else."""
+        readonly = make_token(email="muah.did@gmail.com")
+        with patch("infrastructure.competition_firestore_repository.CompetitionFirestoreRepository.list_competition_docs", return_value=[]):
+            self.assertEqual(self.get("/api/competitions", readonly).status_code, 200)
+        self.assertEqual(self.get("/api/email-status", readonly).status_code, 403)
+        r = self.client.post("/api/competitions", json={}, headers={"Authorization": f"Bearer {readonly}"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.get("/api/competitions", make_token(email="pirate@gmail.com")).status_code, 403)
+        self.assertEqual(self.get("/api/competitions").status_code, 401)
 
     def test_planning_write_requires_admin(self):
         coach = make_token(email="stephane.loridant@orange.fr")

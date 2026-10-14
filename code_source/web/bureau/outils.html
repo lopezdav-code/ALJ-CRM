@@ -4,14 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Version du portail bureau : identique à competitions.html, index.html et CACHE_NAME (sw.js) -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Bureau · Outils (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Bureau · Outils (v23)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🧗</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="/runtime-config.js"></script>
 <script src="/static-web/alj-firebase.js"></script>
 </head>
@@ -20,7 +19,7 @@
 
 <script type="module">
 import { startBureau } from "/static-web/alj-shell.js";
-import { apiFetch, initFirebase } from "/static-web/alj-core.js";
+import { apiFetch } from "/static-web/alj-core.js";
 
 const esc = s => (s == null ? "" : String(s))
   .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1007,27 +1006,20 @@ startBureau({
       loadPivot(e.target.value, true);
     });
 
-    // Chargement des saisons depuis Firestore pour peupler le sélecteur TCD
-    try {
-      const { db } = initFirebase();
-      db.collection("crm_seasons").get().then(snap => {
-        const seasons = [];
-        snap.forEach(d => {
-          const x = d.data();
-          if (x && x._deleted !== true && x.name) seasons.push(x.name);
-        });
-        seasons.sort().reverse();
-        if (seasons.length) {
-          const defaultSeason = seasons.includes("2026-2027") ? "2026-2027" : seasons[0];
-          seasonSelect.innerHTML =
-            seasons.map(s => `<option value="${esc(s)}" ${s === defaultSeason ? "selected" : ""}>${esc(s)}</option>`).join("") +
-            '<option value="Toutes les saisons">Toutes les saisons</option>';
-          currentPivotSeason = defaultSeason;
-        }
-      }).catch(err => {
-        console.warn("Impossible de lister crm_seasons pour les outils :", err);
-      });
-    } catch (e) {}
+    // Seasons of the pivot table selector (active season selected)
+    apiFetch("/api/seasons").then(async res => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const { seasons, active } = await res.json();
+      if (seasons.length) {
+        const defaultSeason = seasons.includes(active) ? active : seasons[0];
+        seasonSelect.innerHTML =
+          seasons.map(s => `<option value="${esc(s)}" ${s === defaultSeason ? "selected" : ""}>${esc(s)}</option>`).join("") +
+          '<option value="Toutes les saisons">Toutes les saisons</option>';
+        currentPivotSeason = defaultSeason;
+      }
+    }).catch(err => {
+      console.warn("Impossible de lister les saisons pour les outils :", err);
+    });
 
     // Vérifier si un onglet est passé dans l'URL (?tab=ffme, ?tab=ffme-import, ?tab=presence, ?tab=pivot)
     const urlTab = new URLSearchParams(window.location.search).get("tab");

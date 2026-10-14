@@ -20,7 +20,6 @@ PROD_FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
 DEV_PROJECT_ID = "demo-alj"
 EMULATOR_ADMIN_TOKEN = "owner"  # emulator admin token: bypasses the security rules
 
-DEFAULT_PUBLIC_FIRESTORE_EMULATOR = "localhost:8081"
 DEFAULT_PUBLIC_AUTH_EMULATOR = "http://localhost:9099"
 
 
@@ -65,14 +64,13 @@ def project_id_override() -> Optional[str]:
 
 
 def client_config() -> Dict[str, Any]:
-    """Configuration exposed to the browser (/runtime-config.js): nothing in production."""
+    """Configuration exposed to the browser (/runtime-config.js): nothing in production.
+    The pages only use Firebase Auth, so only the Auth emulator is exposed."""
     if not is_dev():
         return {"env": "prod"}
     return {
         "env": "dev",
         "projectId": DEV_PROJECT_ID,
-        "firestoreEmulator": (os.environ.get("ALJ_PUBLIC_FIRESTORE_EMULATOR")
-                              or DEFAULT_PUBLIC_FIRESTORE_EMULATOR).strip(),
         "authEmulator": (os.environ.get("ALJ_PUBLIC_AUTH_EMULATOR")
                          or DEFAULT_PUBLIC_AUTH_EMULATOR).strip(),
     }
