@@ -602,6 +602,23 @@ startBureau({
           </div>
           <div style="margin-top:8px; display:flex; flex-direction:column; gap:10px;">
             <div>
+              <label class="fld">Destinataires ciblés</label>
+              <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+                <label class="radio-pill" style="display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer;">
+                  <input type="radio" name="comp-dest-filter" value="selected" checked style="cursor:pointer; accent-color:var(--blue);">
+                  <span>Tous les invités (<b id="comp-em-count-selected">0</b> athlète(s))</span>
+                </label>
+                <label class="radio-pill" style="display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer;">
+                  <input type="radio" name="comp-dest-filter" value="unpaid" style="cursor:pointer; accent-color:var(--blue);">
+                  <span>Paiement en attente (<b id="comp-em-count-unpaid">0</b> athlète(s))</span>
+                </label>
+                <label class="radio-pill" style="display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer;">
+                  <input type="radio" name="comp-dest-filter" value="all" style="cursor:pointer; accent-color:var(--blue);">
+                  <span>Tous les participants enregistrés (<b id="comp-em-count-all">0</b> athlète(s))</span>
+                </label>
+              </div>
+            </div>
+            <div>
               <label class="fld">Modèle d'e-mail</label>
               <select id="comp-email-template-select" class="select-input" style="width:100%;"></select>
             </div>
@@ -614,8 +631,11 @@ startBureau({
               <textarea id="comp-email-body" class="fld-input" rows="8" style="width:100%; font-size:12.5px;"></textarea>
             </div>
             <div>
-              <label class="fld">Destinataires sélectionnés (<span id="comp-email-recipients-count">0</span>)</label>
-              <div id="comp-email-recipients-box" style="max-height:120px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:6px; padding:6px; background:#F8FAFC; font-size:11.5px; display:flex; flex-wrap:wrap; gap:4px;"></div>
+              <label class="fld" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Destinataires sélectionnés (<span id="comp-email-recipients-count">0</span>)</span>
+                <span class="muted" style="font-size:11px; font-weight:normal;">(cliquez sur ✕ pour retirer manuellement)</span>
+              </label>
+              <div id="comp-email-recipients-box" style="max-height:130px; overflow-y:auto; border:1px solid #E2E8F0; border-radius:6px; padding:6px; background:#F8FAFC; font-size:11.5px; display:flex; flex-wrap:wrap; gap:4px;"></div>
             </div>
             <div class="btn-row" style="margin-top:10px;">
               <button class="btn btn-muted" id="comp-email-cancel">Annuler</button>
@@ -2534,16 +2554,87 @@ startBureau({
       } catch (e) {}
     }
 
+    let currentEmailRecipients = [];
+
     function openEmailCampaignModal(comp) {
       const modal = $("comp-email-modal");
-      const parts = (comp.participants || []).filter(p => p.selectionne && p.adherent_id);
-      
-      $("comp-email-recipients-count").textContent = parts.length;
-      $("comp-email-recipients-box").innerHTML = parts.map(p => {
+      const parts = comp.participants || [];
+
+      // Calcul des 3 catégories de destinataires ciblés
+      const selectedParts = parts.filter(p => p.selectionne && p.adherent_id);
+      const unpaidParts = parts.filter(p => p.selectionne && p.adherent_id && p.statut_paiement === "en_attente");
+      const allParts = parts.filter(p => p.adherent_id);
+
+      $("comp-em-count-selected").textContent = selectedParts.length;
+      $("comp-em-count-unpaid").textContent = unpaidParts.length;
+      $("comp-em-count-all").textContent = allParts.length;
+
+      // Par défaut : Tous les invités (selected)
+      const radioSelected = document.querySelector('input[name="comp-dest-filter"][value="selected"]');
+      if (radioSelected) radioSelected.checked = true;
+
+      function toRecipient(p) {
         const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
-        const email = adh.email_primary || adh.email_secondary || "sans e-mail";
-        return `<span class="tag-badge" style="background:#FFFFFF; border:1px solid #CBD5E1;">${esc(p.prenom)} ${esc(p.nom)} &lt;${esc(email)}&gt;</span>`;
-      }).join("") || `<span class="muted">Aucun participant sélectionné.</span>`;
+        const email = adh.email_primary || adh.email_secondary || p.email || "";
+        return {
+          id: p.adherent_id,
+          first_name: p.prenom || adh.first_name || "",
+          last_name: p.nom || adh.last_name || "",
+          email: email.trim(),
+          num_licence: p.num_licence || adh.licence_ffme || ""
+        };
+      }
+
+      function updateRecipientsListFromFilter() {
+        const filterVal = document.querySelector('input[name="comp-dest-filter"]:checked')?.value || "selected";
+        let targetParts = selectedParts;
+        if (filterVal === "unpaid") targetParts = unpaidParts;
+        else if (filterVal === "all") targetParts = allParts;
+
+        currentEmailRecipients = targetParts.map(toRecipient);
+        renderEmailRecipientsBox();
+      }
+
+      function renderEmailRecipientsBox() {
+        $("comp-email-recipients-count").textContent = currentEmailRecipients.length;
+        const box = $("comp-email-recipients-box");
+        if (!currentEmailRecipients.length) {
+          box.innerHTML = `<span class="muted" style="padding:4px;">Aucun destinataire sélectionné.</span>`;
+          return;
+        }
+
+        box.innerHTML = currentEmailRecipients.map((r, idx) => {
+          const hasEmail = r.email && r.email.includes("@");
+          const bgCol = hasEmail ? "#FFFFFF" : "#FEF2F2";
+          const borderCol = hasEmail ? "#CBD5E1" : "#FECACA";
+          const textCol = hasEmail ? "#1E293B" : "#DC2626";
+
+          return `
+            <span class="tag-badge" style="background:${bgCol}; border:1px solid ${borderCol}; color:${textCol}; display:inline-flex; align-items:center; gap:6px; padding:3px 8px; font-size:11.5px; border-radius:4px;">
+              <span>${esc(r.first_name)} ${esc(r.last_name)} &lt;${esc(r.email || "sans e-mail")}&gt;</span>
+              <button type="button" class="remove-dest-btn" data-idx="${idx}" style="background:none; border:none; color:#94A3B8; cursor:pointer; font-size:13px; padding:0 2px; line-height:1;" title="Retirer ce destinataire">✕</button>
+            </span>
+          `;
+        }).join("");
+
+        box.querySelectorAll(".remove-dest-btn").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const removeIdx = parseInt(btn.dataset.idx, 10);
+            if (!isNaN(removeIdx) && removeIdx >= 0 && removeIdx < currentEmailRecipients.length) {
+              currentEmailRecipients.splice(removeIdx, 1);
+              renderEmailRecipientsBox();
+            }
+          });
+        });
+      }
+
+      // Écouteur sur changement de filtre radio
+      document.querySelectorAll('input[name="comp-dest-filter"]').forEach(radio => {
+        radio.onchange = updateRecipientsListFromFilter;
+      });
+
+      updateRecipientsListFromFilter();
 
       const sel = $("comp-email-template-select");
       sel.innerHTML = emailTemplates.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
@@ -2570,29 +2661,20 @@ startBureau({
     $("comp-email-send")?.addEventListener("click", async () => {
       const comp = getActiveComp();
       if (!comp) return;
-      const parts = (comp.participants || []).filter(p => p.selectionne && p.adherent_id);
-      if (!parts.length) {
-        toast("⚠️ Aucun participant sélectionné.");
+
+      if (!currentEmailRecipients.length) {
+        toast("⚠️ Aucun participant dans la liste des destinataires.");
         return;
       }
 
-      const recipients = parts.map(p => {
-        const adh = allAdherents.find(a => String(a.id || a.user_id) === String(p.adherent_id)) || {};
-        return {
-          id: p.adherent_id,
-          first_name: p.prenom,
-          last_name: p.nom,
-          email: adh.email_primary || adh.email_secondary || "",
-          num_licence: p.num_licence
-        };
-      }).filter(r => r.email && r.email.includes("@"));
+      const validRecipients = currentEmailRecipients.filter(r => r.email && r.email.includes("@"));
 
-      if (!recipients.length) {
+      if (!validRecipients.length) {
         toast("⚠️ Aucun participant ne dispose d'une adresse e-mail valide.");
         return;
       }
 
-      if (!confirm(`Envoyer cet e-mail à ${recipients.length} compétiteur(s) ?`)) return;
+      if (!confirm(`Envoyer cet e-mail à ${validRecipients.length} compétiteur(s) ?`)) return;
 
       const btn = $("comp-email-send");
       btn.disabled = true;
@@ -2606,13 +2688,13 @@ startBureau({
             subject: $("comp-email-subject").value.trim(),
             body: $("comp-email-body").value.trim(),
             competition_id: comp.id || comp.docId,
-            recipients: recipients
+            recipients: validRecipients
           })
         });
 
         if (res.ok) {
           const data = await res.json();
-          toast(`✅ ${data.sent_count || recipients.length} e-mail(s) envoyé(s) avec succès !`);
+          toast(`✅ ${data.sent_count || validRecipients.length} e-mail(s) envoyé(s) avec succès !`);
           $("comp-email-modal").style.display = "none";
         } else {
           toast("❌ Erreur lors de l'envoi de la campagne.", 8000);
