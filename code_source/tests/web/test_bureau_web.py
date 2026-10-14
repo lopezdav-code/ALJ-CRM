@@ -447,8 +447,9 @@ class TestBureauFiles(unittest.TestCase):
         """La page adherents.html contient le bouton Modifier et la modale d'édition complète."""
         html = _read(os.path.join(BUREAU, "adherents.html"))
         for elem in ("btn-action-edit", "member-edit-modal", "edit-modal-close", "edit-cancel-btn",
-                      "edit-save-btn", "edit-badge-rouge", "edit-autonomie-bloc",
+                      "edit-save-btn", "edit-licence", "edit-badge-rouge", "edit-autonomie-bloc",
                       "edit-tarifs-container", "edit-email-primary", "edit-email-secondary", "edit-phone",
+                      "edit-address", "edit-zip", "edit-city",
                       "edit-commentaire", "btn-insert-comment-date"):
             self.assertIn(f'id="{elem}"', html)
         self.assertIn('apiFetch("/api/members/update"', html)
@@ -614,6 +615,10 @@ class TestBureauFiles(unittest.TestCase):
                 "purchase_id": 70,
                 "order_ref": "CMD-BERNARD-1",
                 "fields": {
+                    "licence_ffme": "778899",
+                    "address": "12 chemin du Moulin",
+                    "zip_code": "69330",
+                    "city": "Jonage",
                     "badge_rouge": "Oui",
                     "autonomie_bloc": "Oui",
                     "email_primary": "luc.bernard@nouveau.fr",
@@ -631,6 +636,10 @@ class TestBureauFiles(unittest.TestCase):
             # Vérification dans la table users
             conn = SqliteRepository.get_connection()
             u = conn.execute("SELECT * FROM users WHERE id = 50").fetchone()
+            self.assertEqual(u["licence_ffme"], "778899")
+            self.assertEqual(u["address"], "12 chemin du Moulin")
+            self.assertEqual(u["zip_code"], "69330")
+            self.assertEqual(u["city"], "Jonage")
             self.assertEqual(u["badge_rouge"], "Oui")
             self.assertEqual(u["autonomie_bloc"], "Oui")
             self.assertEqual(u["email_primary"], "luc.bernard@nouveau.fr")

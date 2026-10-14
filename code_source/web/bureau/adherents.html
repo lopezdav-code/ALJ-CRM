@@ -411,9 +411,13 @@ startBureau({
               </select>
             </div>
 
-            <!-- Section 1 : Badges & Autonomie FFME -->
-            <div class="section-h" style="margin:4px 0 6px;">🧗 Badges & Autonomie FFME</div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
+            <!-- Section 1 : Badges & Licence FFME -->
+            <div class="section-h" style="margin:4px 0 6px;">🧗 Badges & Licence FFME</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
+              <div>
+                <label class="fld">N° Licence FFME</label>
+                <input type="text" id="edit-licence" class="search-input" placeholder="Ex : 123456" style="width:100%;">
+              </div>
               <div>
                 <label class="fld">🔴 Badge rouge diff</label>
                 <select id="edit-badge-rouge" class="select-input" style="width:100%;">
@@ -445,8 +449,8 @@ startBureau({
               </div>
             </div>
 
-            <!-- Section 3 : Coordonnées & Téléphone -->
-            <div class="section-h" style="margin:8px 0 6px;">📞 Coordonnées</div>
+            <!-- Section 3 : Coordonnées, Téléphone & Adresse -->
+            <div class="section-h" style="margin:8px 0 6px;">📞 Coordonnées & Adresse</div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:8px;">
               <div>
                 <label class="fld">✉️ E-mail principal</label>
@@ -460,6 +464,20 @@ startBureau({
             <div style="margin-bottom:8px;">
               <label class="fld">📞 Téléphone</label>
               <input type="tel" id="edit-phone" class="search-input" placeholder="06 12 34 56 78" style="width:100%;">
+            </div>
+            <div style="margin-bottom:8px;">
+              <label class="fld">📍 Adresse (N° et rue)</label>
+              <input type="text" id="edit-address" class="search-input" placeholder="12 rue de la Paix" style="width:100%;">
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 2fr; gap:12px; margin-bottom:12px;">
+              <div>
+                <label class="fld">Code postal</label>
+                <input type="text" id="edit-zip" class="search-input" placeholder="69330" style="width:100%;">
+              </div>
+              <div>
+                <label class="fld">Ville</label>
+                <input type="text" id="edit-city" class="search-input" placeholder="Jonage" style="width:100%;">
+              </div>
             </div>
 
             <!-- Section 4 : Commentaires / Notes internes -->
@@ -1237,9 +1255,13 @@ startBureau({
       const ab = String(member.autonomie_bloc || "").trim().toLowerCase();
       document.getElementById("edit-autonomie-bloc").value = (ab === "oui" || ab === "x") ? "Oui" : "Non";
 
+      document.getElementById("edit-licence").value = member.licence_ffme || "";
       document.getElementById("edit-email-primary").value = member.email_primary || "";
       document.getElementById("edit-email-secondary").value = member.email_secondary || "";
       document.getElementById("edit-phone").value = member.phone || "";
+      document.getElementById("edit-address").value = member.address || "";
+      document.getElementById("edit-zip").value = member.zip_code || "";
+      document.getElementById("edit-city").value = member.city || "";
       document.getElementById("edit-commentaire").value = member.commentaires_correctif || "";
       document.getElementById("edit-current-tarif").textContent = member.tarif_name || "Aucun";
 
@@ -1316,11 +1338,15 @@ startBureau({
       if (!activeEditMember) return;
       const m = activeEditMember;
 
+      const newLicence = document.getElementById("edit-licence").value.trim();
       const newBadgeRouge = document.getElementById("edit-badge-rouge").value;
       const newAutonomieBloc = document.getElementById("edit-autonomie-bloc").value;
       const newEmailPrimary = document.getElementById("edit-email-primary").value.trim();
       const newEmailSecondary = document.getElementById("edit-email-secondary").value.trim();
       const newPhone = document.getElementById("edit-phone").value.trim();
+      const newAddress = document.getElementById("edit-address").value.trim();
+      const newZip = document.getElementById("edit-zip").value.trim();
+      const newCity = document.getElementById("edit-city").value.trim();
       const newStatus = document.getElementById("edit-status") ? document.getElementById("edit-status").value.trim() : "";
       const selectedRadio = document.querySelector('input[name="edit-tarif-radio"]:checked');
       const newTarif = selectedRadio ? selectedRadio.value.trim() : (m.tarif_name || "");
@@ -1337,6 +1363,10 @@ startBureau({
       if (newStatus && normKey(newStatus) !== normKey(origStatus)) {
         fields.status = newStatus;
         changesDesc.push(`Statut : ${origStatus} ➔ ${newStatus}`);
+      }
+      if (newLicence !== (m.licence_ffme || "")) {
+        fields.licence_ffme = newLicence;
+        changesDesc.push(`Licence FFME : ${m.licence_ffme || "vide"} ➔ ${newLicence || "vide"}`);
       }
       if (newBadgeRouge !== origBadgeRouge) {
         fields.badge_rouge = newBadgeRouge;
@@ -1357,6 +1387,18 @@ startBureau({
       if (newPhone !== (m.phone || "")) {
         fields.phone = newPhone;
         changesDesc.push(`Téléphone : ${m.phone || "vide"} ➔ ${newPhone || "vide"}`);
+      }
+      if (newAddress !== (m.address || "")) {
+        fields.address = newAddress;
+        changesDesc.push(`Adresse : ${m.address || "vide"} ➔ ${newAddress || "vide"}`);
+      }
+      if (newZip !== (m.zip_code || "")) {
+        fields.zip_code = newZip;
+        changesDesc.push(`Code postal : ${m.zip_code || "vide"} ➔ ${newZip || "vide"}`);
+      }
+      if (newCity !== (m.city || "")) {
+        fields.city = newCity;
+        changesDesc.push(`Ville : ${m.city || "vide"} ➔ ${newCity || "vide"}`);
       }
       if (newTarif && newTarif !== (m.tarif_name || "")) {
         fields.tarif_name = newTarif;
@@ -1396,6 +1438,9 @@ startBureau({
         if (res.ok) {
           // Mise à jour réactive immédiate de l'objet local
           Object.assign(m, fields);
+          if (fields.city) {
+            m.city = fmtCity(fields.city);
+          }
 
           if (fields.status) {
             m.status = fields.status;

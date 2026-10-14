@@ -995,6 +995,14 @@ class SqliteRepository:
                 user_updates["email_secondary"] = str(fields["email_secondary"] or "").strip()
             if "phone" in fields:
                 user_updates["phone"] = str(fields["phone"] or "").strip()
+            if "licence_ffme" in fields:
+                user_updates["licence_ffme"] = str(fields["licence_ffme"] or "").strip()
+            if "address" in fields:
+                user_updates["address"] = str(fields["address"] or "").strip()
+            if "zip_code" in fields:
+                user_updates["zip_code"] = str(fields["zip_code"] or "").strip()
+            if "city" in fields:
+                user_updates["city"] = str(fields["city"] or "").strip()
 
             if user_updates and resolved_uid is not None:
                 sets = [f'"{col}" = ?' for col in user_updates.keys()]
