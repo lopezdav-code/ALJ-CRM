@@ -1,5 +1,5 @@
 # Ignorés lors de l'envoi du code source vers Cloud Build (gcloud run deploy --source .)
-# Envoyer uniquement le nécessaire : Dockerfile + requirements-docker.txt + src/ + web/ + doc/ + VERSION
+# Envoyer uniquement le nécessaire : Dockerfile + pyproject.toml + uv.lock + src/ + web/ + doc/ + VERSION
 
 # Environnements virtuels et caches Python
 venv/

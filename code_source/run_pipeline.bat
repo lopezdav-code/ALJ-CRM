@@ -8,7 +8,10 @@ echo   LANCEMENT DE ALJ ESCALADE MANAGER (PySide6)
 echo ====================================================
 echo.
 
-if exist "venv\Scripts\python.exe" (
+if exist ".venv\Scripts\python.exe" (
+    echo [Info] Lancement via l'environnement uv local...
+    .venv\Scripts\python.exe src/app.py
+) else if exist "venv\Scripts\python.exe" (
     echo [Info] Lancement via l'environnement virtuel local...
     venv\Scripts\python.exe src/app.py
 ) else if exist "..\venv\Scripts\python.exe" (

@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Dépendances Python : pyproject.toml + uv.lock (code_source/)
+  - package-ecosystem: "uv"
+    directory: "/code_source"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

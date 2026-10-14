@@ -25,10 +25,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Installation des dépendances Python conteneurisées
-COPY requirements-docker.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-docker.txt
+# 2. Installation des dépendances Python conteneurisées, versions exactes de uv.lock
+#    (--frozen : le build échoue si uv.lock est périmé, jamais de résolution à la volée).
+#    Groupes : dépendances communes + « web » ; ni le client lourd (Qt, pywin32) ni les outils de dev.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_PREFERENCE=only-system \
+    PATH=/opt/venv/bin:$PATH
+COPY pyproject.toml uv.lock ./
+RUN pip install --no-cache-dir uv==0.13.1 && \
+    uv sync --frozen --no-dev --group web --no-install-project && \
+    pip uninstall -y uv
 
 # 3. Copie du code source et des ressources web / templates
 COPY src/ ./src/

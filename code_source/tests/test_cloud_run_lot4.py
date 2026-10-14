@@ -28,8 +28,27 @@ class TestCloudRunLot4(unittest.TestCase):
         self.assertEqual(APP_VERSION, v_content, "La version dans constants.py et VERSION doivent correspondre.")
         self.assertEqual(APP_VERSION, "2.7.6")
 
+    def test_web_profile_excludes_desktop_dependencies(self):
+        """Source de vérité (pyproject.toml + uv.lock) : le profil web exclut le client lourd Windows."""
+        import re
+        import tomllib
+
+        with open(os.path.join(_code_root, "pyproject.toml"), "rb") as f:
+            pyproject = tomllib.load(f)
+
+        def names(requirements):
+            return {re.split(r"[\[<>=!~; ]", r, maxsplit=1)[0].lower() for r in requirements}
+
+        web_profile = names(pyproject["project"]["dependencies"]) | names(pyproject["dependency-groups"]["web"])
+        for backend in ("fastapi", "uvicorn", "requests", "python-dotenv", "weasyprint"):
+            self.assertIn(backend, web_profile)
+        for desktop_only in ("pywin32", "pyside6", "python-docx"):
+            self.assertNotIn(desktop_only, web_profile)
+            self.assertIn(desktop_only, names(pyproject["dependency-groups"]["desktop"]))
+        self.assertTrue(os.path.isfile(os.path.join(_code_root, "uv.lock")), "uv.lock doit être versionné.")
+
     def test_requirements_docker(self):
-        """Vérifie que requirements-docker.txt exclut les paquets Windows lourds."""
+        """Vérifie que requirements-docker.txt (export généré de uv.lock) exclut les paquets Windows lourds."""
         req_docker_path = os.path.join(_code_root, "requirements-docker.txt")
         self.assertTrue(os.path.isfile(req_docker_path), "requirements-docker.txt doit exister.")
         with open(req_docker_path, "r", encoding="utf-8") as f:
@@ -69,7 +88,9 @@ class TestCloudRunLot4(unittest.TestCase):
         self.assertIn("HEALTHCHECK", content)
         self.assertIn("PORT", content)
         self.assertIn("uvicorn server:app", content)
-        self.assertIn("requirements-docker.txt", content)
+        # Dépendances installées depuis uv.lock (versions exactes, build en échec si le lock est périmé)
+        self.assertIn("uv.lock", content)
+        self.assertIn("uv sync --frozen", content)
 
     def test_dockerfile_python_matches_python_version_file(self):
         """The image runs the Python of .python-version (also read by the CI and make_portable.py)."""

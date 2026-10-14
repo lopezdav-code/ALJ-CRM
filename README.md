@@ -12,10 +12,26 @@ e-mails capturés par Mailpit. **Aucun accès aux données ni aux services de pr
 ### Prérequis (une fois)
 
 ```bash
-sudo apt install python3-venv libpango-1.0-0 libpangoft2-1.0-0   # + Docker
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0   # + Docker
+# uv : https://docs.astral.sh/uv/getting-started/installation/  (Windows : winget install astral-sh.uv)
 cd code_source
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements-docker.txt -r requirements-dev.txt
+uv sync --group web          # crée .venv/ aux versions exactes de uv.lock (profil web + outils de dev)
+source .venv/bin/activate    # ou préfixer les commandes par « uv run »
+```
+
+`uv sync --group desktop` ajoute le client lourd (PySide6, pywin32…). Sans uv, `pip install -r requirements-docker.txt
+-r requirements-dev.txt` reste possible : ces fichiers sont générés à partir de `uv.lock`.
+
+### Gérer les dépendances
+
+`pyproject.toml` (+ `uv.lock`) fait foi. Les `requirements*.txt` sont **générés** : ne pas les éditer à la main
+(le client lourd les consomme avec pip, le CI vérifie qu'ils sont à jour).
+
+```bash
+cd code_source
+# 1. modifier les dépendances dans pyproject.toml (ou `uv add <paquet>` / `uv add --group dev <paquet>`)
+uv lock                              # met à jour uv.lock
+python dev/export_requirements.py    # régénère requirements*.txt
 ```
 
 ### Démarrage
