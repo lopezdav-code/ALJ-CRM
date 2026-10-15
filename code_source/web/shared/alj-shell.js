@@ -2,7 +2,7 @@
    contrôle de connexion et de rôle (coach / administrateur). Chaque page appelle
    startBureau() puis remplit la zone #content dans onReady(). */
 import {
-  initFirebase, login, logout, roleFor, isStaff,
+  apiFetch, initFirebase, login, logout, roleFor, isStaff,
   checkWebVersion, registerServiceWorker, WEB_VERSION
 } from "/static-web/alj-core.js";
 

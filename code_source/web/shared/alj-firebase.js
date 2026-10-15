@@ -48,7 +48,9 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
     if (isEmulator) {
-      auth.useEmulator(runtime.authEmulator);
+      // The SDK's own warning banner covers the bottom navigation on phones: the DEV banner
+      // below replaces it (and lets clicks through).
+      auth.useEmulator(runtime.authEmulator, { disableWarnings: true });
       const [host, port] = String(runtime.firestoreEmulator).split(":");
       db.useEmulator(host, Number(port));
       showDevBanner();

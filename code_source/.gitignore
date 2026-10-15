@@ -19,6 +19,9 @@ doc/QrCode/
 dev/.emulator-data/*
 !dev/.emulator-data/.gitkeep
 data-dev/
+# Playwright artifacts of the e2e tests (traces, screenshots, videos, server log)
+e2e-results/
+test-results/
 
 # ===== Environnement Python =====
 venv/

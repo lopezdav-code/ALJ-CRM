@@ -196,8 +196,12 @@ python3 -m venv venv && source venv/bin/activate                   # venv/ est i
 pip install -r requirements-docker.txt -r requirements-dev.txt     # profil « web » (sans Qt/pywin32) + Faker
 ```
 
-L'image Docker utilise Python **3.11** ; une version plus récente fonctionne, mais en cas d'échec d'installation
-d'une roue (pandas, lxml…), revenir à 3.11.
+La version de Python est définie dans `code_source/.python-version` (version complète, ex. `3.14.8`), lue par
+la CI (`setup-python`), le Python embarqué du mode portable Windows (`make_portable.py`) et les messages de
+`install.bat`. Seul le `FROM python:<version>-slim` du `Dockerfile` la répète : un test
+(`tests/test_cloud_run_lot4.py`) vérifie que les deux concordent. Pour changer de version, modifier ces **deux
+fichiers** (vérifier d'abord que les roues existent : `pip download --only-binary=:all: --python-version X.Y …`).
+Les postes portables déjà installés gardent leur Python embarqué : la mise à jour automatique ne remplace que `app/`.
 
 ### 7.2 Mode dev sur l'émulateur Firebase (recommandé)
 

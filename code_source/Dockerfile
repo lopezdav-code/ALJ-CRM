@@ -3,7 +3,7 @@
 # Architecture Cloud & Mobile (Coût 0 €/mois sur Google Cloud Free Tier)
 # ==============================================================================
 
-FROM python:3.11-slim
+FROM python:3.14.8-slim
 
 # Configuration de l'environnement Python et conteneur
 ENV PYTHONUNBUFFERED=1 \

@@ -12,7 +12,8 @@ python --version >nul 2>&1
 if %errorlevel% == 0 goto :python_ok
 echo [ERREUR] Python n'est pas installe sur ce PC !
 echo.
-echo Veuillez installer Python, version 3.10 ou superieure recommandee.
+set /p PYTHON_VERSION=<.python-version
+echo Veuillez installer Python %PYTHON_VERSION% (version utilisee par l'application).
 echo IMPORTANT : Cochez imperativement la case "Add Python.exe to PATH" lors de l'installation de Python !
 echo Telechargement direct : https://www.python.org/downloads/
 echo.

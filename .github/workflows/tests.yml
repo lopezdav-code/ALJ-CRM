@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  workflow_call: # Reused by the release workflow before packaging
+  workflow_call:
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        python-version: '3.13'
+        python-version-file: 'code_source/.python-version'
         cache: 'pip'
 
     - name: Install Dependencies
@@ -47,10 +47,80 @@ jobs:
         QT_QPA_PLATFORM: offscreen
       # Qt test files create PySide6 widgets: they run in separate processes to
       # avoid native crashes caused by Qt state leaking from one test file to the
-      # next (0xC0000409 when running the full suite at once).
+      # next.
       run: |
         python -m pytest tests --ignore=tests/presentation/test_app_smoke.py --ignore=tests/presentation/test_communication_sender.py --ignore=tests/presentation/test_member_email_shortcut.py --ignore=tests/presentation/test_presentation_lot3.py --ignore=tests/presentation/test_presentation_lot4.py --ignore=tests/presentation/test_presentation_lot5.py --ignore=tests/presentation/test_tarif_update.py &&
         python -m pytest tests/presentation/test_app_smoke.py tests/presentation/test_member_email_shortcut.py tests/presentation/test_tarif_update.py tests/presentation/test_presentation_lot3.py &&
         python -m pytest tests/presentation/test_communication_sender.py &&
         python -m pytest tests/presentation/test_presentation_lot4.py &&
         python -m pytest tests/presentation/test_presentation_lot5.py
+
+  e2e:
+    # Browser tests (Playwright) against a throwaway stack started by the tests: Firebase emulator +
+    # Mailpit (code_source/e2e/docker-compose.yml), fake data, fake HelloAsso, server in dev mode.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: code_source
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+
+    - name: Prepare e2e stack images (Firebase emulator + Mailpit)
+      # Built/pulled up front so that a failure shows here; the tests start the stack themselves.
+      run: docker compose -f e2e/docker-compose.yml build && docker compose -f e2e/docker-compose.yml pull mailpit
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version-file: 'code_source/.python-version'
+        cache: 'pip'
+
+    - name: Install system libraries (WeasyPrint)
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-docker.txt -r requirements-e2e.txt
+
+    - name: Cache Playwright browsers
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('code_source/requirements-e2e.txt') }}
+
+    - name: Install Chromium
+      run: python -m playwright install --with-deps chromium
+
+    - name: Lint (ruff)
+      run: python -m ruff check e2e
+
+    - name: Run e2e tests (pytest + Playwright)
+      env:
+        E2E_KEEP_STACK: '1' # kept for the logs below, removed by the last step
+      # No --video: "retain-on-failure" still records every test, which overloads the 4-vCPU runner
+      # shared by 4 workers (timeouts). The trace has a screenshot and DOM snapshot of every step.
+      # -n 2 (instead of 4 locally): the 4-vCPU runner also hosts the server, the emulator and the PDF
+      # rendering; 4 browsers on top of them slowed responses past the test timeouts.
+      run: >
+        python -m pytest -c e2e/pytest.ini e2e -n 2
+        --output e2e-results --tracing retain-on-failure
+        --screenshot only-on-failure
+
+    - name: e2e stack logs
+      if: failure()
+      run: mkdir -p e2e-results && docker compose -f e2e/docker-compose.yml logs --no-color > e2e-results/docker-compose.log 2>&1
+
+    - name: Upload e2e artifacts
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: e2e-results
+        path: code_source/e2e-results/
+        retention-days: 7
+
+    - name: Stop e2e stack
+      if: always()
+      run: docker compose -f e2e/docker-compose.yml down

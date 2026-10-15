@@ -1077,9 +1077,12 @@ const PAIEMENT_BADGE = {
 function populateCoachDropdowns() {
   const sorted = coaches.slice().sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || ""), "fr"));
   const options = '<option value="">Aucun</option>' + sorted.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join("");
-  $("#f-coach1").innerHTML = options;
-  $("#f-coach2").innerHTML = options;
-  $("#f-coach3").innerHTML = options;
+  // Rebuilt on every Firestore snapshot (renderAll): keep the choice of an open form, unless that coach is gone
+  for (const id of ["#f-coach1", "#f-coach2", "#f-coach3"]) {
+    const sel = $(id), kept = sel.value;
+    sel.innerHTML = options;
+    if (coaches.some(c => String(c.id) === kept)) sel.value = kept;
+  }
 }
 function currentCompId() {
   const sel = $("#p-comp-select");

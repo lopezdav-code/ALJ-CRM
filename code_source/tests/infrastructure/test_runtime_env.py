@@ -3,6 +3,7 @@ Runtime mode tests (production by default / dev on the Firebase emulator):
 - production unchanged without variables, nothing exposed to the browser;
 - dev mode rejected on Cloud Run or without the emulator (fail-closed);
 - Firestore URL, token and project redirected to the emulator in dev only;
+- HelloAsso API redirected to a local fake in dev only (e2e tests);
 - /runtime-config.js route;
 - guard of the fake data script.
 """
@@ -29,7 +30,10 @@ DEV_ENV = {
     "FIRESTORE_EMULATOR_HOST": "localhost:8081",
     "FIREBASE_AUTH_EMULATOR_HOST": "localhost:9099",
 }
-DEV_KEYS = list(DEV_ENV) + ["K_SERVICE", "ALJ_PUBLIC_FIRESTORE_EMULATOR", "ALJ_PUBLIC_AUTH_EMULATOR"]
+DEV_KEYS = list(DEV_ENV) + ["K_SERVICE", "ALJ_PUBLIC_FIRESTORE_EMULATOR", "ALJ_PUBLIC_AUTH_EMULATOR",
+                            "HELLOASSO_API_BASE_URL", "HELLOASSO_OAUTH_URL"]
+FAKE_HELLOASSO = {"HELLOASSO_API_BASE_URL": "http://localhost:8095/v5/",
+                  "HELLOASSO_OAUTH_URL": "http://localhost:8095/oauth2/token"}
 
 
 def _env(**values):
@@ -61,6 +65,11 @@ class TestProductionByDefault(unittest.TestCase):
         with _env(ALJ_ENV="staging"):
             self.assertEqual(runtime_env.env(), "prod")
 
+    def test_fake_helloasso_ignored_outside_dev_mode(self):
+        with _env(**FAKE_HELLOASSO):
+            self.assertEqual(runtime_env.helloasso_api_url(), "https://api.helloasso.com/v5")
+            self.assertEqual(runtime_env.helloasso_oauth_url(), "https://api.helloasso.com/oauth2/token")
+
 
 class TestDevMode(unittest.TestCase):
 
@@ -86,6 +95,28 @@ class TestDevMode(unittest.TestCase):
             with self.subTest(missing=missing), _env(**values):
                 with self.assertRaises(RuntimeError):
                     runtime_env.validate()
+
+    def test_helloasso_redirected_to_fake(self):
+        import helloasso_api
+        with _env(**DEV_ENV, **FAKE_HELLOASSO), \
+                patch.object(helloasso_api, "CLIENT_ID", "id"), patch.object(helloasso_api, "CLIENT_SECRET", "secret"), \
+                patch.object(helloasso_api.requests, "post") as post, patch.object(helloasso_api.requests, "get") as get:
+            post.return_value.json.return_value = {"access_token": "t"}
+            get.return_value.status_code = 200
+            get.return_value.json.return_value = {"id": 7}
+            self.assertEqual(helloasso_api.get_item(7), {"id": 7})
+            self.assertEqual(post.call_args.args[0], "http://localhost:8095/oauth2/token")
+            self.assertEqual(get.call_args.args[0], "http://localhost:8095/v5/items/7")
+
+    def test_check_env_refuses_remote_helloasso(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("check_env", os.path.join(_code_root, "dev", "check_env.py"))
+        check_env = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check_env)
+        with _env(**DEV_ENV, SMTP_HOST="localhost", HELLOASSO_API_BASE_URL="https://api.helloasso.com/v5"):
+            self.assertTrue(any("HELLOASSO_API_BASE_URL" in p for p in check_env.problems()))
+        with _env(**DEV_ENV, SMTP_HOST="localhost", **FAKE_HELLOASSO):
+            self.assertFalse(any("HELLOASSO" in p for p in check_env.problems()))
 
     def test_firestore_clients_use_emulator(self):
         with _env(**DEV_ENV):

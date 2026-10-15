@@ -9,11 +9,12 @@ echo ====================================================
 echo.
 
 :: 1. Vérifier si Python est installé
+set /p PYTHON_VERSION=<code_source\.python-version
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ❌ ERREUR : Python n'est pas installé sur ce PC !
     echo.
-    echo 👉 Veuillez installer Python, version 3.10 ou supérieure recommandée.
+    echo 👉 Veuillez installer Python %PYTHON_VERSION%, la version utilisée par l'application.
     echo 👉 IMPORTANT : Cochez impérativement la case Add Python.exe to PATH lors de l'installation de Python !
     echo 👉 Téléchargement direct : https://www.python.org/downloads/
     echo.

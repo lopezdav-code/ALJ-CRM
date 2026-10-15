@@ -3,6 +3,8 @@ import requests
 import urllib3
 from dotenv import load_dotenv
 
+from infrastructure import runtime_env
+
 # Désactiver les avertissements SSL lors de l'utilisation de verify=False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -12,14 +14,13 @@ load_dotenv()
 CLIENT_ID = os.getenv("HELLOASSO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("HELLOASSO_CLIENT_SECRET")
 ORG_SLUG = os.getenv("HELLOASSO_ORG_SLUG")
-BASE_URL = "https://api.helloasso.com/v5"
 
 def get_access_token():
     """Récupère un jeton d'accès OAuth2 auprès de HelloAsso."""
     if not CLIENT_ID or not CLIENT_SECRET:
         return None
         
-    url = "https://api.helloasso.com/oauth2/token"
+    url = runtime_env.helloasso_oauth_url()
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -92,7 +93,7 @@ def get_campaigns():
     if not token:
         return []
         
-    url = f"{BASE_URL}/organizations/{ORG_SLUG}/forms"
+    url = f"{runtime_env.helloasso_api_url()}/organizations/{ORG_SLUG}/forms"
     headers = {"Authorization": f"Bearer {token}"}
     return fetch_all_pages(url, headers)
 
@@ -102,7 +103,7 @@ def get_payments(campaign_type, campaign_slug):
     if not token:
         return []
         
-    url = f"{BASE_URL}/organizations/{ORG_SLUG}/forms/{campaign_type}/{campaign_slug}/payments"
+    url = f"{runtime_env.helloasso_api_url()}/organizations/{ORG_SLUG}/forms/{campaign_type}/{campaign_slug}/payments"
     headers = {"Authorization": f"Bearer {token}"}
     return fetch_all_pages(url, headers)
 
@@ -112,7 +113,7 @@ def get_items(campaign_type, campaign_slug):
     if not token:
         return []
         
-    url = f"{BASE_URL}/organizations/{ORG_SLUG}/forms/{campaign_type}/{campaign_slug}/items"
+    url = f"{runtime_env.helloasso_api_url()}/organizations/{ORG_SLUG}/forms/{campaign_type}/{campaign_slug}/items"
     headers = {"Authorization": f"Bearer {token}"}
     return fetch_all_pages(url, headers, params={"withDetails": "true"})
 
@@ -135,7 +136,7 @@ def _get_resource(path, params=None):
     if not token:
         raise HelloAssoApiError("Jeton d'accès HelloAsso indisponible")
     try:
-        response = requests.get(f"{BASE_URL}{path}", headers={"Authorization": f"Bearer {token}"},
+        response = requests.get(f"{runtime_env.helloasso_api_url()}{path}", headers={"Authorization": f"Bearer {token}"},
                                 params=params or {}, timeout=15)
     except requests.exceptions.RequestException as e:
         raise HelloAssoApiError(f"API HelloAsso injoignable : {e}")

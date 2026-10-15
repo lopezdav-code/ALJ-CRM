@@ -1,0 +1,28 @@
+# Throwaway stack of the e2e tests: Firebase emulator + Mailpit, started and removed by e2e/conftest.py.
+# Separate from the dev stack (dev/docker-compose.yml): other host ports, no persisted data, so a run
+# never touches the developer's emulator and always starts from a fresh one (its memory grows with use).
+#   docker compose -f e2e/docker-compose.yml up -d     (only to keep it between runs, see dev/README.md)
+name: alj-e2e
+
+services:
+  firebase-emulator:
+    build: ../dev/emulator
+    image: alj-firebase-emulator:15.31.0   # same image as the dev stack: built once
+    ports:
+      - "127.0.0.1:18081:8081"   # Firestore
+      - "127.0.0.1:19099:9099"   # Auth
+    volumes:
+      - ../firebase.json:/workspace/firebase.json:ro
+      - ../firestore.rules:/workspace/firestore.rules:ro
+    # No --import / --export-on-exit: nothing survives the run
+    command: ["firebase", "emulators:start", "--project", "demo-alj", "--only", "auth,firestore"]
+
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    ports:
+      - "127.0.0.1:11025:1025"   # SMTP
+      - "127.0.0.1:18025:8025"   # web UI / API
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_MAX_MESSAGES: "500"

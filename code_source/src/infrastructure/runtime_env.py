@@ -10,6 +10,8 @@ involved: in dev, the application's SMTP settings point to Mailpit (dev/dev.env)
 - ``ALJ_ENV=dev``: everything goes through the Firebase emulator (Auth + Firestore) of the
   ``demo-alj`` project. A ``demo-*`` project does not exist in production: even when
   misconfigured, no call can reach the real data. See ``code_source/dev/``.
+  The HelloAsso API can also be replaced by a local fake (``HELLOASSO_API_BASE_URL`` /
+  ``HELLOASSO_OAUTH_URL``, used by the e2e tests): these variables are ignored in production.
 
 Environment variables are read again on every call (tests, reload).
 """
@@ -17,6 +19,8 @@ import os
 from typing import Any, Dict, Optional
 
 PROD_FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1"
+PROD_HELLOASSO_API_URL = "https://api.helloasso.com/v5"
+PROD_HELLOASSO_OAUTH_URL = "https://api.helloasso.com/oauth2/token"
 DEV_PROJECT_ID = "demo-alj"
 EMULATOR_ADMIN_TOKEN = "owner"  # emulator admin token: bypasses the security rules
 
@@ -54,6 +58,20 @@ def validate() -> None:
 def firestore_base_url() -> str:
     host = firestore_emulator_host()
     return f"http://{host}/v1" if host else PROD_FIRESTORE_BASE_URL
+
+
+def _dev_override(name: str, default: str) -> str:
+    value = (os.environ.get(name) or "").strip()
+    return value if value and is_dev() else default
+
+
+def helloasso_api_url() -> str:
+    """HelloAsso API v5 base URL; a dev-only override points it to a local fake."""
+    return _dev_override("HELLOASSO_API_BASE_URL", PROD_HELLOASSO_API_URL).rstrip("/")
+
+
+def helloasso_oauth_url() -> str:
+    return _dev_override("HELLOASSO_OAUTH_URL", PROD_HELLOASSO_OAUTH_URL)
 
 
 def emulator_token() -> Optional[str]:
