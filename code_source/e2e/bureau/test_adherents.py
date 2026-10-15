@@ -168,7 +168,8 @@ def test_payment_certificate(page, mailpit, people, tmp_path):
     assert pdf.read_bytes().startswith(b"%PDF") and pdf.stat().st_size > 1_000
 
     page.locator("#att-send-btn").click()
-    expect(page.locator("#toast")).to_contain_text("Attestation envoyée avec succès")
+    # Sending renders the PDF again (5 s on a loaded CI runner)
+    expect(page.locator("#toast")).to_contain_text("Attestation envoyée avec succès", timeout=30_000)
     [sent] = mailpit.wait_for(f"to:{recipient} has:attachment")   # the only e-mails with one
     attachments = sent["Attachments"]
     assert [a["ContentType"] for a in attachments] == ["application/pdf"]

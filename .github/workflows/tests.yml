@@ -102,8 +102,10 @@ jobs:
         E2E_KEEP_STACK: '1' # kept for the logs below, removed by the last step
       # No --video: "retain-on-failure" still records every test, which overloads the 4-vCPU runner
       # shared by 4 workers (timeouts). The trace has a screenshot and DOM snapshot of every step.
+      # -n 2 (instead of 4 locally): the 4-vCPU runner also hosts the server, the emulator and the PDF
+      # rendering; 4 browsers on top of them slowed responses past the test timeouts.
       run: >
-        python -m pytest -c e2e/pytest.ini e2e
+        python -m pytest -c e2e/pytest.ini e2e -n 2
         --output e2e-results --tracing retain-on-failure
         --screenshot only-on-failure
 
