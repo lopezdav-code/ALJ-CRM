@@ -1,0 +1,105 @@
+name: Deploy Cloud Run
+
+# Continuous deployment of the API & PWA (code_source/) to Cloud Run, once the tests pass on main.
+# Authentication: Workload Identity Federation (no service-account key). The GCP identifiers are
+# GitHub variables of the "production" environment, never committed (public repository).
+# Env vars and Secret Manager references are already set on the Cloud Run service: deploying an
+# image without --set-env-vars / --set-secrets keeps them unchanged.
+# Setup and rollback: code_source/docs/guide_deploiement_cloud_run_helloasso.md, section 7.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false # never interrupt a deployment mid-way
+
+env:
+  SERVICE_NAME: alj-escalade-api
+  REGION: europe-west1
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  deploy:
+    needs: tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write # OIDC token exchanged for GCP credentials
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+
+    - name: Authenticate to Google Cloud (Workload Identity Federation)
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+        service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+    - name: Set up gcloud
+      uses: google-github-actions/setup-gcloud@v3
+
+    - name: Record the live revision (rollback target)
+      id: previous
+      # Same query as live_revision() in code_source/deploy_cloud_run.sh
+      run: |
+        revision=$(gcloud run services describe "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" \
+          --flatten='status.traffic[]' \
+          --format='value(status.traffic.percent,status.traffic.revisionName)' 2>/dev/null \
+          | sort -rn | awk 'NR == 1 { print $2 }' || true)
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"
+        echo "Live revision: ${revision:-none}"
+
+    - name: Build and push the image
+      id: image
+      run: |
+        image="$REGION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/$SERVICE_NAME:$GITHUB_SHA"
+        gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+        docker build -f code_source/Dockerfile -t "$image" code_source
+        docker push "$image"
+        echo "image=$image" >> "$GITHUB_OUTPUT"
+
+    - name: Deploy to Cloud Run
+      id: deploy
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+      # Same settings as code_source/deploy_cloud_run.sh; no env/secret flags so the service keeps them.
+      run: |
+        gcloud run deploy "$SERVICE_NAME" --image "$IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+          --platform managed --allow-unauthenticated \
+          --memory 1Gi --cpu 1 --min-instances 0 --max-instances 2 --timeout 300 --quiet
+        # A previous rollback pins traffic to a fixed revision: make sure the new one serves it
+        gcloud run services update-traffic "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" --to-latest --quiet
+        url=$(gcloud run services describe "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+
+    - name: Health check
+      env:
+        URL: ${{ steps.deploy.outputs.url }}
+      run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$URL/health"
+
+    - name: Rollback instructions
+      if: failure() && steps.previous.outputs.revision != ''
+      env:
+        PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+      run: |
+        {
+          echo "### ❌ Deployment failed"
+          echo "Previous live revision: \`$PREVIOUS_REVISION\`. Roll back from code_source/ (Cloud Shell):"
+          echo '```'
+          echo "./deploy_cloud_run.sh --rollback $PREVIOUS_REVISION"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"

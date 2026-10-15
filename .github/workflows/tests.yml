@@ -1,8 +1,7 @@
 name: Tests
 
+# On main, these tests run through deploy-cloud-run.yml (which deploys only if they pass).
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
