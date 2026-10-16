@@ -878,6 +878,12 @@ class CompetitionsPage(QWidget):
         self.input_statut.setStyleSheet("QComboBox { border: 1px solid #CBD5E1; border-radius: 6px; padding: 7px; }")
         col4.addWidget(self.input_statut)
         row2.addLayout(col4, 1)
+
+        col_wa = QVBoxLayout()
+        col_wa.addWidget(field_label("Lien groupe WhatsApp"))
+        self.input_whatsapp = line_edit("Ex : https://chat.whatsapp.com/...")
+        col_wa.addWidget(self.input_whatsapp)
+        row2.addLayout(col_wa, 2)
         form.addLayout(row2)
 
         row_coaches = QHBoxLayout()
@@ -1261,6 +1267,7 @@ class CompetitionsPage(QWidget):
             list(LIBELLES_STATUT_COMPETITION.keys()).index(c.statut)
             if c.statut in LIBELLES_STATUT_COMPETITION else 0
         )
+        self.input_whatsapp.setText(c.whatsapp_link or "")
         
         self._populate_coach_dropdowns()
         
@@ -1288,6 +1295,7 @@ class CompetitionsPage(QWidget):
         self.input_id_ffme.clear()
         self.input_prix.setValue(0.0)
         self.input_statut.setCurrentIndex(0)
+        self.input_whatsapp.clear()
         
         self._populate_coach_dropdowns()
         self.input_coach1.setCurrentIndex(0)
@@ -1322,6 +1330,7 @@ class CompetitionsPage(QWidget):
         comp.date_fin = f"{df.year():04d}-{df.month():02d}-{df.day():02d}"
         comp.prix = round(self.input_prix.value(), 2)
         comp.statut = list(LIBELLES_STATUT_COMPETITION.keys())[self.input_statut.currentIndex()]
+        comp.whatsapp_link = self.input_whatsapp.text().strip()
         comp.coach1_id = self.input_coach1.currentData()
         comp.coach2_id = self.input_coach2.currentData()
         comp.coach3_id = self.input_coach3.currentData()

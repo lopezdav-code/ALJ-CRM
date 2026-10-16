@@ -293,7 +293,8 @@ class TestCompetitionRepository(unittest.TestCase):
         self.assertTrue(os.path.exists(self.comp_db_path))
 
         comp = Competition(id_ffme="EVT-2026-001", nom="Championnat U13",
-                           date_competition="2026-11-15", prix=10.0)
+                           date_competition="2026-11-15", prix=10.0,
+                           whatsapp_link="https://chat.whatsapp.com/test_sqlite")
         comp_id = self.repo.save_competition(comp)
         self.assertTrue(comp_id)
 
@@ -301,6 +302,7 @@ class TestCompetitionRepository(unittest.TestCase):
         self.assertEqual(loaded.nom, "Championnat U13")
         self.assertEqual(loaded.statut, "en_preparation")
         self.assertEqual(loaded.prix, 10.0)
+        self.assertEqual(loaded.whatsapp_link, "https://chat.whatsapp.com/test_sqlite")
 
         loaded.statut = STATUT_EN_COURS
         self.repo.save_competition(loaded)

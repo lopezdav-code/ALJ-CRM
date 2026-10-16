@@ -140,7 +140,7 @@ class FirestoreRepoTestCase(unittest.TestCase):
 class TestCompetitionsCrud(FirestoreRepoTestCase):
     def test_create_edit_list_delete(self):
         comp = Competition(nom="Coupe Rhône", id_ffme="18846", date_competition="2026-03-15",
-                           prix=15.0)
+                           prix=15.0, whatsapp_link="https://chat.whatsapp.com/testfirestore")
         comp_id = Repo.save_competition(comp)
         self.assertTrue(comp_id)
         self.assertIn(str(comp_id), self.fake.store["competitions"])
@@ -148,10 +148,14 @@ class TestCompetitionsCrud(FirestoreRepoTestCase):
         got = Repo.get_competition(comp_id)
         self.assertEqual(got.nom, "Coupe Rhône")
         self.assertEqual(got.doc_id, str(comp_id))
+        self.assertEqual(got.whatsapp_link, "https://chat.whatsapp.com/testfirestore")
 
         got.prix = 18.0
+        got.whatsapp_link = "https://chat.whatsapp.com/updated"
         Repo.save_competition(got)
-        self.assertEqual(Repo.get_competition(comp_id).prix, 18.0)
+        saved = Repo.get_competition(comp_id)
+        self.assertEqual(saved.prix, 18.0)
+        self.assertEqual(saved.whatsapp_link, "https://chat.whatsapp.com/updated")
         # Une seule documentation de l'épreuve (pas de doublon)
         self.assertEqual(len(self.fake.store["competitions"]), 1)
 

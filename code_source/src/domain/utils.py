@@ -99,7 +99,7 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
     - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
     - {num_licence} : licence FFME du destinataire ;
     - variables compétition : {no_competition}, {name_competition}, {montant_competition},
-      {date_competition} (laissées telles quelles si absentes du contexte).
+      {date_competition}, {whatapp_Id} (laissées telles quelles si absentes du contexte).
 
     escape_html=True: values are HTML-escaped, for a template already converted to HTML
     (member data comes from the public HelloAsso form and must never add markup).
@@ -137,5 +137,17 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
         val = str(ctx.get(key) or "").strip()
         if val:
             out = out.replace("{" + key + "}", enc(val))
+
+    wa_val = str(
+        ctx.get("whatapp_Id")
+        or ctx.get("whatsapp_link")
+        or ctx.get("whatsapp_id")
+        or ctx.get("whatapp_id")
+        or ctx.get("whatsappLink")
+        or ""
+    ).strip()
+    if wa_val:
+        for wa_key in ("whatapp_Id", "whatsapp_id", "whatapp_id", "whatsapp_Id", "whatsapp_link", "whatapp_link"):
+            out = out.replace("{" + wa_key + "}", enc(wa_val))
     return out
 

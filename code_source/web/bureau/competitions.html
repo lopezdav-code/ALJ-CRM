@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Bureau · Compétitions (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Bureau · Compétitions (v23)</title>
 <meta name="theme-color" content="#0F172A">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='85' font-size='85'>🏆</text></svg>">
 <link rel="stylesheet" href="/static-web/alj.css">
@@ -585,6 +585,10 @@ startBureau({
               <label class="fld">Lien résultats MyCompet (optionnel)</label>
               <input type="text" id="f-url-resultats" class="search-input" placeholder="Ex: https://mycompet.ffme.fr/resultat/resultat_13660 ou 13660" style="width:100%;">
             </div>
+            <div>
+              <label class="fld">Lien du groupe WhatsApp (optionnel)</label>
+              <input type="url" id="f-whatsapp" class="search-input" placeholder="Ex: https://chat.whatsapp.com/..." style="width:100%;">
+            </div>
             <div class="btn-row" style="margin-top:10px;">
               <button type="button" class="btn btn-muted" id="comp-modal-cancel">Annuler</button>
               <button type="submit" class="btn btn-primary" id="comp-modal-submit">Enregistrer l'épreuve</button>
@@ -627,7 +631,7 @@ startBureau({
               <input type="text" id="comp-email-subject" class="search-input" style="width:100%;">
             </div>
             <div>
-              <label class="fld">Corps du message *</label>
+              <label class="fld">Corps du message (Balises : {Prénom}, {Nom}, {name_competition}, {no_competition}, {montant_competition}, {date_competition}, {whatapp_Id}) *</label>
               <textarea id="comp-email-body" class="fld-input" rows="8" style="width:100%; font-size:12.5px;"></textarea>
             </div>
             <div>
@@ -878,6 +882,14 @@ startBureau({
                   <span class="muted" style="font-style:italic; font-size:12px;">Non renseignés — cliquez sur « 🏆 Trouver les résultats » pour les détecter automatiquement</span>
                 `}
               </div>
+              ${comp.whatsapp_link ? `
+                <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12.5px; flex-wrap:wrap;">
+                  <span style="font-weight:700; color:#15803D;">💬 Groupe WhatsApp :</span>
+                  <a href="${esc(comp.whatsapp_link)}" target="_blank" rel="noopener noreferrer" style="color:#16A34A; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:5px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:6px; padding:2px 8px;" title="Rejoindre le groupe WhatsApp dédié">
+                    📱 ${esc(comp.whatsapp_link)} ↗
+                  </a>
+                </div>
+              ` : ""}
             </div>
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -2447,6 +2459,7 @@ startBureau({
       $("f-prix").value = "15";
       $("f-idffme").value = "";
       $("f-url-resultats").value = "";
+      $("f-whatsapp").value = "";
       renderCoachCheckboxes([], []);
       $("comp-form-modal").style.display = "flex";
       $("f-nom").focus();
@@ -2463,6 +2476,7 @@ startBureau({
       $("f-prix").value = c.prix != null ? c.prix : "15";
       $("f-idffme").value = c.id_ffme || "";
       $("f-url-resultats").value = c.url_resultats || "";
+      $("f-whatsapp").value = c.whatsapp_link || "";
       renderCoachCheckboxes(c.coach_ids || [], c.coaches || []);
       $("comp-form-modal").style.display = "flex";
       $("f-nom").focus();
@@ -2486,6 +2500,7 @@ startBureau({
       const prix = parseFloat($("f-prix").value || "0") || 0;
       const idffme = $("f-idffme").value.trim();
       const urlResultats = $("f-url-resultats").value.trim();
+      const whatsappLink = $("f-whatsapp").value.trim();
 
       const selectedCoachIds = [];
       const selectedCoachNames = [];
@@ -2504,6 +2519,7 @@ startBureau({
           await db.collection("competitions").doc(String(editCompId)).update({
             nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
             url_resultats: urlResultats,
+            whatsapp_link: whatsappLink,
             coach_ids: selectedCoachIds,
             coaches: selectedCoachNames,
             updated_at: new Date().toISOString()
@@ -2513,6 +2529,7 @@ startBureau({
           const newDoc = await db.collection("competitions").add({
             nom, date_competition: date, date_fin: dateFin, lieu, type, prix, id_ffme: idffme,
             url_resultats: urlResultats,
+            whatsapp_link: whatsappLink,
             coach_ids: selectedCoachIds,
             coaches: selectedCoachNames,
             participants: [],

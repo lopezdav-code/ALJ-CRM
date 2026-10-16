@@ -78,6 +78,29 @@ class TestApplyTemplateVariables(unittest.TestCase):
         out = apply_template_variables("Date : {date_competition}", _member(), ctx)
         self.assertEqual(out, "Date : 15/10/2026")
 
+    def test_whatsapp_link_replaced_with_whatapp_id_token(self):
+        ctx = {
+            "no_competition": "18846",
+            "name_competition": "Coupe du Rhône 2027",
+            "whatapp_Id": "https://chat.whatsapp.com/invite123"
+        }
+        out = apply_template_variables("Lien du groupe : {whatapp_Id}", _member(), ctx)
+        self.assertEqual(out, "Lien du groupe : https://chat.whatsapp.com/invite123")
+
+    def test_whatsapp_link_fallback_keys(self):
+        ctx = {
+            "whatsapp_link": "https://chat.whatsapp.com/invite456"
+        }
+        out1 = apply_template_variables("Groupe : {whatapp_Id}", _member(), ctx)
+        self.assertEqual(out1, "Groupe : https://chat.whatsapp.com/invite456")
+
+        out2 = apply_template_variables("Groupe : {whatsapp_link} et {whatsapp_id}", _member(), ctx)
+        self.assertEqual(out2, "Groupe : https://chat.whatsapp.com/invite456 et https://chat.whatsapp.com/invite456")
+
+    def test_whatsapp_token_kept_if_no_context(self):
+        out = apply_template_variables("Rejoins {whatapp_Id}", _member(), None)
+        self.assertEqual(out, "Rejoins {whatapp_Id}")
+
 
 if __name__ == "__main__":
     unittest.main()

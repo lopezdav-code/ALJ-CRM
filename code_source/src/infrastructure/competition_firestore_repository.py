@@ -144,6 +144,9 @@ class CompetitionFirestoreRepository:
             "coach1_id": doc.get("coach1_id") or (coach_ids[0] if len(coach_ids) > 0 else None),
             "coach2_id": doc.get("coach2_id") or (coach_ids[1] if len(coach_ids) > 1 else None),
             "coach3_id": doc.get("coach3_id") or (coach_ids[2] if len(coach_ids) > 2 else None),
+            "url_resultats": doc.get("url_resultats"),
+            "resultats_synced_at": doc.get("resultats_synced_at"),
+            "whatsapp_link": doc.get("whatsapp_link"),
             "_doc_id": doc.get("_doc_id"),
         }
         return Competition.from_row(row)
@@ -170,6 +173,9 @@ class CompetitionFirestoreRepository:
             "coach1_id": comp.coach1_id,
             "coach2_id": comp.coach2_id,
             "coach3_id": comp.coach3_id,
+            "url_resultats": comp.url_resultats or "",
+            "resultats_synced_at": comp.resultats_synced_at or "",
+            "whatsapp_link": comp.whatsapp_link or "",
             "participants": parts,
             "created_at": (doc or {}).get("created_at") or now,
             "updated_at": now,

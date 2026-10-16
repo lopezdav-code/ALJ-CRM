@@ -24,7 +24,8 @@ class TestEmailDispatchService(unittest.TestCase):
             "name_competition": "Coupe Régionale Bugey",
             "no_competition": "18866",
             "montant_competition": "18,00 €",
-            "date_competition": "03/10/2026"
+            "date_competition": "03/10/2026",
+            "whatapp_Id": "https://chat.whatsapp.com/testgroup"
         }
         recipient = {
             "first_name": "Éden",
@@ -33,7 +34,7 @@ class TestEmailDispatchService(unittest.TestCase):
             "email": "eden.coche@example.com"
         }
         template_subj = "Convocation {name_competition} - {first_name}"
-        template_body = "Bonjour {first_name} {last_name},\nTa sélection pour {name_competition} (#{no_competition}) est confirmée.\nMontant : {montant_competition}."
+        template_body = "Bonjour {first_name} {last_name},\nTa sélection pour {name_competition} (#{no_competition}) est confirmée.\nMontant : {montant_competition}.\nGroupe WhatsApp : {whatapp_Id}"
 
         with patch.object(EmailDispatchService, "get_competition_context", return_value=comp_ctx):
             preview = EmailDispatchService.preview(
@@ -48,7 +49,20 @@ class TestEmailDispatchService(unittest.TestCase):
             self.assertIn("Bonjour Éden COCHE", preview["body_plain"])
             self.assertIn("Coupe Régionale Bugey (#18866)", preview["body_plain"])
             self.assertIn("18,00 €", preview["body_plain"])
+            self.assertIn("https://chat.whatsapp.com/testgroup", preview["body_plain"])
             self.assertIn("<div", preview["body_html"])
+
+    def test_get_competition_context_includes_whatsapp_link(self):
+        from domain.competition_models import Competition
+        fake_comp = Competition(
+            id=12, nom="Coupe Bugey", id_ffme="12345", prix=15.0,
+            date_competition="2026-10-03", whatsapp_link="https://chat.whatsapp.com/abc"
+        )
+        with patch("infrastructure.email_dispatch_service.CompetitionRepository.get_competition", return_value=fake_comp):
+            ctx = EmailDispatchService.get_competition_context(12)
+            self.assertEqual(ctx["whatapp_Id"], "https://chat.whatsapp.com/abc")
+            self.assertEqual(ctx["whatsapp_link"], "https://chat.whatsapp.com/abc")
+            self.assertEqual(ctx["name_competition"], "Coupe Bugey")
 
     @patch("infrastructure.email_repository.EmailRepository.send_email")
     def test_dispatch_emails_success(self, mock_send):

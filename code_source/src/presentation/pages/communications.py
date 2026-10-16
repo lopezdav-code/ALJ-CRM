@@ -1062,7 +1062,9 @@ class CommunicationsPage(QWidget):
             "Variables disponibles lorsqu un filtre Compet est actif (onglet Competitions) :\n\n"
             "- {no_competition} : identifiant FFME de la competition selectionnee\n"
             "- {name_competition} : nom de la competition selectionnee\n"
-            "- {montant_competition} : tarif d inscription de la competition\n\n"
+            "- {montant_competition} : tarif d inscription de la competition\n"
+            "- {date_competition} : date ou periode de la competition\n"
+            "- {whatapp_Id} : lien du groupe WhatsApp de la competition\n\n"
             "Variables du texte d invitation WhatsApp (lorsque l invitation est jointe) :\n\n"
             "- {group_name} : nom du groupe de creneau\n"
             "- {whatsapp_link} : lien d invitation WhatsApp du creneau"
@@ -1493,6 +1495,7 @@ class CommunicationsPage(QWidget):
         
         from domain.utils import format_periode
         date_formatted = format_periode(comp.date_competition, comp.date_fin)
+        wa_link = str(getattr(comp, "whatsapp_link", "") or "").strip()
 
         return {
             "competition_id": comp.id,
@@ -1501,6 +1504,8 @@ class CommunicationsPage(QWidget):
             "name_competition": comp.nom,
             "montant_competition": format_montant(comp.prix),
             "date_competition": date_formatted,
+            "whatapp_Id": wa_link,
+            "whatsapp_link": wa_link,
         }
 
     def focus_on_member(self, member):

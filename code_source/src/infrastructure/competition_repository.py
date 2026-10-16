@@ -67,9 +67,16 @@ class CompetitionRepository:
                 id_ffme TEXT DEFAULT '',
                 nom TEXT NOT NULL,
                 date_competition TEXT DEFAULT '',
+                date_fin TEXT DEFAULT '',
                 prix REAL DEFAULT 0.0,
                 statut TEXT DEFAULT 'en_preparation',
                 helloasso_ref TEXT DEFAULT '',
+                coach1_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+                coach2_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+                coach3_id INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+                url_resultats TEXT DEFAULT '',
+                resultats_synced_at TEXT DEFAULT '',
+                whatsapp_link TEXT DEFAULT '',
                 created_at TEXT DEFAULT '',
                 updated_at TEXT DEFAULT ''
             );
@@ -177,6 +184,10 @@ class CompetitionRepository:
                 conn.execute("ALTER TABLE competitions ADD COLUMN url_resultats TEXT DEFAULT ''")
             if "resultats_synced_at" not in comp_cols:
                 conn.execute("ALTER TABLE competitions ADD COLUMN resultats_synced_at TEXT DEFAULT ''")
+            if "date_fin" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN date_fin TEXT DEFAULT ''")
+            if "whatsapp_link" not in comp_cols:
+                conn.execute("ALTER TABLE competitions ADD COLUMN whatsapp_link TEXT DEFAULT ''")
 
             # Migration : colonnes résultats et pointage dans la table participants
             part_cols = {r["name"] for r in conn.execute("PRAGMA table_info(participants)").fetchall()}
@@ -397,19 +408,23 @@ class CompetitionRepository:
             cur = conn.cursor()
             if comp.id:
                 cur.execute(
-                    """UPDATE competitions SET id_ffme=?, nom=?, date_competition=?, prix=?,
-                       statut=?, helloasso_ref=?, coach1_id=?, coach2_id=?, coach3_id=?, updated_at=? WHERE id=?""",
-                    (comp.id_ffme, comp.nom, comp.date_competition, comp.prix,
-                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id, now, comp.id),
+                    """UPDATE competitions SET id_ffme=?, nom=?, date_competition=?, date_fin=?, prix=?,
+                       statut=?, helloasso_ref=?, coach1_id=?, coach2_id=?, coach3_id=?,
+                       url_resultats=?, resultats_synced_at=?, whatsapp_link=?, updated_at=? WHERE id=?""",
+                    (comp.id_ffme, comp.nom, comp.date_competition, comp.date_fin, comp.prix,
+                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id,
+                     comp.url_resultats, comp.resultats_synced_at, comp.whatsapp_link, now, comp.id),
                 )
                 comp_id = comp.id
             else:
                 cur.execute(
-                    """INSERT INTO competitions (id_ffme, nom, date_competition, prix,
-                       statut, helloasso_ref, coach1_id, coach2_id, coach3_id, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (comp.id_ffme, comp.nom, comp.date_competition, comp.prix,
-                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id, now, now),
+                    """INSERT INTO competitions (id_ffme, nom, date_competition, date_fin, prix,
+                       statut, helloasso_ref, coach1_id, coach2_id, coach3_id,
+                       url_resultats, resultats_synced_at, whatsapp_link, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (comp.id_ffme, comp.nom, comp.date_competition, comp.date_fin, comp.prix,
+                     comp.statut, comp.helloasso_ref, comp.coach1_id, comp.coach2_id, comp.coach3_id,
+                     comp.url_resultats, comp.resultats_synced_at, comp.whatsapp_link, now, now),
                 )
                 comp_id = cur.lastrowid
             conn.commit()

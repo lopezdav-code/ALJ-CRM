@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Version de la page web : à incrémenter à chaque modification, en même temps que CACHE_NAME dans sw.js -->
-<meta name="alj-web-version" content="22">
-<title>ALJ Escalade — Gestion des Compétitions (v22)</title>
+<meta name="alj-web-version" content="23">
+<title>ALJ Escalade — Gestion des Compétitions (v23)</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1E293B">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -159,7 +159,7 @@
 
 <header>
   <div class="title">
-    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v22</span></b>
+    <b>🏆 ALJ Escalade — Compétitions <span class="web-version" id="web-version">v23</span></b>
     <small id="sync-info">Connexion à Firebase…</small>
   </div>
   <a class="icon-btn" id="annuaire-link" href="/index?vue=pwa" title="Annuaire des adhérents" style="display:none;align-items:center;text-decoration:none">📇</a>
@@ -232,6 +232,10 @@
           <label class="fld">Tarif d'inscription (€)</label>
           <input type="number" id="f-prix" min="0" step="0.5" placeholder="10">
         </div>
+        <div>
+          <label class="fld">Lien groupe WhatsApp</label>
+          <input type="url" id="f-whatsapp" placeholder="https://chat.whatsapp.com/...">
+        </div>
         <div style="display: none;">
           <label class="fld">Statut</label>
           <select id="f-statut">
@@ -291,6 +295,7 @@
     <div class="card">
       <label class="fld">Compétition</label>
       <select id="p-comp-select"></select>
+      <div id="p-comp-whatsapp-box" style="margin:6px 0 2px;"></div>
       <div class="btn-row">
         <button class="btn btn-edit btn-mini" id="p-edit-btn" onclick="openEdit(currentCompId())" style="flex:1">✏️ Modifier l'épreuve</button>
         <button class="btn btn-muted btn-mini" id="p-load-group" style="flex:2">🧗 Charger le groupe « Compétition »</button>
@@ -485,7 +490,7 @@
       <label class="fld">Sujet de l'e-mail *</label>
       <input type="text" id="em-subject" placeholder="Sujet de votre message..." oninput="updateEmailPreview()">
 
-      <label class="fld">Corps du message (Balises : {first_name}, {name_competition}, {montant_competition}, {no_competition}, {date_competition}) *</label>
+      <label class="fld">Corps du message (Balises : {first_name}, {name_competition}, {montant_competition}, {no_competition}, {date_competition}, {whatapp_Id}) *</label>
       <textarea id="em-body" class="fld-input" rows="6" placeholder="Bonjour {first_name}, ..." oninput="updateEmailPreview()"></textarea>
 
       <div class="section-h" style="margin-top:12px;">👁 Aperçu en direct pour <span id="em-preview-recipient">—</span></div>
@@ -1107,6 +1112,12 @@ function compCardHtml(c) {
             (${nbParticipe} participant${nbParticipe > 1 ? "s" : ""} · ${nbEnAttente} en attente · ${nbPaye} payé${nbPaye > 1 ? "s" : ""})
           </div>
           <div class="m-sub" style="margin-top:2px; color: #475569;">${esc(coachesText)}</div>
+          ${c.whatsapp_link ? `
+            <div class="m-sub" style="margin-top:2px;">
+              <a href="${esc(c.whatsapp_link)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="color:#16A34A; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:4px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:4px; padding:1px 6px;">
+                💬 Groupe WhatsApp ↗
+              </a>
+            </div>` : ""}
         </div>
         <span class="badge" style="display: ${archived ? "inline-block" : "none"}; background:#64748B">📦 Archivée</span>
       </div>
@@ -1176,6 +1187,7 @@ function openEdit(id) {
   finAuto = !c.date_fin || c.date_fin === c.date_competition;
   $("#f-prix").value = c.prix != null ? c.prix : 0;
   $("#f-statut").value = c.statut || "en_preparation";
+  $("#f-whatsapp").value = c.whatsapp_link || "";
   populateCoachDropdowns();
   const ids = c.coach_ids || [];
   $("#f-coach1").value = ids[0] != null ? String(ids[0]) : "";
@@ -1237,7 +1249,7 @@ function resetCompForm() {
   editSourcePage = null;
   $("#f-form-title").textContent = "➕ Nouvelle compétition";
   $("#f-nom").value = ""; $("#f-idffme").value = ""; $("#f-date").value = ""; $("#f-date-fin").value = ""; finAuto = true;
-  $("#f-prix").value = ""; $("#f-statut").value = "en_preparation";
+  $("#f-prix").value = ""; $("#f-statut").value = "en_preparation"; $("#f-whatsapp").value = "";
   populateCoachDropdowns();
   $("#f-coach1").value = "";
   $("#f-coach2").value = "";
@@ -1270,6 +1282,7 @@ async function createCompetition() {
       date_fin: dateFinValue(),
       prix: parseFloat($("#f-prix").value || "0") || 0,
       statut: $("#f-statut").value,
+      whatsapp_link: $("#f-whatsapp").value.trim(),
       coach_ids: coachIds,
       coaches: coachNames(coachIds),
       coach1_id: coachIds[0] != null ? coachIds[0] : null,
@@ -1313,6 +1326,7 @@ async function updateCompetition() {
       date_fin: dateFinValue(),
       prix: parseFloat($("#f-prix").value || "0") || 0,
       statut: $("#f-statut").value,
+      whatsapp_link: $("#f-whatsapp").value.trim(),
       coach_ids: coachIds,
       coaches: coachNames(coachIds),
       coach1_id: coachIds[0] != null ? coachIds[0] : null,
@@ -1386,14 +1400,31 @@ function renderParticipants() {
   const isCoach = isCoachUser();
   const compId = currentCompId();
   const wrap = $("#p-list"), count = $("#p-count");
+  const waBox = $("#p-comp-whatsapp-box");
   if (!compId) {
     wrap.innerHTML = `<div class="empty">Créez d'abord une compétition.</div>`;
     count.textContent = "—";
+    if (waBox) waBox.innerHTML = "";
     $("#p-search-results").innerHTML = "";
     if ($("#p-kpi-participe")) $("#p-kpi-participe").textContent = "0";
     if ($("#p-kpi-attente")) $("#p-kpi-attente").textContent = "0";
     if ($("#p-kpi-paye")) $("#p-kpi-paye").textContent = "0";
     return;
+  }
+  const compObj = findComp(compId);
+  if (waBox) {
+    if (compObj && compObj.whatsapp_link) {
+      waBox.innerHTML = `
+        <div style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px; flex-wrap:wrap;">
+          <span style="font-weight:700; color:#15803D;">💬 Groupe WhatsApp :</span>
+          <a href="${esc(compObj.whatsapp_link)}" target="_blank" rel="noopener noreferrer" style="color:#16A34A; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:4px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:4px; padding:2px 8px;" title="Rejoindre le groupe WhatsApp dédié">
+            📱 Rejoindre le groupe WhatsApp ↗
+          </a>
+        </div>
+      `;
+    } else {
+      waBox.innerHTML = "";
+    }
   }
   const allRows = competitionAdherents(compId);
   const nbParticipe = allRows.filter(r => r.selectionne).length;
@@ -2508,14 +2539,17 @@ function updateEmailPreview() {
     name_competition: comp?.nom || "Compétition",
     no_competition: comp?.id_ffme || "",
     montant_competition: comp?.prix ? `${Number(comp.prix).toFixed(2).replace('.', ',')} €` : "0,00 €",
-    date_competition: dateFmt
+    date_competition: dateFmt,
+    whatapp_Id: (comp?.whatsapp_link || "").trim(),
+    whatsapp_link: (comp?.whatsapp_link || "").trim(),
+    whatsapp_id: (comp?.whatsapp_link || "").trim()
   };
 
   let subj = $("#em-subject").value || "";
   let body = $("#em-body").value || "";
 
   for (const [k, v] of Object.entries(ctx)) {
-    const reg = new RegExp("{" + k + "}", "g");
+    const reg = new RegExp("{" + k + "}", "gi");
     subj = subj.replace(reg, v);
     body = body.replace(reg, v);
   }

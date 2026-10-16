@@ -93,6 +93,7 @@ class EmailDispatchService:
 
         from domain.utils import format_periode
         date_formatted = format_periode(comp.date_competition, comp.date_fin)
+        wa_link = str(getattr(comp, "whatsapp_link", "") or "").strip()
 
         return {
             "competition_id": str(comp.id),
@@ -101,6 +102,8 @@ class EmailDispatchService:
             "name_competition": comp.nom,
             "montant_competition": format_montant(comp.prix),
             "date_competition": date_formatted,
+            "whatapp_Id": wa_link,
+            "whatsapp_link": wa_link,
         }
 
     @classmethod

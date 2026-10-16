@@ -87,6 +87,7 @@ class Competition:
     coach3_id: int = None
     url_resultats: str = ""
     resultats_synced_at: str = ""
+    whatsapp_link: str = ""          # Lien d'invitation au groupe WhatsApp de la compétition
     # Identifiant Firestore réel du document (peut différer de str(id) sur une
     # base héritée ; normalisé au premier chargement par le référentiel).
     doc_id: str = None
@@ -108,6 +109,7 @@ class Competition:
             "coach3_id": self.coach3_id,
             "url_resultats": self.url_resultats,
             "resultats_synced_at": self.resultats_synced_at,
+            "whatsapp_link": self.whatsapp_link,
         }
 
     @classmethod
@@ -128,6 +130,7 @@ class Competition:
             coach3_id=row.get("coach3_id"),
             url_resultats=str(row.get("url_resultats") or ""),
             resultats_synced_at=str(row.get("resultats_synced_at") or ""),
+            whatsapp_link=str(row.get("whatsapp_link") or ""),
             doc_id=row.get("doc_id") or row.get("_doc_id"),
         )
 
