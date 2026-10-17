@@ -189,12 +189,16 @@ Fin de parcours : supprimer `presentation/`, `app.py`, `launcher/`, `installer/`
 
 ```bash
 # Debian/Ubuntu : module venv + libs Pango pour WeasyPrint (cf. Dockerfile) ; Docker pour l'émulateur
-sudo apt install python3-venv libpango-1.0-0 libpangoft2-1.0-0
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0
 
 cd code_source
-python3 -m venv venv && source venv/bin/activate                   # venv/ est ignoré par git
-pip install -r requirements-docker.txt -r requirements-dev.txt     # profil « web » (sans Qt/pywin32) + Faker
+uv sync --group web          # .venv/ (ignoré par git) : profil « web » (sans Qt/pywin32) + outils de dev + Faker
+source .venv/bin/activate
 ```
+
+Les dépendances sont déclarées dans `pyproject.toml` et verrouillées dans `uv.lock` (versions exactes, identiques en
+CI, en dev et dans l'image Docker). Les `requirements*.txt` en sont des exports générés
+(`python dev/export_requirements.py`) : le client lourd les installe avec pip dans son runtime Python embarqué.
 
 La version de Python est définie dans `code_source/.python-version` (version complète, ex. `3.14.8`), lue par
 la CI (`setup-python`), le Python embarqué du mode portable Windows (`make_portable.py`) et les messages de

@@ -1,2 +1,6 @@
 # Conserver les retours à la ligne Linux (LF) pour les scripts shell
 *.sh text eol=lf
+
+# Fichiers générés par uv : LF partout (vérification de fraîcheur en CI sous Windows)
+requirements*.txt text eol=lf
+uv.lock text eol=lf

@@ -1,6 +1,46 @@
 [project]
 name = "alj-escalade-manager"
 version = "2.0.5"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.139.0",
+    "uvicorn==0.51.0",
+    "requests==2.34.2",
+    "PyJWT[crypto]==2.15.1",
+    "pandas==3.0.3",
+    "openpyxl==3.1.5",
+    "python-dotenv==1.2.2",
+    "geopy==2.4.1",
+    "pillow==12.3.0",
+    "lxml==6.1.1",
+]
+
+[dependency-groups]
+# Client lourd Windows (Qt, Word COM, trousseau). Exclu de l'image Cloud Run.
+desktop = [
+    "PySide6==6.11.1",
+    "pywin32==312; sys_platform == 'win32'",
+    "python-docx==1.2.0",
+    "keyring==25.7.0",
+    # Repli PDF pur Python pour les attestations quand WeasyPrint/Pango est indisponible (Windows)
+    "pydyf==0.12.1",
+]
+# Génération des attestations PDF sur Cloud Run (nécessite Pango côté système).
+web = ["weasyprint==70.0"]
+dev = [
+    "pytest==9.1.1",
+    "pytest-timeout==2.4.0",
+    "ruff==0.16.5",
+    "mypy==2.3.1",
+    "httpx==0.28.1",
+    # Fake data for the development environment (dev/seed)
+    "Faker==40.39.0",
+]
+
+[tool.uv]
+# Arborescence plate src/ : pas un paquet installable.
+package = false
+default-groups = ["dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
