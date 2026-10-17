@@ -94,6 +94,7 @@ class EmailDispatchService:
         from domain.utils import format_periode
         date_formatted = format_periode(comp.date_competition, comp.date_fin)
         wa_link = str(getattr(comp, "whatsapp_link", "") or "").strip()
+        bloc_wa = f"Voici le lien du groupe WhatApp dédié à cette compétition : {wa_link}" if wa_link else ""
 
         return {
             "competition_id": str(comp.id),
@@ -104,6 +105,7 @@ class EmailDispatchService:
             "date_competition": date_formatted,
             "whatapp_Id": wa_link,
             "whatsapp_link": wa_link,
+            "bloc_whatsapp": bloc_wa,
         }
 
     @classmethod

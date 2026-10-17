@@ -1064,7 +1064,8 @@ class CommunicationsPage(QWidget):
             "- {name_competition} : nom de la competition selectionnee\n"
             "- {montant_competition} : tarif d inscription de la competition\n"
             "- {date_competition} : date ou periode de la competition\n"
-            "- {whatapp_Id} : lien du groupe WhatsApp de la competition\n\n"
+            "- {whatapp_Id} : lien du groupe WhatsApp de la competition\n"
+            "- {bloc_whatsapp} : phrase complete avec lien (masquee si aucun lien)\n\n"
             "Variables du texte d invitation WhatsApp (lorsque l invitation est jointe) :\n\n"
             "- {group_name} : nom du groupe de creneau\n"
             "- {whatsapp_link} : lien d invitation WhatsApp du creneau"
@@ -1496,6 +1497,7 @@ class CommunicationsPage(QWidget):
         from domain.utils import format_periode
         date_formatted = format_periode(comp.date_competition, comp.date_fin)
         wa_link = str(getattr(comp, "whatsapp_link", "") or "").strip()
+        bloc_wa = f"Voici le lien du groupe WhatApp dédié à cette compétition : {wa_link}" if wa_link else ""
 
         return {
             "competition_id": comp.id,
@@ -1506,6 +1508,7 @@ class CommunicationsPage(QWidget):
             "date_competition": date_formatted,
             "whatapp_Id": wa_link,
             "whatsapp_link": wa_link,
+            "bloc_whatsapp": bloc_wa,
         }
 
     def focus_on_member(self, member):

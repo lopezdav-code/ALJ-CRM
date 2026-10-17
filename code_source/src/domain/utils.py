@@ -1,5 +1,6 @@
 import html as _html
 import json
+import re
 import unicodedata
 from typing import Any
 import pandas as pd
@@ -99,7 +100,7 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
     - {Prénom}/{Nom}/{first_name}/{last_name} : nom et prénom du destinataire ;
     - {num_licence} : licence FFME du destinataire ;
     - variables compétition : {no_competition}, {name_competition}, {montant_competition},
-      {date_competition}, {whatapp_Id} (laissées telles quelles si absentes du contexte).
+      {date_competition}, {whatapp_Id}, {bloc_whatsapp} (laissées telles quelles si absentes du contexte).
 
     escape_html=True: values are HTML-escaped, for a template already converted to HTML
     (member data comes from the public HelloAsso form and must never add markup).
@@ -146,8 +147,22 @@ def apply_template_variables(text: str, member: Any, competition_context: dict =
         or ctx.get("whatsappLink")
         or ""
     ).strip()
+
     if wa_val:
+        bloc_wa = enc(f"Voici le lien du groupe WhatApp dédié à cette compétition : {wa_val}")
+        for b_key in ("bloc_whatsapp", "bloc_whatapp", "whatsapp_bloc"):
+            out = out.replace("{" + b_key + "}", bloc_wa)
         for wa_key in ("whatapp_Id", "whatsapp_id", "whatapp_id", "whatsapp_Id", "whatsapp_link", "whatapp_link"):
             out = out.replace("{" + wa_key + "}", enc(wa_val))
+    elif competition_context is not None:
+        for b_key in ("bloc_whatsapp", "bloc_whatapp", "whatsapp_bloc"):
+            out = out.replace("{" + b_key + "}", "")
+        # Masquer la ligne dédiée au lien WhatsApp lorsqu'aucun lien n'est configuré
+        out = re.sub(
+            r"(?m)^[^\n]*\{(?:whatapp_Id|whatsapp_id|whatapp_id|whatsapp_Id|whatsapp_link|whatapp_link)\}[^\n]*\r?\n?",
+            "",
+            out,
+        )
+        out = re.sub(r"\n{3,}", "\n\n", out)
     return out
 

@@ -101,6 +101,59 @@ class TestApplyTemplateVariables(unittest.TestCase):
         out = apply_template_variables("Rejoins {whatapp_Id}", _member(), None)
         self.assertEqual(out, "Rejoins {whatapp_Id}")
 
+    def test_bloc_whatsapp_with_link(self):
+        ctx = {
+            "whatsapp_link": "https://chat.whatsapp.com/test123"
+        }
+        text = "Ligne avant\n\n{bloc_whatsapp}\n\nLigne après"
+        out = apply_template_variables(text, _member(), ctx)
+        expected = "Ligne avant\n\nVoici le lien du groupe WhatApp dédié à cette compétition : https://chat.whatsapp.com/test123\n\nLigne après"
+        self.assertEqual(out, expected)
+
+    def test_bloc_whatsapp_without_link_removed_cleanly(self):
+        ctx = {
+            "name_competition": "Coupe Régionale"
+        }
+        text = "Ligne avant\n\n{bloc_whatsapp}\n\nLigne après"
+        out = apply_template_variables(text, _member(), ctx)
+        expected = "Ligne avant\n\nLigne après"
+        self.assertEqual(out, expected)
+
+    def test_dedicated_whatsapp_line_removed_when_no_link(self):
+        ctx = {
+            "name_competition": "Coupe Régionale",
+            "first_name": "Jean"
+        }
+        text = (
+            "4- Saisissez le numéro de licence de votre enfant : {num_licence}\n\n"
+            "Voici le lien du groupe WhatApp dédié à cette compétition :  {whatapp_Id}\n\n"
+            "Merci de réaliser cette démarche dans les meilleurs délais."
+        )
+        out = apply_template_variables(text, _member(), ctx)
+        expected = (
+            "4- Saisissez le numéro de licence de votre enfant : 123456\n\n"
+            "Merci de réaliser cette démarche dans les meilleurs délais."
+        )
+        self.assertEqual(out, expected)
+
+    def test_dedicated_whatsapp_line_kept_and_replaced_when_link_present(self):
+        ctx = {
+            "name_competition": "Coupe Régionale",
+            "whatsapp_link": "https://chat.whatsapp.com/mygroup"
+        }
+        text = (
+            "4- Saisissez le numéro de licence de votre enfant : {num_licence}\n\n"
+            "Voici le lien du groupe WhatApp dédié à cette compétition :  {whatapp_Id}\n\n"
+            "Merci de réaliser cette démarche dans les meilleurs délais."
+        )
+        out = apply_template_variables(text, _member(), ctx)
+        expected = (
+            "4- Saisissez le numéro de licence de votre enfant : 123456\n\n"
+            "Voici le lien du groupe WhatApp dédié à cette compétition :  https://chat.whatsapp.com/mygroup\n\n"
+            "Merci de réaliser cette démarche dans les meilleurs délais."
+        )
+        self.assertEqual(out, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
