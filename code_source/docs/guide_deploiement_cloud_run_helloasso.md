@@ -216,3 +216,91 @@ Vérifiez dans la PWA mobile que l'adhérent Lucas MARTIN passe immédiatement e
    - Cliquez sur **« 📄 Attestation »** : prévisualisez l'attestation PDF générée par WeasyPrint en mémoire, téléchargez-la ou envoyez-la en un clic par e-mail.
 4. Accédez à la page **Outils** (`/bureau/outils`) :
    - Basculez entre la **Carte géographique interactive** (Leaflet) et l'**Analyse des effectifs** (Tableau Croisé Dynamique avec sélecteur de saison).
+
+---
+
+## 7. 🔁 Déploiement continu (GitHub Actions)
+
+Chaque push sur `main` lance `.github/workflows/deploy-cloud-run.yml` :
+
+1. les tests (`tests.yml` : unitaires + e2e) ;
+2. **uniquement s'ils passent** : construction de l'image (`code_source/Dockerfile`), envoi dans Artifact Registry
+   (`cloud-run-source-deploy/alj-escalade-api:<sha du commit>`), déploiement sur Cloud Run avec 100 % du trafic,
+   puis vérification de `/health`.
+
+Le workflow peut aussi être relancé à la main (onglet *Actions* → *Deploy Cloud Run* → *Run workflow*, sur `main`).
+
+**Aucun secret dans le dépôt (public).** L'authentification passe par Workload Identity Federation (pas de clé de compte
+de service). Les identifiants GCP sont des *variables* de l'environnement GitHub `production`. Les variables
+d'environnement et les secrets de l'application restent configurés sur le service Cloud Run (sections 4 et 5) : un
+déploiement d'image sans `--set-env-vars` / `--set-secrets` les conserve tels quels.
+
+**Retour arrière** : si le déploiement ou la vérification `/health` échoue, le résumé du job indique la révision précédente.
+Depuis Cloud Shell, dans `code_source/` :
+
+```bash
+./deploy_cloud_run.sh --rollback <revision-precedente>
+```
+
+Le script reste l'outil pour `--test`, `--rollback` et `--cleanup`. Le push suivant sur `main` renvoie le trafic sur la dernière révision.
+
+### Mise en place (une seule fois)
+
+À exécuter dans Cloud Shell. Ne jamais committer les valeurs obtenues.
+
+```bash
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+REGION=europe-west1
+REPO_ID=<id numérique du dépôt>   # gh api repos/<propriétaire>/<dépôt> --jq .id
+DEPLOY_SA="github-deployer@$PROJECT_ID.iam.gserviceaccount.com"
+
+gcloud services enable iamcredentials.googleapis.com sts.googleapis.com \
+    artifactregistry.googleapis.com run.googleapis.com
+
+# 1. Compte de service de déploiement et ses droits
+gcloud iam service-accounts create github-deployer --display-name "GitHub Actions deploy"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member "serviceAccount:$DEPLOY_SA" --role roles/run.developer
+gcloud artifacts repositories add-iam-policy-binding cloud-run-source-deploy --location "$REGION" \
+    --member "serviceAccount:$DEPLOY_SA" --role roles/artifactregistry.writer
+
+# Compte de service d'exécution du service (vide = compte Compute Engine par défaut)
+RUNTIME_SA=$(gcloud run services describe alj-escalade-api --region "$REGION" \
+    --format='value(spec.template.spec.serviceAccountName)')
+RUNTIME_SA=${RUNTIME_SA:-$PROJECT_NUMBER-compute@developer.gserviceaccount.com}
+gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+    --member "serviceAccount:$DEPLOY_SA" --role roles/iam.serviceAccountUser
+
+# 2. Workload Identity Federation : seule la branche main de CE dépôt est acceptée
+gcloud iam workload-identity-pools create github --location global --display-name "GitHub Actions"
+gcloud iam workload-identity-pools providers create-oidc github-oidc \
+    --location global --workload-identity-pool github \
+    --issuer-uri "https://token.actions.githubusercontent.com" \
+    --attribute-mapping "google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.ref=assertion.ref" \
+    --attribute-condition "assertion.repository_id == '$REPO_ID' && assertion.ref == 'refs/heads/main'"
+gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" --role roles/iam.workloadIdentityUser \
+    --member "principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository_id/$REPO_ID"
+
+# 3. Conserver seulement les 5 dernières images (rester dans la gratuité d'Artifact Registry)
+cat > /tmp/cleanup-policy.json <<'JSON'
+[{"name": "keep-last-5", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 5}},
+ {"name": "delete-others", "action": {"type": "Delete"}, "condition": {"tagState": "any"}}]
+JSON
+gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy --location "$REGION" \
+    --policy /tmp/cleanup-policy.json --no-dry-run
+
+# Valeurs à reporter dans GitHub
+echo "GCP_PROJECT_ID=$PROJECT_ID"
+echo "GCP_WIF_PROVIDER=projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-oidc"
+echo "GCP_DEPLOY_SA=$DEPLOY_SA"
+```
+
+Côté GitHub : *Settings → Environments → New environment* `production`.
+- *Deployment branches and tags* : `main` uniquement.
+- *Required reviewers* (facultatif) : ajoute une validation manuelle avant chaque mise en production.
+- *Environment variables* (pas des secrets) : `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER` et `GCP_DEPLOY_SA`, avec les valeurs affichées ci-dessus.
+
+Enfin, supprimez l'ancien déclencheur Cloud Build `deploy-alj-crm` (Console GCP → Cloud Build → Déclencheurs, région
+`europe-west1`). C'est lui qui produisait le check en échec « File cloudbuild.yaml not found ». Désinstallez ensuite
+l'application GitHub « Google Cloud Build » si elle ne sert plus à rien d'autre.
